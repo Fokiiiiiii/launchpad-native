@@ -16,6 +16,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private let gridModel: GridModel
     private let iconCache: IconCache
     private var hasAttemptedLegacyImport = false
+    private var onOpenSettings: (() -> Void)?
 
     /// Reads the window's own real visibility rather than a separately
     /// tracked bool — a manually-maintained `isVisible` flag drifted out of
@@ -33,8 +34,23 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         super.init()
     }
 
+    /// Set once by the composition root (`AppDelegate`) after both this
+    /// controller and the Settings window controller exist — avoids a
+    /// circular initializer dependency between the two.
+    public func setOnOpenSettings(_ handler: @escaping () -> Void) {
+        onOpenSettings = handler
+    }
+
     public func loadGridDocument() async {
         await gridModel.loadDocument()
+    }
+
+    /// Exposed so composition-root code (`AppDelegate`, the Settings window)
+    /// can read/mutate grid settings, custom sources, hidden apps, and
+    /// aliases without this controller growing one pass-through accessor per
+    /// concern.
+    public var model: GridModel {
+        gridModel
     }
 
     public var triggerSettings: TriggerSettings {
@@ -109,7 +125,11 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             gridModel: gridModel,
             iconCache: iconCache,
             onDidLaunch: { [weak self] in self?.hide() },
-            onDidCancel: { [weak self] in self?.hide() }
+            onDidCancel: { [weak self] in self?.hide() },
+            onOpenSettings: { [weak self] in
+                self?.hide()
+                self?.onOpenSettings?()
+            }
         )
 
         // The glass background is a plain sibling subview behind the real

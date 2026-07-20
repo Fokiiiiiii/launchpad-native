@@ -69,10 +69,10 @@ final class GridCellItem: NSCollectionViewItem {
         iconHeightConstraint?.constant = clamped
     }
 
-    func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double) {
+    func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, displayName: String? = nil) {
         applyIconSize(iconSize)
         iconView.image = icon
-        label.stringValue = record.displayName
+        label.stringValue = displayName ?? record.displayName
         countBadge.isHidden = true
         applySelection(isSelected)
     }

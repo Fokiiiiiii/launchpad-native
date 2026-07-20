@@ -99,8 +99,42 @@ bugs beyond the phases above, all fixed and verified live:
   a fire-and-forget disk write; confirmed via log timestamps that icon
   fetches now genuinely overlap across threads, and all icons render within
   ~2.5s of a cold launch (screenshotted) instead of visibly trickling in.
+- `multitouchGestureEnabled` defaulted to `false`, and there was no Settings
+  UI yet for a user to turn it on themselves — F4 needs Input Monitoring
+  permission this app bundle doesn't have, so with multitouch off there was
+  no working trigger at all outside a debug env var only the developer could
+  set. This is why "the gesture doesn't open it" kept recurring even after
+  the recognizer itself was verified correct. Default changed to `true`.
+- A grid cell's clickable bounding box (NSCollectionView's default) was far
+  larger than its rendered icon+label, so clicking what looked like empty
+  space between icons still selected/launched something. Fixed via
+  `GridCellItem.contentHitTestFrame` + a `GridCollectionView.mouseDown`
+  override: only clicks actually within the icon+label area forward to
+  normal selection; everything else routes to the background-dismiss path.
+
+Phase 6 (customization) is implemented: `Settings` adds a SwiftUI window
+(opened via a gear button in the launcher's search bar) with tabs for grid
+density/icon size/layout mode, trigger enable toggles + hot corners +
+gesture sensitivity, custom app-source folders (with include/exclude glob
+support in `ApplicationSource`/`ApplicationBundleReader`), and a hidden-apps
+list with unhide. `GridModel` gained real hide/unhide, alias (display-name
+override, never touches the bundle), and custom-source persistence —
+previously the context menu's Rename/Hide items just logged instead of
+doing anything.
 
 **Known limitations:**
+- The Settings window's "Vertical Scroll" layout mode is stored/persisted
+  but not actually implemented in `GridViewController`/`PagedGridLayout` yet
+  — selecting it changes a setting with no visual effect. Paged mode is the
+  only one that renders.
+- The Settings window's hotkey toggle has no key-capture UI behind it yet
+  (`TriggerSettings.hotkeyKeyCode` stays `nil`), so enabling it currently
+  registers nothing — `GlobalHotkeyTrigger` itself works (Phase 5), only the
+  Settings-side key recorder is missing.
+- Search-list aliasing: renamed apps show the alias in the main grid, but
+  the flat search-results list (shown while typing) still shows the
+  original name — `LauncherViewModel`/`LauncherFiltering` don't have access
+  to `GridModel`'s aliases yet.
 - Xcode.app is required for `swift test` (Command Line Tools alone can't
   resolve `Testing`/`XCTest`) and will also be needed for Instruments-based
   performance work (Phase 9).

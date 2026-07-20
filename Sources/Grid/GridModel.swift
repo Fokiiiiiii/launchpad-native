@@ -40,6 +40,23 @@ public final class GridModel {
         document.triggerSettings = settings
     }
 
+    /// Applies immediately (relayout) without losing item order — the grid
+    /// only changes how many items fit per page, not which items exist.
+    public func updateGridSettings(_ settings: GridSettings) {
+        gridSettings = settings
+        document.gridSettings = settings
+        onChange?()
+    }
+
+    public var layoutMode: LayoutMode {
+        document.layoutMode
+    }
+
+    public func setLayoutMode(_ mode: LayoutMode) {
+        document.layoutMode = mode
+        onChange?()
+    }
+
     public func record(for identifier: StableAppIdentifier) -> ApplicationRecord? {
         recordsByIDValue[identifier.value]
     }
@@ -199,6 +216,79 @@ public final class GridModel {
     public func renameFolder(_ id: FolderID, to name: String) {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         folders[id]?.name = name
+        onChange?()
+    }
+
+    // MARK: - Hidden apps (2.16)
+
+    /// Hides without unregistering/deleting anything — the app stays
+    /// installed and known to Catalog, it just drops out of pages/folders
+    /// and normal search until unhidden.
+    public func hideApplication(_ id: StableAppID) {
+        let identifier = id.asPersistenceIdentifier
+        document.hiddenApplicationIDs.insert(identifier)
+        let hiddenValues = Set(document.hiddenApplicationIDs.map(\.value))
+        let validIDs = Set(recordsByIDValue.keys).subtracting(hiddenValues)
+        pruneMissingItems(validIDs: validIDs)
+        onChange?()
+    }
+
+    public func unhideApplication(_ identifier: StableAppIdentifier) {
+        document.hiddenApplicationIDs.remove(identifier)
+        if recordsByIDValue[identifier.value] != nil, !allPlacedAppIdentifierValues().contains(identifier.value) {
+            appendToLastPage(.app(identifier))
+        }
+        onChange?()
+    }
+
+    public var hiddenApplicationIdentifiers: [StableAppIdentifier] {
+        Array(document.hiddenApplicationIDs)
+    }
+
+    // MARK: - Display name aliasing (2.15)
+
+    /// Overrides display name only for this app — never touches the bundle
+    /// or Info.plist. Passing `nil` (or blank) clears the alias.
+    public func setAlias(_ alias: String?, for id: StableAppID) {
+        let identifier = id.asPersistenceIdentifier
+        let trimmed = alias?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty {
+            document.aliases[identifier] = trimmed
+        } else {
+            document.aliases.removeValue(forKey: identifier)
+        }
+        onChange?()
+    }
+
+    public func alias(for id: StableAppID) -> String? {
+        document.aliases[id.asPersistenceIdentifier]
+    }
+
+    /// The name to actually display: alias if set, else the catalog name.
+    public func displayName(for record: ApplicationRecord) -> String {
+        alias(for: record.id) ?? record.displayName
+    }
+
+    // MARK: - Custom sources (2.13)
+
+    public var customSources: [CustomSourceConfig] {
+        document.customSources
+    }
+
+    public func addCustomSource(_ config: CustomSourceConfig) {
+        guard !document.customSources.contains(where: { $0.id == config.id }) else { return }
+        document.customSources.append(config)
+        onChange?()
+    }
+
+    public func removeCustomSource(id: String) {
+        document.customSources.removeAll { $0.id == id }
+        onChange?()
+    }
+
+    public func setCustomSourceEnabled(id: String, enabled: Bool) {
+        guard let index = document.customSources.firstIndex(where: { $0.id == id }) else { return }
+        document.customSources[index].enabled = enabled
         onChange?()
     }
 

@@ -71,6 +71,24 @@ public struct CustomSourceConfig: Codable, Sendable, Hashable {
     public var excludeGlobs: [String]
     public var priority: Int
     public var enabled: Bool
+
+    public init(
+        id: String,
+        rootPath: String,
+        recursive: Bool,
+        includeGlobs: [String],
+        excludeGlobs: [String],
+        priority: Int,
+        enabled: Bool
+    ) {
+        self.id = id
+        self.rootPath = rootPath
+        self.recursive = recursive
+        self.includeGlobs = includeGlobs
+        self.excludeGlobs = excludeGlobs
+        self.priority = priority
+        self.enabled = enabled
+    }
 }
 
 /// Populated in Phase 5; reserved now.

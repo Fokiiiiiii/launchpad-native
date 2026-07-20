@@ -30,6 +30,8 @@ enum ApplicationBundleReader {
             appURLs = contents.filter { $0.pathExtension == "app" }
         }
 
+        appURLs = appURLs.filter { source.matches(bundleFilename: $0.lastPathComponent) }
+
         return appURLs.compactMap { record(for: $0, sourceID: source.id) }
     }
 

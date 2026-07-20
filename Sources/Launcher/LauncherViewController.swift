@@ -15,8 +15,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private let iconCache: IconCache
     private let onDidLaunch: () -> Void
     private let onDidCancel: () -> Void
+    private let onOpenSettings: () -> Void
 
     private let searchField = NSTextField()
+    private let settingsButton = NSButton()
     private let searchResultsCollectionView = NSCollectionView()
     private let searchResultsScrollView = NSScrollView()
     private let itemIdentifier = NSUserInterfaceItemIdentifier("AppIconItem")
@@ -32,13 +34,15 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         gridModel: GridModel,
         iconCache: IconCache,
         onDidLaunch: @escaping () -> Void,
-        onDidCancel: @escaping () -> Void
+        onDidCancel: @escaping () -> Void,
+        onOpenSettings: @escaping () -> Void
     ) {
         self.viewModel = viewModel
         self.gridModel = gridModel
         self.iconCache = iconCache
         self.onDidLaunch = onDidLaunch
         self.onDidCancel = onDidCancel
+        self.onOpenSettings = onOpenSettings
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -56,6 +60,15 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchField.drawsBackground = false
         searchField.focusRingType = .none
         searchField.delegate = self
+
+        settingsButton.translatesAutoresizingMaskIntoConstraints = false
+        settingsButton.bezelStyle = .circular
+        settingsButton.isBordered = false
+        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")?
+            .withSymbolConfiguration(.init(pointSize: 18, weight: .regular))
+        settingsButton.contentTintColor = .secondaryLabelColor
+        settingsButton.target = self
+        settingsButton.action = #selector(settingsButtonTapped)
 
         let layout = NSCollectionViewFlowLayout()
         layout.itemSize = NSSize(width: 96, height: 110)
@@ -80,12 +93,18 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         gridViewController.view.translatesAutoresizingMaskIntoConstraints = false
 
         root.addSubview(searchField)
+        root.addSubview(settingsButton)
         root.addSubview(gridViewController.view)
         root.addSubview(searchResultsScrollView)
         NSLayoutConstraint.activate([
             searchField.topAnchor.constraint(equalTo: root.topAnchor, constant: 40),
             searchField.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             searchField.widthAnchor.constraint(equalToConstant: 360),
+
+            settingsButton.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
+            settingsButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
+            settingsButton.widthAnchor.constraint(equalToConstant: 28),
+            settingsButton.heightAnchor.constraint(equalToConstant: 28),
 
             gridViewController.view.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 24),
             gridViewController.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -117,6 +136,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     func reloadGrid() {
         gridViewController.reload()
+    }
+
+    @objc private func settingsButtonTapped() {
+        onOpenSettings()
     }
 
     private func setSearchMode(active: Bool) {

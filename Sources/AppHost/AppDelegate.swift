@@ -3,6 +3,7 @@ import Catalog
 import Diagnostics
 import Launcher
 import Persistence
+import Settings
 import Triggers
 
 /// LaunchpadNative runs as a resident, Dock-icon-less utility (LSUIElement).
@@ -10,7 +11,7 @@ import Triggers
 /// activation policy here keeps the same behavior for an unbundled `swift run`.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let scanner = ApplicationScanner()
+    private var scanner: ApplicationScanner?
     private let layoutStore = LayoutStore()
     private let iconCache = IconCache()
     private lazy var launcherWindowController = LauncherWindowController(iconCache: iconCache, layoutStore: layoutStore)
@@ -25,31 +26,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.launcherWindowController.hide()
         }
     )
+    private lazy var settingsWindowController = SettingsWindowController(model: launcherWindowController.model) { [weak self] in
+        self?.applyCurrentTriggerSettings()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         DiagnosticsLog.appHost.info("LaunchpadNative resident host started")
 
+        launcherWindowController.setOnOpenSettings { [weak self] in
+            self?.settingsWindowController.show()
+        }
+
         Task {
             await launcherWindowController.loadGridDocument()
+
+            // Custom sources (2.13) are only known once the document has
+            // loaded, so the scanner is created here rather than at
+            // declaration time.
+            let customSources = launcherWindowController.model.customSources
+                .filter(\.enabled)
+                .map { config in
+                    ApplicationSource(
+                        id: config.id,
+                        rootURL: URL(fileURLWithPath: config.rootPath),
+                        recursive: config.recursive,
+                        priority: config.priority,
+                        includeGlobs: config.includeGlobs,
+                        excludeGlobs: config.excludeGlobs
+                    )
+                }
+            let scanner = ApplicationScanner(sources: ApplicationSource.standardSources + customSources)
+            self.scanner = scanner
+
             let snapshot = await scanner.performFullScan()
             DiagnosticsLog.appHost.info("Catalog ready: \(snapshot.records.count, privacy: .public) applications")
             launcherWindowController.updateRecords(snapshot.records)
             await scanner.startWatching()
 
-            var settings = launcherWindowController.triggerSettings
-            // Debug-only override so Phase 5's triggers can be verified live
-            // on this machine without needing a Settings UI (Phase 6) yet to
-            // opt in — persisted user settings are untouched otherwise.
-            if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_ALL_TRIGGERS"] == "1" {
-                settings.f4Enabled = true
-                settings.hotCornersEnabled["bottomRight"] = true
-                settings.multitouchGestureEnabled = true
-            }
-            let report = triggerCoordinator.apply(settings)
-            DiagnosticsLog.triggers.info(
-                "Triggers applied: hotkey=\(report.hotkeyRegistered, privacy: .public) f4=\(report.f4Active, privacy: .public) multitouch=\(report.multitouchActive, privacy: .public)"
-            )
+            applyCurrentTriggerSettings()
 
             for await update in await scanner.updates() {
                 launcherWindowController.updateRecords(update.records)
@@ -63,6 +78,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.launcherWindowController.show()
             }
         }
+    }
+
+    /// Re-applies trigger settings — called at launch and whenever the
+    /// Settings window saves a change, since `TriggerCoordinator.apply`
+    /// unregisters/reregisters everything idempotently.
+    private func applyCurrentTriggerSettings() {
+        var settings = launcherWindowController.triggerSettings
+        // Debug-only override so triggers can be forced on for verification
+        // without going through the Settings window.
+        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_ALL_TRIGGERS"] == "1" {
+            settings.f4Enabled = true
+            settings.hotCornersEnabled["bottomRight"] = true
+            settings.multitouchGestureEnabled = true
+        }
+        let report = triggerCoordinator.apply(settings)
+        DiagnosticsLog.triggers.info(
+            "Triggers applied: hotkey=\(report.hotkeyRegistered, privacy: .public) f4=\(report.f4Active, privacy: .public) multitouch=\(report.multitouchActive, privacy: .public)"
+        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -236,18 +236,16 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     private func promptRenameApp(at indexPath: IndexPath, record: ApplicationRecord) {
-        // Display-name aliasing is Phase 6 (LayoutDocument.aliases); the
-        // prompt exists now so the context menu's shape doesn't change later.
-        presentRenameAlert(currentName: record.displayName) { _ in
-            DiagnosticsLog.launcher.info("Alias rename UI captured; wiring to LayoutDocument.aliases lands in Phase 6")
+        presentRenameAlert(currentName: model.displayName(for: record)) { [weak self] newName in
+            guard let self else { return }
+            self.model.setAlias(newName == record.displayName ? nil : newName, for: record.id)
+            Task { await self.model.save() }
         }
     }
 
     private func hideApp(_ record: ApplicationRecord) {
-        // LayoutDocument.hiddenApplicationIDs write-back lands with the rest
-        // of Phase 6's hide/unhide UI; logged for now so this isn't a silent
-        // no-op menu item.
-        DiagnosticsLog.launcher.info("Hide requested for \(record.bundleIdentifier, privacy: .public); persisted hide/unhide UI lands in Phase 6")
+        model.hideApplication(record.id)
+        Task { await model.save() }
     }
 
     private func presentRenameAlert(currentName: String, completion: @escaping (String) -> Void) {
@@ -296,10 +294,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         case .app(let id):
             guard let record = model.record(for: id) else { return cell }
             let cache = iconCache
-            cell.configureAsApp(record: record, icon: NSImage(), isSelected: isSelected, iconSize: iconSize)
+            let displayName = model.displayName(for: record)
+            cell.configureAsApp(record: record, icon: NSImage(), isSelected: isSelected, iconSize: iconSize, displayName: displayName)
             Task { @MainActor in
                 let icon = await cache.icon(for: record)
-                cell.configureAsApp(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize)
+                cell.configureAsApp(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize, displayName: displayName)
             }
         case .folder(let folderID):
             let folder = model.folders[folderID]
