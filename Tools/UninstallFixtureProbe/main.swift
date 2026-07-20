@@ -71,6 +71,8 @@ for item in plan {
     print("  [\(item.classification)] privilegedHelper=\(item.requiresPrivilegedHelper) \(item.path.path)")
 }
 
+let shouldExecute = CommandLine.arguments.contains("--execute")
+
 let store = OperationReportStore()
 Task {
     do {
@@ -80,6 +82,32 @@ Task {
     } catch {
         print("\nFailed to save report: \(error)")
     }
+
+    if shouldExecute {
+        print("\n--execute passed: actually running RemovalExecutor against the fixture...")
+        let outcomes = RemovalExecutor.execute(plan)
+        for outcome in outcomes {
+            let status = outcome.succeeded ? "OK" : "REFUSED (\(outcome.errorDescription ?? "unknown"))"
+            print("  [\(status)] \(outcome.item.path.path)")
+        }
+        do {
+            let url = try await store.recordExecution(bundleIdentifier: bundleID, outcomes: outcomes)
+            print("\nExecution report saved: \(url.path)")
+        } catch {
+            print("\nFailed to save execution report: \(error)")
+        }
+
+        // Re-collect evidence to prove what actually happened on disk: the
+        // owned Caches/LaunchAgent paths should be gone, but the sharedRisk
+        // Application Support folder (which nests the sibling's own data)
+        // must still exist untouched.
+        let after = OwnershipEvidenceCollector.collect(for: mainRecord)
+        print("\nPost-execution state:")
+        for path in after.relatedPaths {
+            print("  \(path.category) exists=\(path.exists) \(path.url.path)")
+        }
+    }
+
     exit(0)
 }
 RunLoop.main.run(until: Date().addingTimeInterval(5))

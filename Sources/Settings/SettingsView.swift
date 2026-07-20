@@ -148,10 +148,39 @@ public struct SettingsView: View {
                             }
                         }
                     }
-                    Button("Save Dry-Run Report") { viewModel.saveUninstallDryRunReport() }
+                    HStack {
+                        Button("Save Dry-Run Report") { viewModel.saveUninstallDryRunReport() }
+                        Spacer()
+                        Button("Move Owned Items to Trash…") { confirmAndExecuteRemoval() }
+                            .disabled(viewModel.itemsEligibleForRemoval.isEmpty)
+                    }
+                    Text("Only \"owned\" items are ever removed, and always to the Trash — never a permanent delete. Shared-risk, unknown, and helper-required items are shown for visibility only and are never touched.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding()
+        }
+    }
+
+    /// The confirmation this project's safety rules require before any
+    /// irreversible-looking action: lists exactly what will move to Trash,
+    /// requires an explicit destructive-styled click, and only then calls
+    /// into the view model. Trash is itself recoverable, but the dialog
+    /// still exists — the user should never be surprised by what happened.
+    private func confirmAndExecuteRemoval() {
+        let items = viewModel.itemsEligibleForRemoval
+        guard !items.isEmpty else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Move \(items.count) item(s) to Trash?"
+        alert.informativeText = items.map(\.path.path).joined(separator: "\n")
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            viewModel.executeOwnedRemoval()
         }
     }
 

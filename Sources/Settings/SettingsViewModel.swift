@@ -112,6 +112,35 @@ public final class SettingsViewModel: ObservableObject {
         }
     }
 
+    /// The subset of the current plan this phase is willing to act on —
+    /// `owned` and not needing a Privileged Helper. Everything else
+    /// (`sharedRisk`, `unknown`, privileged items) is only ever displayed,
+    /// never passed to a confirmation dialog as something that will happen.
+    public var itemsEligibleForRemoval: [RemovalItem] {
+        uninstallPlan.filter { $0.classification == .owned && !$0.requiresPrivilegedHelper }
+    }
+
+    /// Actually moves `itemsEligibleForRemoval` to the Trash (never a
+    /// permanent delete) and terminates the app first if it's running.
+    /// The caller (the view) is responsible for confirming with the user
+    /// before invoking this — this method itself performs no confirmation.
+    public func executeOwnedRemoval() {
+        guard let id = selectedUninstallRecordID, let record = model.record(for: id) else { return }
+        let bundleIdentifier = record.bundleIdentifier
+        let store = reportStore
+
+        RemovalExecutor.terminateIfRunning(bundleIdentifier: bundleIdentifier)
+        let outcomes = RemovalExecutor.execute(uninstallPlan)
+
+        Task {
+            try? await store.recordExecution(bundleIdentifier: bundleIdentifier, outcomes: outcomes)
+        }
+
+        // Recompute the plan so the UI reflects what's actually left on
+        // disk (trashed items no longer show up as `exists`).
+        selectUninstallCandidate(id)
+    }
+
     public func saveGridSettings() {
         var grid = model.gridSettings
         grid.columns = columns

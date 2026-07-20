@@ -54,6 +54,27 @@ public extension OperationReport {
             }
         )
     }
+
+    /// Builds a report from real `RemovalExecutor.execute` results — every
+    /// entry's `executed` is `true`, with `succeeded`/an error reason
+    /// reflecting what actually happened (including the refused
+    /// sharedRisk/unknown/privileged-helper items, whose `succeeded` is
+    /// `false` with an explanatory reason, never silently dropped).
+    init(bundleIdentifier: String, generatedAt: Date, outcomes: [RemovalOutcome]) {
+        self.init(
+            bundleIdentifier: bundleIdentifier,
+            generatedAt: generatedAt,
+            entries: outcomes.map {
+                Entry(
+                    path: $0.item.path.path,
+                    classification: String(describing: $0.item.classification),
+                    requiresPrivilegedHelper: $0.item.requiresPrivilegedHelper,
+                    executed: true,
+                    succeeded: $0.succeeded
+                )
+            }
+        )
+    }
 }
 
 /// Persists `OperationReport`s with the same atomic-write-plus-backup
@@ -98,5 +119,12 @@ public actor OperationReportStore {
             throw OperationReportStoreError.writeFailed(error)
         }
         return url
+    }
+
+    /// Convenience for the execution path: builds the report from outcomes
+    /// and saves it in one call, mirroring `save(_:)`'s dry-run counterpart.
+    @discardableResult
+    public func recordExecution(bundleIdentifier: String, outcomes: [RemovalOutcome]) throws -> URL {
+        try save(OperationReport(bundleIdentifier: bundleIdentifier, generatedAt: Date(), outcomes: outcomes))
     }
 }

@@ -159,13 +159,29 @@ installed app — including a real `sharedRisk` classification when a
 same-code-signing-team sibling's data is nested inside another app's folder.
 The Settings window gained a read-only "Uninstall" tab (color-coded
 owned/shared-risk/unknown), reachable from the grid's "Uninstall…" context
-menu item (previously a disabled stub). **This phase intentionally stops
-short of executing any removal** — no app is stopped, no file moved to
-Trash, no LaunchAgent unloaded, no Privileged Helper installed — per this
-project's "verify before wrap" discipline applied to an operation category
-that can otherwise irreversibly affect a user's real data; that execution
-step is deferred to a follow-up round that verifies each destructive action
-against the fixture first.
+menu item (previously a disabled stub). Phase 8 part 2 — real execution, non-privileged only — is implemented:
+`RemovalExecutor` acts on exactly the slice of a plan this phase considers
+safe (`owned` items that don't need a Privileged Helper) and refuses
+everything else outright, even if it somehow reached the function, with an
+explanatory `succeeded: false` outcome rather than silently skipping it.
+Every removal is `FileManager.trashItem` (moved to `~/.Trash`, never
+`removeItem`), the target app is terminated first via
+`NSRunningApplication` if it's running, and a user LaunchAgent is
+`launchctl bootout`'d (a public CLI tool, not a private API) before its
+plist is trashed. The Settings Uninstall tab gained a "Move Owned Items to
+Trash…" button gated behind an `NSAlert` confirmation listing the exact
+paths — shared-risk/unknown/privileged-helper items are never included, on
+purpose. Verified live end-to-end against the fixture (not a real app):
+`Tools/UninstallFixtureProbe --execute` actually trashed the fixture's
+owned Caches folder and LaunchAgent plist (both recoverable in
+`~/.Trash`, confirmed with `ls`) while correctly refusing to touch the
+sharedRisk Application Support folder that nests the sibling fixture's own
+data. **Privileged Helper removal, system extension deactivation, and
+package receipt removal remain unimplemented** — this project is
+deliberately unsigned/unnotarized, so whether `SMAppService` daemon
+registration even works at all here is still unverified; that's the next
+round's first task, before any code that would run with elevated
+privileges gets written.
 
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
