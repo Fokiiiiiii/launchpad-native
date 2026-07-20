@@ -22,6 +22,19 @@ and caches icons off the main actor; `Persistence` stores the versioned
 a real machine: 99 real apps scanned via the resident host and via
 `Tools/CatalogProbe`.
 
+Phase 3 (launcher surface) is implemented: a borderless overlay panel joins
+every Space and floats over fullscreen apps (public `NSWindow.CollectionBehavior`,
+no private SkyLight window-level poking needed here), backed by
+`NSGlassEffectView` (falling back to `NSVisualEffectView` on Reduce
+Transparency or pre-26), with search, keyboard navigation, real app launch
+via `NSWorkspace`, and all the spec's close conditions (Escape, background
+click, losing key status, same-trigger toggle). The grid itself is a plain
+`NSCollectionViewFlowLayout` for now — the custom paged/vertical layout,
+folders, and drag-and-drop are Phase 4. Verified live: built the release
+`.app`, launched it with `LAUNCHPAD_DEBUG_AUTOSHOW=1` (temporary — permanent
+global triggers are Phase 5), and screenshotted the real overlay over the
+desktop with search focused and icons loading in.
+
 **Known limitations:**
 - Xcode.app is required for `swift test` (Command Line Tools alone can't
   resolve `Testing`/`XCTest`) and will also be needed for Instruments-based
