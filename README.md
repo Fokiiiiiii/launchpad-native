@@ -11,15 +11,26 @@ tiers — source only, built and run from this repository.
 
 ## Status
 
-Early bootstrap (Phase 0 of the implementation plan). Only a minimal resident
-host and the module/build scaffolding exist so far.
+Phase 0 (bootstrap) and Phase 1 (Private API contract freeze — see
+`ReverseEngineering/Contracts/`) are done. Phase 2 (application catalog +
+persistence) is implemented: `Catalog` scans `/Applications`,
+`/System/Applications`, and `~/Applications` into stable-identity
+`ApplicationRecord`s (code-signing team ID via the public `Security`
+framework, not LaunchServices SPI), watches them incrementally via FSEvents,
+and caches icons off the main actor; `Persistence` stores the versioned
+`LayoutDocument` with atomic writes and a last-known-good backup. Verified on
+a real machine: 99 real apps scanned via the resident host and via
+`Tools/CatalogProbe`.
 
-**Known limitation:** on a machine with only Xcode Command Line Tools (no
-full Xcode.app), `swift build` works but `swift test` fails — neither the
-`Testing` nor `XCTest` module resolves without Xcode.app selected as the
-active developer directory (`xcode-select -p`). Install Xcode.app to run the
-test suite; it will also be required later for Instruments-based performance
-work (Phase 9).
+**Known limitations:**
+- Xcode.app is required for `swift test` (Command Line Tools alone can't
+  resolve `Testing`/`XCTest`) and will also be needed for Instruments-based
+  performance work (Phase 9).
+- The Catalog scan is ~15-20x slower in a debug build than release
+  (SHA256 identity hashing + `Bundle`/code-signing reads are not
+  representative unoptimized): 99 real apps took ~9s in debug vs. ~540ms in
+  `-c release`. Benchmark with `swift build -c release` before drawing any
+  performance conclusion.
 
 ## Requirements
 
