@@ -12,14 +12,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let scanner = ApplicationScanner()
     private let layoutStore = LayoutStore()
     private let iconCache = IconCache()
-    private lazy var launcherWindowController = LauncherWindowController(iconCache: iconCache)
+    private lazy var launcherWindowController = LauncherWindowController(iconCache: iconCache, layoutStore: layoutStore)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         DiagnosticsLog.appHost.info("LaunchpadNative resident host started")
 
         Task {
-            _ = await layoutStore.load()
+            await launcherWindowController.loadGridDocument()
             let snapshot = await scanner.performFullScan()
             DiagnosticsLog.appHost.info("Catalog ready: \(snapshot.records.count, privacy: .public) applications")
             launcherWindowController.updateRecords(snapshot.records)

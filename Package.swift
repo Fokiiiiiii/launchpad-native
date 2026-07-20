@@ -9,7 +9,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AppHost",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "Launcher"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "Launcher", "Grid"],
             path: "Sources/AppHost"
         ),
         .target(
@@ -28,8 +28,14 @@ let package = Package(
         ),
         .target(
             name: "Launcher",
-            dependencies: ["Diagnostics", "Catalog"],
+            dependencies: ["Diagnostics", "Catalog", "Grid"],
             path: "Sources/Launcher"
+        ),
+        .target(
+            name: "Grid",
+            dependencies: ["Diagnostics", "Catalog", "Persistence"],
+            path: "Sources/Grid",
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .executableTarget(
             name: "ContractProbe",
@@ -59,6 +65,11 @@ let package = Package(
             name: "LauncherTests",
             dependencies: ["Launcher"],
             path: "Tests/LauncherTests"
+        ),
+        .testTarget(
+            name: "GridTests",
+            dependencies: ["Grid"],
+            path: "Tests/GridTests"
         )
     ]
 )

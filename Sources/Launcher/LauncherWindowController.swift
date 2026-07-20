@@ -1,6 +1,8 @@
 import AppKit
 import Catalog
 import Diagnostics
+import Grid
+import Persistence
 
 /// Owns the single launcher window instance for the whole app — callers
 /// never create a second one, which is what satisfies "複数ディスプレイで
@@ -11,16 +13,44 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private var window: LauncherWindow?
     private var viewController: LauncherViewController?
     private let viewModel = LauncherViewModel()
+    private let gridModel: GridModel
     private let iconCache: IconCache
     private var isVisible = false
+    private var hasAttemptedLegacyImport = false
 
-    public init(iconCache: IconCache) {
+    public init(iconCache: IconCache, layoutStore: LayoutStore) {
         self.iconCache = iconCache
+        self.gridModel = GridModel(layoutStore: layoutStore)
         super.init()
+    }
+
+    public func loadGridDocument() async {
+        await gridModel.loadDocument()
     }
 
     public func updateRecords(_ records: [ApplicationRecord]) {
         viewModel.setRecords(records)
+
+        // Legacy import must run BEFORE reconcile: `applyLegacyImportIfFirstRun`
+        // only applies when the grid is still completely empty, and
+        // `reconcile` itself fills the grid (alphabetically) with anything
+        // unplaced — running reconcile first would make every subsequent
+        // import attempt see a "non-empty" grid and silently no-op.
+        if !hasAttemptedLegacyImport {
+            hasAttemptedLegacyImport = true
+            if let dbURL = LegacyLaunchpadImporter.defaultDatabaseURL() {
+                let result = LegacyLaunchpadImporter.importLegacyLayout(from: dbURL, matching: records)
+                if gridModel.applyLegacyImportIfFirstRun(result) {
+                    DiagnosticsLog.launcher.info(
+                        "Imported legacy Launchpad layout: \(result.folders.count, privacy: .public) folders, \(result.unresolvedBundleIDs.count, privacy: .public) unresolved bundle IDs"
+                    )
+                }
+            }
+        }
+
+        gridModel.reconcile(with: records)
+        viewController?.reloadGrid()
+        Task { await gridModel.save() }
     }
 
     /// Same-trigger reinvocation closes it; otherwise it opens (or moves to
@@ -55,6 +85,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
 
         let content = LauncherViewController(
             viewModel: viewModel,
+            gridModel: gridModel,
             iconCache: iconCache,
             onDidLaunch: { [weak self] in self?.hide() },
             onDidCancel: { [weak self] in self?.hide() }
