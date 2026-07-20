@@ -46,6 +46,10 @@ let package = Package(
             dependencies: ["Catalog"],
             path: "Tools/CatalogProbe"
         ),
+        .executableTarget(
+            name: "MultitouchProbe",
+            path: "Tools/MultitouchProbe"
+        ),
         .testTarget(
             name: "DiagnosticsTests",
             dependencies: ["Diagnostics"],
