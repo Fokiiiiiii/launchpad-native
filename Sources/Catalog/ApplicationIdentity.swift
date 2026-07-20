@@ -11,7 +11,7 @@ import Security
 public struct StableAppID: Hashable, Codable, Sendable {
     public let value: String
 
-    init(bundleURL: URL, bundleIdentifier: String, teamIdentifier: String?) {
+    public init(bundleURL: URL, bundleIdentifier: String, teamIdentifier: String?) {
         let volumeUUID = (try? bundleURL.resourceValues(forKeys: [.volumeUUIDStringKey]))?
             .volumeUUIDString ?? "unknown-volume"
         let normalizedPath = bundleURL.standardizedFileURL.path

@@ -9,7 +9,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AppHost",
-            dependencies: ["Diagnostics", "Catalog", "Persistence"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "Launcher"],
             path: "Sources/AppHost"
         ),
         .target(
@@ -25,6 +25,11 @@ let package = Package(
             name: "Persistence",
             dependencies: ["Diagnostics"],
             path: "Sources/Persistence"
+        ),
+        .target(
+            name: "Launcher",
+            dependencies: ["Diagnostics", "Catalog"],
+            path: "Sources/Launcher"
         ),
         .executableTarget(
             name: "ContractProbe",
@@ -49,6 +54,11 @@ let package = Package(
             name: "PersistenceTests",
             dependencies: ["Persistence"],
             path: "Tests/PersistenceTests"
+        ),
+        .testTarget(
+            name: "LauncherTests",
+            dependencies: ["Launcher"],
+            path: "Tests/LauncherTests"
         )
     ]
 )

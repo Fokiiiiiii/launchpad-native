@@ -1,0 +1,65 @@
+import Catalog
+import Diagnostics
+import Foundation
+
+/// Drives the launcher's search/selection state. Kept AppKit-free (beyond
+/// `NSWorkspace` at the launch call site being the one exception, isolated in
+/// `AppLauncher`) so the selection/filtering behavior is unit-testable.
+@MainActor
+public final class LauncherViewModel {
+    public private(set) var allRecords: [ApplicationRecord] = []
+    public private(set) var filteredRecords: [ApplicationRecord] = []
+    public private(set) var query: String = ""
+    public private(set) var selectedIndex: Int?
+
+    /// Called whenever `filteredRecords` or `selectedIndex` changes, so the
+    /// view controller can reload/re-highlight without this model knowing
+    /// anything about NSCollectionView.
+    public var onChange: (() -> Void)?
+
+    public init() {}
+
+    public func setRecords(_ records: [ApplicationRecord]) {
+        allRecords = records
+        refilter()
+    }
+
+    public func setQuery(_ query: String) {
+        self.query = query
+        refilter()
+    }
+
+    public var selectedRecord: ApplicationRecord? {
+        guard let selectedIndex, filteredRecords.indices.contains(selectedIndex) else { return nil }
+        return filteredRecords[selectedIndex]
+    }
+
+    public func moveSelection(by delta: Int) {
+        guard !filteredRecords.isEmpty else {
+            selectedIndex = nil
+            onChange?()
+            return
+        }
+        let current = selectedIndex ?? (delta > 0 ? -1 : 0)
+        let next = min(max(current + delta, 0), filteredRecords.count - 1)
+        selectedIndex = next
+        onChange?()
+    }
+
+    public func select(index: Int) {
+        guard filteredRecords.indices.contains(index) else { return }
+        selectedIndex = index
+        onChange?()
+    }
+
+    private func refilter() {
+        let previouslySelectedID = selectedRecord?.id
+        filteredRecords = LauncherFiltering.filter(allRecords, query: query)
+        if let previouslySelectedID, let newIndex = filteredRecords.firstIndex(where: { $0.id == previouslySelectedID }) {
+            selectedIndex = newIndex
+        } else {
+            selectedIndex = filteredRecords.isEmpty ? nil : 0
+        }
+        onChange?()
+    }
+}
