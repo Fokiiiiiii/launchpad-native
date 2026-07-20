@@ -122,6 +122,26 @@ override, never touches the bundle), and custom-source persistence —
 previously the context menu's Rename/Hide items just logged instead of
 doing anything.
 
+Phase 7 (window browser) is implemented: `WindowBrowser` enumerates a given
+app's real windows via the public `ScreenCaptureKit` (`SCShareableContent`),
+captures per-window thumbnails via `SCScreenshotManager.captureImage`
+(cached briefly, only for requested windows — never a background sweep),
+and activates/closes/minimizes a specific window by matching it to its
+`AXUIElement` (title+frame heuristic) and using the public Accessibility
+API, layered under app-level `NSRunningApplication.activate()`. No private
+SkyLight enumeration API was needed for any of this — confirmed by testing
+`CGWindowListCopyWindowInfo`/`SCShareableContent` directly on this machine
+before writing the wrapper, per this project's "verify before wrapping"
+rule; SkyLight's `SLSCopySpacesForWindows` remains the one piece not
+implemented (moving a window to a different Space), since it's the one
+capability with no public equivalent. Wired into the grid's "Show Windows"
+context menu item (previously a disabled stub). Verified live via
+`Tools/WindowBrowserProbe`: enumerated Brave Browser's 2 real windows,
+captured a real 1680x1050 thumbnail, and activation actually brought Brave
+to the front (confirmed via `System Events` frontmost-process query) — with
+Accessibility correctly reported as untrusted for this dev binary, falling
+back to app-level-only activation exactly as designed.
+
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
   but not actually implemented in `GridViewController`/`PagedGridLayout` yet

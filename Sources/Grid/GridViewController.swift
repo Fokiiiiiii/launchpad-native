@@ -2,6 +2,7 @@ import AppKit
 import Catalog
 import Diagnostics
 import Persistence
+import WindowBrowser
 
 /// The persistent, folder-aware paged grid (2.2/2.4/2.7): backed by
 /// `GridModel`+`PagedGridLayout`, with in-page reorder, folder
@@ -38,6 +39,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private var currentPage = 0
     private var openFolderPopover: NSPopover?
+    private let windowThumbnailService = WindowThumbnailService()
 
     public init(
         model: GridModel,
@@ -198,6 +200,21 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         popover.show(relativeTo: cell.view.bounds, of: cell.view, preferredEdge: .maxY)
     }
 
+    private func showWindows(for record: ApplicationRecord, anchorIndexPath: IndexPath) {
+        guard let cell = collectionView.item(at: anchorIndexPath) else { return }
+        let popover = NSPopover()
+        let browserVC = WindowBrowserPopoverController(
+            bundleIdentifier: record.bundleIdentifier,
+            thumbnailService: windowThumbnailService,
+            onDismiss: { [weak popover] in popover?.close() }
+        )
+        popover.contentViewController = browserVC
+        popover.behavior = .transient
+        popover.animates = true
+        popover.contentSize = NSSize(width: 320, height: 280)
+        popover.show(relativeTo: cell.view.bounds, of: cell.view, preferredEdge: .maxY)
+    }
+
     private func contextMenu(for indexPath: IndexPath) -> NSMenu? {
         guard model.pages.indices.contains(currentPage),
               model.pages[currentPage].indices.contains(indexPath.item) else { return nil }
@@ -220,7 +237,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 rename: { [weak self] in self?.promptRenameApp(at: indexPath, record: record) },
                 hide: { [weak self] in self?.hideApp(record) },
                 removeFromFolder: nil,
-                getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) }
+                getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
+                showWindows: { [weak self] in self?.showWindows(for: record, anchorIndexPath: indexPath) }
             )
             return ContextMenuBuilder.menu(for: record, isInFolder: false, actions: actions)
         }

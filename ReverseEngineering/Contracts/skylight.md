@@ -48,3 +48,26 @@ cross-checked** (e.g. `SLSCopyWindowsWithOptionsAndTags` result count against
 `dlopen` returning `NULL` (framework missing/path changed) must degrade the
 whole Window Browser capability to unavailable with a diagnostic reason, not
 crash the app (per architecture rule: capability-level fail isolation).
+
+## Phase 7 outcome: SkyLight wasn't needed for enumeration/activation after all
+
+Before wrapping any of the above, `CGWindowListCopyWindowInfo` (Quartz Window
+Services, fully public) and `SCShareableContent`/`SCScreenshotManager`
+(ScreenCaptureKit, fully public, macOS 12.3+/14+) were tested directly on
+this machine and found sufficient for real window enumeration, titles,
+bounds, and thumbnail capture — no private SkyLight call needed. Window
+activation/close/minimize also turned out not to need `SLSOrderWindow`: the
+public Accessibility API (`AXUIElement` + `kAXRaiseAction`/`kAXPressAction`/
+`kAXMinimizedAttribute`), matched to a `WindowInfo` by title+frame, plus
+`NSRunningApplication.activate()` for app-level focus, covered everything
+verified live (enumerated Brave Browser's real windows, captured a real
+thumbnail, and activation genuinely brought it to the front).
+
+This means none of the symbols above were wrapped for Phase 7. They remain
+build-gated candidates for exactly one still-unimplemented capability: Space
+association/movement (`SLSCopySpacesForWindows` et al.), since that's the
+one thing with no public equivalent. If that capability is built later, the
+"not yet call-verified" list above still applies — verify each call against
+a real result (e.g. cross-check `SLSCopySpacesForWindows`'s claimed space ID
+against `SLSGetActiveSpace`'s already-verified one) before trusting a
+guessed signature.

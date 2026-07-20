@@ -9,7 +9,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AppHost",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "Launcher", "Grid", "Triggers", "Settings"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "Launcher", "Grid", "Triggers", "Settings", "WindowBrowser"],
             path: "Sources/AppHost"
         ),
         .target(
@@ -33,7 +33,7 @@ let package = Package(
         ),
         .target(
             name: "Grid",
-            dependencies: ["Diagnostics", "Catalog", "Persistence"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "WindowBrowser"],
             path: "Sources/Grid",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
@@ -47,6 +47,11 @@ let package = Package(
             dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid"],
             path: "Sources/Settings"
         ),
+        .target(
+            name: "WindowBrowser",
+            dependencies: ["Diagnostics"],
+            path: "Sources/WindowBrowser"
+        ),
         .executableTarget(
             name: "ContractProbe",
             path: "Tools/ContractProbe"
@@ -59,6 +64,11 @@ let package = Package(
         .executableTarget(
             name: "MultitouchProbe",
             path: "Tools/MultitouchProbe"
+        ),
+        .executableTarget(
+            name: "WindowBrowserProbe",
+            dependencies: ["WindowBrowser"],
+            path: "Tools/WindowBrowserProbe"
         ),
         .testTarget(
             name: "DiagnosticsTests",
@@ -89,6 +99,11 @@ let package = Package(
             name: "TriggersTests",
             dependencies: ["Triggers"],
             path: "Tests/TriggersTests"
+        ),
+        .testTarget(
+            name: "WindowBrowserTests",
+            dependencies: ["WindowBrowser"],
+            path: "Tests/WindowBrowserTests"
         )
     ]
 )

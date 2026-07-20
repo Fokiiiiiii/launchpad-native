@@ -13,9 +13,10 @@ public enum ContextMenuBuilder {
         public var hide: () -> Void
         public var removeFromFolder: (() -> Void)?
         public var getInfo: () -> Void
-        // Show windows (Phase 7) and Uninstall (Phase 8) are wired once those
-        // phases exist; the menu items are still built here, disabled, so the
-        // capability-driven structure doesn't change later.
+        public var showWindows: (() -> Void)?
+        // Uninstall (Phase 8) is wired once that phase exists; the menu item
+        // is still built here, disabled, so the capability-driven structure
+        // doesn't change later.
     }
 
     public static func menu(for record: ApplicationRecord, isInFolder: Bool, actions: Actions) -> NSMenu {
@@ -39,10 +40,9 @@ public enum ContextMenuBuilder {
         }
 
         menu.addItem(.separator())
-        let showWindows = makeItem("Show Windows", action: {})
-        showWindows.isEnabled = false
-        showWindows.toolTip = "Available once the Window Browser (Phase 7) lands"
-        menu.addItem(showWindows)
+        if let showWindows = actions.showWindows {
+            menu.addItem(makeItem("Show Windows", action: showWindows))
+        }
 
         let uninstall = makeItem("Uninstall\u{2026}", action: {})
         uninstall.isEnabled = false

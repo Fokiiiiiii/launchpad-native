@@ -150,7 +150,8 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
                 self.onItemDraggedOut(entry.page, entry.index)
                 self.refresh()
             },
-            getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) }
+            getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
+            showWindows: nil // Folder-internal items don't get the window browser shortcut yet; open the app itself first.
         )
         return ContextMenuBuilder.menu(for: record, isInFolder: true, actions: actions)
     }
