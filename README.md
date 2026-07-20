@@ -35,6 +35,23 @@ folders, and drag-and-drop are Phase 4. Verified live: built the release
 global triggers are Phase 5), and screenshotted the real overlay over the
 desktop with search focused and icons loading in.
 
+Phase 4 (grid, pages, folders, import) is implemented: `Grid` adds
+`PagedGridLayout` (a real custom `NSCollectionViewLayout`, not
+`NSCollectionViewFlowLayout` and never SwiftUI `LazyVGrid`), `GridModel`
+(reconciles pages/folders against catalog changes, handles reorder/folder
+create-join-dissolve/rename), a capability-driven context menu, and a
+read-only importer for the pre-26 Classic Launchpad SQLite DB. Verified live:
+cleared this app's own layout store and launched fresh — the real Classic
+Launchpad DB on this machine imported correctly, with folders ("その他"/10
+items, "ゲーム"/5 items) and app ordering matching the legacy data exactly
+(screenshotted). A real bug was caught and fixed during this verification:
+the catalog-reconcile step needs to run *after* the one-time legacy import,
+not before, or the import silently no-ops. Dragging an app onto the real
+Dock and clicking to open a folder were not live-driven in this sandboxed
+session (no Accessibility permission for GUI-scripting tools) — covered
+instead by 33 passing unit tests and code review of the standard
+NSCollectionView drag-and-drop API used.
+
 **Known limitations:**
 - Xcode.app is required for `swift test` (Command Line Tools alone can't
   resolve `Testing`/`XCTest`) and will also be needed for Instruments-based
