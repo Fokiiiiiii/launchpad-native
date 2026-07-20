@@ -8,6 +8,8 @@ final class GridCellItem: NSCollectionViewItem {
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let countBadge = NSTextField(labelWithString: "")
+    private var iconWidthConstraint: NSLayoutConstraint?
+    private var iconHeightConstraint: NSLayoutConstraint?
 
     override func loadView() {
         let container = NSView()
@@ -32,11 +34,17 @@ final class GridCellItem: NSCollectionViewItem {
         container.addSubview(iconView)
         container.addSubview(label)
         container.addSubview(countBadge)
+
+        let widthConstraint = iconView.widthAnchor.constraint(equalToConstant: 96)
+        let heightConstraint = iconView.heightAnchor.constraint(equalToConstant: 96)
+        iconWidthConstraint = widthConstraint
+        iconHeightConstraint = heightConstraint
+
         NSLayoutConstraint.activate([
             iconView.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
             iconView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: 64),
-            iconView.heightAnchor.constraint(equalToConstant: 64),
+            widthConstraint,
+            heightConstraint,
 
             countBadge.topAnchor.constraint(equalTo: iconView.topAnchor, constant: -2),
             countBadge.trailingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 4),
@@ -52,15 +60,26 @@ final class GridCellItem: NSCollectionViewItem {
         view.wantsLayer = true
     }
 
-    func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool) {
+    /// Applies `GridSettings.iconSize` — previously hardcoded to 64pt
+    /// regardless of the setting, which is why icons rendered noticeably
+    /// smaller than intended.
+    private func applyIconSize(_ size: Double) {
+        let clamped = CGFloat(size)
+        iconWidthConstraint?.constant = clamped
+        iconHeightConstraint?.constant = clamped
+    }
+
+    func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double) {
+        applyIconSize(iconSize)
         iconView.image = icon
         label.stringValue = record.displayName
         countBadge.isHidden = true
         applySelection(isSelected)
     }
 
-    func configureAsFolder(name: String, itemCount: Int, isSelected: Bool) {
-        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 40, weight: .regular)
+    func configureAsFolder(name: String, itemCount: Int, isSelected: Bool, iconSize: Double) {
+        applyIconSize(iconSize)
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: iconSize * 0.42, weight: .regular)
         iconView.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: name)?
             .withSymbolConfiguration(symbolConfig)
         iconView.contentTintColor = .systemBlue

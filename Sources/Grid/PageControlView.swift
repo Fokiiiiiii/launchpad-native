@@ -1,36 +1,80 @@
 import AppKit
 
-/// A minimal page-dot indicator + click-to-jump, standing in for full
-/// gesture-driven paging (rubber-band/velocity projection per apple-design
-/// is a follow-up polish pass — see PagedGridLayout's doc comment).
+/// Page-dot indicator plus explicit prev/next chevron buttons. The dots
+/// alone (6x6pt, 8pt apart) turned out to be too small a hit target for
+/// reliable clicking during hands-on testing ("can't get to the side
+/// pages") — the chevrons give a large, unambiguous, discoverable control
+/// that doesn't depend on trackpad gesture support or precise dot aim.
+/// Full gesture-driven paging physics (rubber-band/velocity projection per
+/// apple-design) remains a follow-up polish pass — see PagedGridLayout's
+/// doc comment.
 final class PageControlView: NSView {
     var onSelectPage: ((Int) -> Void)?
+    var onPrevious: (() -> Void)?
+    var onNext: (() -> Void)?
 
     var numberOfPages: Int = 1 {
-        didSet { rebuildDots() }
+        didSet {
+            rebuildDots()
+            updateChevronEnabledState()
+        }
     }
 
     var currentPage: Int = 0 {
-        didSet { updateDotStates() }
+        didSet {
+            updateDotStates()
+            updateChevronEnabledState()
+        }
     }
 
     private var dotButtons: [NSButton] = []
-    private let stack = NSStackView()
+    private let dotStack = NSStackView()
+    private let previousButton = NSButton()
+    private let nextButton = NSButton()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.orientation = .horizontal
-        stack.spacing = 8
-        addSubview(stack)
+
+        dotStack.translatesAutoresizingMaskIntoConstraints = false
+        dotStack.orientation = .horizontal
+        dotStack.spacing = 8
+
+        configureChevron(previousButton, symbol: "chevron.left", action: #selector(previousTapped))
+        configureChevron(nextButton, symbol: "chevron.right", action: #selector(nextTapped))
+
+        addSubview(previousButton)
+        addSubview(dotStack)
+        addSubview(nextButton)
+
         NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor)
+            previousButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+            previousButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            previousButton.widthAnchor.constraint(equalToConstant: 32),
+            previousButton.heightAnchor.constraint(equalToConstant: 32),
+
+            dotStack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            dotStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            nextButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            nextButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            nextButton.widthAnchor.constraint(equalToConstant: 32),
+            nextButton.heightAnchor.constraint(equalToConstant: 32)
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unavailable") }
+
+    private func configureChevron(_ button: NSButton, symbol: String, action: Selector) {
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.bezelStyle = .circular
+        button.isBordered = false
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: symbol)?
+            .withSymbolConfiguration(.init(pointSize: 16, weight: .semibold))
+        button.contentTintColor = .labelColor
+        button.target = self
+        button.action = action
+    }
 
     private func rebuildDots() {
         dotButtons.forEach { $0.removeFromSuperview() }
@@ -46,7 +90,7 @@ final class PageControlView: NSView {
                 button.widthAnchor.constraint(equalToConstant: 6),
                 button.heightAnchor.constraint(equalToConstant: 6)
             ])
-            stack.addArrangedSubview(button)
+            dotStack.addArrangedSubview(button)
             dotButtons.append(button)
         }
         updateDotStates()
@@ -60,7 +104,27 @@ final class PageControlView: NSView {
         }
     }
 
+    /// Kept simple on purpose: earlier this dimmed disabled buttons to 0.3
+    /// alpha, which against this app's dark glass background read as the
+    /// button having vanished entirely during hands-on testing ("after
+    /// moving, the button disappears" — really just the *next* button
+    /// dimming out on the last page). Both buttons now stay fully visible
+    /// always; clicking past either end is already a no-op via `jumpToPage`'s
+    /// own bounds check, so hiding/disabling isn't load-bearing.
+    private func updateChevronEnabledState() {
+        previousButton.isHidden = numberOfPages <= 1
+        nextButton.isHidden = numberOfPages <= 1
+    }
+
     @objc private func dotClicked(_ sender: NSButton) {
         onSelectPage?(sender.tag)
+    }
+
+    @objc private func previousTapped() {
+        onPrevious?()
+    }
+
+    @objc private func nextTapped() {
+        onNext?()
     }
 }

@@ -14,10 +14,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let layoutStore = LayoutStore()
     private let iconCache = IconCache()
     private lazy var launcherWindowController = LauncherWindowController(iconCache: iconCache, layoutStore: layoutStore)
-    private lazy var triggerCoordinator = TriggerCoordinator(onActivate: { [weak self] in
-        DiagnosticsLog.triggers.info("Trigger fired — toggling launcher")
-        self?.launcherWindowController.toggle()
-    })
+    private lazy var triggerCoordinator = TriggerCoordinator(
+        onActivate: { [weak self] in
+            self?.launcherWindowController.toggle()
+        },
+        onPinchClose: { [weak self] in
+            self?.launcherWindowController.show()
+        },
+        onSpreadOpen: { [weak self] in
+            self?.launcherWindowController.hide()
+        }
+    )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)

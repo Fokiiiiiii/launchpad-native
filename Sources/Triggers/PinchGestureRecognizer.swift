@@ -17,36 +17,54 @@ public struct TouchSample: Sendable, Equatable {
     }
 }
 
-/// Detects the Launchpad-style thumb+3-finger pinch: four simultaneous
-/// contacts whose average pairwise spread contracts past a threshold,
-/// firing once per gesture and re-arming only once every finger lifts.
+/// Detects the classic Launchpad gesture: a fixed number of simultaneous
+/// contacts (default **4**, i.e. thumb+3) whose average pairwise spread
+/// either *contracts* past a threshold (fingers pinching together — fires
+/// `onPinchDetected`, meant to open the launcher) or *expands* past a
+/// threshold relative to the gesture's start (fingers spreading apart —
+/// fires `onSpreadDetected`, meant to close it). Each direction fires once
+/// per gesture; re-arms only once every finger lifts.
 ///
-/// Thumb-specific disambiguation (as opposed to "any 4 contacts closing
-/// together") is not implemented yet — flagged as a follow-up in
-/// `ReverseEngineering/Contracts/multitouch.md` pending a clean, isolated
-/// gesture-capture fixture. In practice, four simultaneous trackpad
-/// contacts contracting together is already a fairly specific motion.
+/// History: this defaulted to 2 fingers for one iteration to dodge a
+/// suspected conflict with the OS's own 4-finger Launchpad/Mission Control
+/// handling — hands-on testing found 2-finger pinch collides with the much
+/// more universal system pinch-to-zoom gesture instead, which is worse. Back
+/// to 4 fingers, now with the real bidirectional open/close semantics real
+/// Launchpad uses (pinch to open, spread to close) rather than a single
+/// toggle-only trigger. Contact count and both ratios are parameters (not
+/// hardcoded) so they can become user settings in Phase 6.
 public final class PinchGestureRecognizer {
     private enum Phase: Equatable {
         case idle
         case tracking(initialSpread: Float)
-        case fired
+        case firedClosing
+        case firedOpening
     }
 
     private var phase: Phase = .idle
     private let closingRatio: Float
+    private let openingRatio: Float
+    private let requiredContactCount: Int
 
     /// `closingRatio` is the fraction of the gesture's *starting* spread
     /// that counts as "closed enough" to fire — e.g. 0.6 means the fingers
-    /// must move to within 60% of their starting distance apart.
-    public init(closingRatio: Float = 0.6) {
+    /// must contract to within 60% of their starting distance apart.
+    /// `openingRatio` is the multiple of the starting spread that counts as
+    /// "spread enough" to fire — e.g. 1.4 means the fingers must move 40%
+    /// farther apart than they started.
+    public init(closingRatio: Float = 0.6, openingRatio: Float = 1.4, requiredContactCount: Int = 4) {
         self.closingRatio = closingRatio
+        self.openingRatio = openingRatio
+        self.requiredContactCount = requiredContactCount
     }
 
+    /// Fingers pinching together — intended to open the launcher.
     public var onPinchDetected: (() -> Void)?
+    /// Fingers spreading apart — intended to close the launcher.
+    public var onSpreadDetected: (() -> Void)?
 
     public func ingest(_ touches: [TouchSample]) {
-        guard touches.count == 4 else {
+        guard touches.count == requiredContactCount else {
             if touches.isEmpty { phase = .idle }
             return
         }
@@ -58,10 +76,13 @@ public final class PinchGestureRecognizer {
         case .tracking(let initialSpread):
             guard initialSpread > 0 else { return }
             if spread <= initialSpread * closingRatio {
-                phase = .fired
+                phase = .firedClosing
                 onPinchDetected?()
+            } else if spread >= initialSpread * openingRatio {
+                phase = .firedOpening
+                onSpreadDetected?()
             }
-        case .fired:
+        case .firedClosing, .firedOpening:
             break
         }
     }

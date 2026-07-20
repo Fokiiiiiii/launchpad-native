@@ -112,10 +112,14 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         let entry = flattenedItems[indexPath.item]
         if case .app(let id) = entry.item, let record = model.record(for: id) {
             let cache = iconCache
-            cell.configureAsApp(record: record, icon: NSImage(), isSelected: false)
+            // Fixed, smaller than the main grid's iconSize: the folder
+            // popover's cells are a compact 80x96pt, independent of the
+            // user's main-grid icon size setting.
+            let folderIconSize = 56.0
+            cell.configureAsApp(record: record, icon: NSImage(), isSelected: false, iconSize: folderIconSize)
             Task { @MainActor in
                 let icon = await cache.icon(for: record)
-                cell.configureAsApp(record: record, icon: icon, isSelected: false)
+                cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: folderIconSize)
             }
         }
         return cell

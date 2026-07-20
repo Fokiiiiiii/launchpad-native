@@ -15,6 +15,11 @@ final class PagedGridLayout: NSCollectionViewLayout {
     }
 
     private(set) var pageSize: NSSize = .zero
+    /// The actual computed per-item cell size for the current bounds —
+    /// exposed so cell content (the icon inside) can scale proportionally
+    /// to its slot instead of using one fixed pixel size regardless of how
+    /// large the grid's cells actually are.
+    private(set) var currentCellSize: NSSize = .zero
     private var itemAttributes: [IndexPath: NSCollectionViewLayoutAttributes] = [:]
     private var contentSize: NSSize = .zero
 
@@ -36,6 +41,7 @@ final class PagedGridLayout: NSCollectionViewLayout {
         let availableHeight = viewportHeight - margin * 2 - vSpacing * CGFloat(rows - 1)
         let cellWidth = max(availableWidth / CGFloat(columns), 1)
         let cellHeight = max(availableHeight / CGFloat(rows), 1)
+        currentCellSize = NSSize(width: cellWidth, height: cellHeight)
 
         let sectionCount = collectionView.numberOfSections
         for section in 0..<sectionCount {

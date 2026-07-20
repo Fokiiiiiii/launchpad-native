@@ -6,9 +6,14 @@ import AppKit
 /// `NSVisualEffectView` below that, since this package's deployment target
 /// (`.v15`) must still build on slightly older runtimes.
 ///
-/// Per Apple's docs, `NSGlassEffectView.contentView` does not guarantee
-/// subview z-order, so the content view here holds exactly one child
-/// (the launcher's root content stack), never multiple ad-hoc subviews.
+/// This view is purely decorative — a background layer, never a container
+/// for interactive content. Apple's own docs say `NSGlassEffectView.contentView`
+/// doesn't guarantee subview z-order; hands-on testing confirmed the practical
+/// consequence is worse than a visual quirk — clicks, buttons, and collection
+/// view cells hosted inside `contentView` stopped receiving mouse events
+/// reliably. `LauncherWindowController` now adds this view and the real
+/// interactive content as *sibling* subviews of a plain `NSView` (background
+/// first, content on top), which guarantees normal AppKit hit-testing.
 @MainActor
 enum GlassBackgroundFactory {
     /// Reduce Transparency asks for a frostier/near-solid surface rather than
@@ -23,10 +28,23 @@ enum GlassBackgroundFactory {
         if #available(macOS 26.0, *), !reduceTransparency {
             let glass = NSGlassEffectView()
             glass.cornerRadius = cornerRadius
+            // A near-opaque default tint made the launcher read as a heavy
+            // black overlay rather than a light glass surface (unfavorably
+            // compared, during hands-on testing, to lighter wallpaper-
+            // forward reference designs). A faint neutral tint keeps the
+            // material readable as "glass" without crushing the desktop
+            // wallpaper behind it.
+            glass.tintColor = NSColor.black.withAlphaComponent(0.08)
             background = glass
         } else {
             let fallback = NSVisualEffectView()
-            fallback.material = reduceTransparency ? .underWindowBackground : .hudWindow
+            // `.hudWindow` renders quite dark; `.underWindowBackground`
+            // adapts to the desktop behind it and reads much lighter,
+            // matching the same intent as the glass tint above. Reduce
+            // Transparency still gets a frostier, more opaque material
+            // (`.sidebar`) rather than sacrificing that accessibility need
+            // for style.
+            fallback.material = reduceTransparency ? .sidebar : .underWindowBackground
             fallback.blendingMode = .behindWindow
             fallback.state = .active
             fallback.wantsLayer = true
@@ -41,23 +59,5 @@ enum GlassBackgroundFactory {
             background.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.6).cgColor
         }
         return background
-    }
-
-    /// Sets `contentView` on an `NSGlassEffectView`, or adds as a subview for
-    /// the `NSVisualEffectView` fallback — the two types don't share an API
-    /// for "the one child view," so this centralizes the branch.
-    static func setContent(_ content: NSView, on background: NSView) {
-        if #available(macOS 26.0, *), let glass = background as? NSGlassEffectView {
-            glass.contentView = content
-        } else {
-            background.addSubview(content)
-        }
-        content.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: background.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: background.trailingAnchor),
-            content.topAnchor.constraint(equalTo: background.topAnchor),
-            content.bottomAnchor.constraint(equalTo: background.bottomAnchor)
-        ])
     }
 }

@@ -19,11 +19,15 @@ public final class TriggerCoordinator {
     private let f4: F4Trigger
     private let multitouch: MultitouchGestureTrigger
 
-    public init(onActivate: @escaping () -> Void) {
+    /// `onActivate` (toggle semantics) drives the hotkey/hot-corner/F4
+    /// triggers. The multitouch gesture uses real Launchpad semantics
+    /// instead — pinch closed opens, spread apart closes — so it takes
+    /// separate `onPinchClose`/`onSpreadOpen` callbacks rather than a toggle.
+    public init(onActivate: @escaping () -> Void, onPinchClose: @escaping () -> Void, onSpreadOpen: @escaping () -> Void) {
         hotkey = GlobalHotkeyTrigger(onTrigger: onActivate)
         hotCorner = HotCornerTrigger(onActivate: onActivate)
         f4 = F4Trigger(onActivate: onActivate)
-        multitouch = MultitouchGestureTrigger(onActivate: onActivate)
+        multitouch = MultitouchGestureTrigger(onPinchClose: onPinchClose, onSpreadOpen: onSpreadOpen)
     }
 
     @discardableResult

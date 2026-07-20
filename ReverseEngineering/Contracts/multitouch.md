@@ -70,6 +70,35 @@ normal hand movement during the 15s window are mixed in), so the
 open. Tracked as a Phase 5 follow-up: capture a clean, isolated gesture
 fixture once the recognizer exists, to validate against.
 
+## Gesture design history: 4-finger → 2-finger → back to 4-finger, bidirectional
+
+`PinchGestureRecognizer` originally defaulted to 4 simultaneous contacts
+(thumb+3, matching Classic Launchpad's own gesture), firing a single
+toggle. Live testing suspected a conflict with macOS's own Mission
+Control/Launchpad-family multitouch handling and switched the default to a
+**2-finger pinch**. Further hands-on testing found 2-finger pinch collides
+with something far more universal instead — the system's own pinch-to-zoom
+gesture — which is worse. The default is back to **4 fingers**
+(`requiredContactCount: 4`), now with real bidirectional Launchpad semantics
+implemented (previously only a single toggle existed): pinching the 4
+contacts together fires `onPinchDetected` (opens the launcher), spreading
+them apart fires `onSpreadDetected` (closes it) — matching how Classic
+Launchpad's own trackpad gesture actually worked. Both ratios and the
+contact count are constructor parameters, not hardcoded, so a future
+Settings UI (Phase 6) could still offer a 2-finger toggle variant for users
+who've disabled the system's competing gesture.
+
+This also surfaced a real performance bug worth recording: the original
+`MultitouchGestureTrigger.frameCallback` spawned a new
+`Task { @MainActor in ... }` on *every* contact frame — which fires for any
+trackpad touch at all (cursor movement, scrolling), not just the gesture
+shape being matched. At typical multitouch frame rates that's continuous
+Task/actor-hop churn system-wide while the trackpad is touched at all,
+which is almost certainly what the user experienced as "very slow." Fixed
+by running the recognizer synchronously on the callback's own thread
+(guarded by a lock) and only hopping to the main actor once, on an actual
+detected pinch.
+
 ## Failure behavior
 
 If `MTDeviceCreateList` returns null/empty or `dlopen` fails, the raw

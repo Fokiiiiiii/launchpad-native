@@ -66,6 +66,40 @@ as Phase 1 predicted), and the multitouch trigger activated and toggled the
 launcher open from a real physical pinch gesture with no explicit `show()`
 call in the code path.
 
+**Post-Phase-5 hands-on fixes:** real device usage surfaced several concrete
+bugs beyond the phases above, all fixed and verified live:
+- `didSelectItemsAt` was an empty placeholder — clicking a grid icon never
+  actually launched anything. Fixed to launch on click, matching real
+  Launchpad.
+- Paging was originally a wide scroll strip with a computed x-offset; live
+  testing repeatedly found the page never visibly changed despite the scroll
+  code running correctly. Replaced with a single-section-per-page data
+  source swap (`GridViewController`/`PagedGridLayout`), which is now
+  reliable, plus a 2-finger trackpad swipe (`GridCollectionView.scrollWheel`)
+  and prev/next buttons (`PageControlView`) — the buttons previously dimmed
+  to near-invisibility at 0.3 alpha on the last page, now always fully
+  visible.
+- `NSGlassEffectView.contentView` (used to host the launcher's interactive
+  content) turned out not to reliably forward mouse events to its children,
+  per Apple's own "z-order not guaranteed" caveat — clicks/buttons stopped
+  working. Fixed by making the glass view a plain decorative sibling behind
+  the real content instead of its container.
+- The launcher's visibility was tracked with a separately-maintained `Bool`
+  that drifted from the window's real state (the outside-click dismiss
+  monitor kept seeing a stale `false` while the window was still visible).
+  Fixed to read `window.isVisible` directly.
+- The multitouch gesture went 4-finger → 2-finger → back to 4-finger with
+  real bidirectional semantics (pinch closed opens, spread apart closes,
+  matching Classic Launchpad) after 2-finger was found to collide with
+  system pinch-to-zoom.
+- `IconCache` was an `actor`, serializing every icon fetch onto one
+  executor — cold-start icon loading for ~35 visible cells summed rather
+  than overlapped. Rewritten as a concurrent-queue-backed class (lock only
+  around the shared memory dictionary) with PNG instead of TIFF caching and
+  a fire-and-forget disk write; confirmed via log timestamps that icon
+  fetches now genuinely overlap across threads, and all icons render within
+  ~2.5s of a cold launch (screenshotted) instead of visibly trickling in.
+
 **Known limitations:**
 - Xcode.app is required for `swift test` (Command Line Tools alone can't
   resolve `Testing`/`XCTest`) and will also be needed for Instruments-based

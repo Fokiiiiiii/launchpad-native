@@ -26,25 +26,55 @@ struct Finger {
 
 typealias MTContactCallbackFunction = @convention(c) (Int32, UnsafeMutableRawPointer?, Int32, Double, Int32) -> Int32
 
-/// Raw multitouch Launchpad-pinch trigger. Build-gated: if the private
-/// framework or its symbols aren't present, `start()` returns `false` and
-/// every other trigger keeps working (capability-level fail isolation).
+/// Raw multitouch Launchpad gesture trigger — pinch closed to open, spread
+/// open to close. Build-gated: if the private framework or its symbols
+/// aren't present, `start()` returns `false` and every other trigger keeps
+/// working (capability-level fail isolation).
+///
+/// Performance note: `MTRegisterContactFrameCallback` fires for *any*
+/// trackpad contact — cursor movement, scrolling, anything — not just the
+/// gesture shape being matched, at typical multitouch frame rates
+/// (60-120Hz). An earlier version hopped to the main actor with a fresh
+/// `Task` on every single frame, which meant constant Task/actor-hop churn
+/// system-wide any time the trackpad was touched at all — the almost
+/// certain cause of a real "the whole app feels very slow" report during
+/// hands-on testing. The fix: run the recognizer synchronously on the
+/// callback's own (background, framework-owned) thread behind a lock, and
+/// only hop to the main actor once, when a pinch is actually detected.
 @MainActor
 public final class MultitouchGestureTrigger {
     private var deviceHandles: [UnsafeMutableRawPointer] = []
     private var frameworkHandle: UnsafeMutableRawPointer?
-    private let recognizer: PinchGestureRecognizer
-    private let onActivate: () -> Void
+    /// Pinch (fingers closing) — real Launchpad semantics: opens.
+    private let onPinchClose: () -> Void
+    /// Spread (fingers opening) — real Launchpad semantics: closes.
+    private let onSpreadOpen: () -> Void
     public private(set) var isActive = false
+
+    /// Not actor-isolated on purpose: `handleFrame` runs on whatever thread
+    /// MultitouchSupport calls back on (not the main thread), and the
+    /// framework may call back for multiple registered devices concurrently
+    /// — `lock` protects `recognizer`'s mutable state across those calls.
+    nonisolated(unsafe) private let recognizer: PinchGestureRecognizer
+    private let lock = NSLock()
 
     /// The C callback has no context/refcon parameter to carry `self`
     /// through, so exactly one live trigger routes through this static
     /// reference — acceptable since the app only ever runs one.
     nonisolated(unsafe) private static var current: MultitouchGestureTrigger?
 
-    public init(onActivate: @escaping () -> Void, sensitivity: Float = 0.6) {
-        self.onActivate = onActivate
-        self.recognizer = PinchGestureRecognizer(closingRatio: sensitivity)
+    /// `requiredContactCount` defaults to 4 (thumb+3), matching real
+    /// Launchpad's own gesture. A 2-finger variant was tried and rejected —
+    /// it collides with the far more universal system pinch-to-zoom gesture.
+    public init(
+        onPinchClose: @escaping () -> Void,
+        onSpreadOpen: @escaping () -> Void,
+        sensitivity: Float = 0.6,
+        requiredContactCount: Int = 4
+    ) {
+        self.onPinchClose = onPinchClose
+        self.onSpreadOpen = onSpreadOpen
+        self.recognizer = PinchGestureRecognizer(closingRatio: sensitivity, requiredContactCount: requiredContactCount)
     }
 
     @discardableResult
@@ -76,7 +106,14 @@ public final class MultitouchGestureTrigger {
         }
 
         Self.current = self
-        recognizer.onPinchDetected = { [weak self] in self?.onActivate() }
+        recognizer.onPinchDetected = { [weak self] in
+            guard let self else { return }
+            DispatchQueue.main.async { self.onPinchClose() }
+        }
+        recognizer.onSpreadDetected = { [weak self] in
+            guard let self else { return }
+            DispatchQueue.main.async { self.onSpreadOpen() }
+        }
 
         let count = CFArrayGetCount(list)
         for i in 0..<count {
@@ -101,8 +138,17 @@ public final class MultitouchGestureTrigger {
         isActive = false
     }
 
+    /// Runs on the multitouch framework's own callback thread — never hops
+    /// to the main actor except (indirectly, via `onPinchDetected` above)
+    /// when a gesture actually fires.
+    nonisolated private func handleFrame(_ samples: [TouchSample]) {
+        lock.lock()
+        recognizer.ingest(samples)
+        lock.unlock()
+    }
+
     private static let frameCallback: MTContactCallbackFunction = { _, rawData, nFingers, _, _ in
-        guard let rawData, nFingers >= 0 else { return 0 }
+        guard let rawData, nFingers >= 0, let trigger = current else { return 0 }
         let data = rawData.assumingMemoryBound(to: Finger.self)
         var samples: [TouchSample] = []
         samples.reserveCapacity(Int(nFingers))
@@ -110,9 +156,7 @@ public final class MultitouchGestureTrigger {
             let f = data[i]
             samples.append(TouchSample(id: f.identifier, x: f.normalized.position.x, y: f.normalized.position.y, size: f.size))
         }
-        Task { @MainActor in
-            current?.recognizer.ingest(samples)
-        }
+        trigger.handleFrame(samples)
         return 0
     }
 }

@@ -3,16 +3,25 @@ import Catalog
 import Diagnostics
 import Persistence
 
-private struct DragPayload: Codable {
-    var page: Int
-    var index: Int
-}
-
 /// The persistent, folder-aware paged grid (2.2/2.4/2.7): backed by
-/// `GridModel`+`PagedGridLayout`, with in-page reorder, cross-page drag,
-/// folder creation/join/dissolve via drag, and a per-item context menu.
-/// This is what `LauncherViewController` shows when there's no active search
-/// query; search results still use the flat list from Phase 3.
+/// `GridModel`+`PagedGridLayout`, with in-page reorder, folder
+/// creation/join/dissolve via drag, and a per-item context menu. This is
+/// what `LauncherViewController` shows when there's no active search query;
+/// search results still use the flat list from Phase 3.
+///
+/// Pages are a **data-source swap**, not a scroll position: the
+/// `NSCollectionView` always shows exactly one section — `model.pages[currentPage]`
+/// — and changing page calls `reloadData()` with the new page's items rather
+/// than scrolling a wide horizontal strip. An earlier version tried the
+/// "one continuous strip, scroll to the page's x-offset" approach; hands-on
+/// testing repeatedly found the page never visibly changed despite the
+/// scroll code executing correctly (a real, reproducible AppKit scroll-
+/// position quirk that wasn't worth chasing further). The trade-off is that
+/// dragging an item directly from one page onto another isn't possible in
+/// this model — a real regression the earlier design's docs even called out
+/// as being made functional; it's removed here in favor of *guaranteed
+/// correctness* for basic page navigation, which is what actually blocked
+/// the user.
 public final class GridViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate {
     private static let internalDragType = NSPasteboard.PasteboardType("com.launchpadnative.griditem")
     private let itemIdentifier = NSUserInterfaceItemIdentifier("GridCellItem")
@@ -52,16 +61,18 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.setDraggingSourceOperationMask(.every, forLocal: false)
         collectionView.registerForDraggedTypes([Self.internalDragType])
         collectionView.menuProvider = { [weak self] indexPath in self?.contextMenu(for: indexPath) }
+        collectionView.onSwipePage = { [weak self] delta in self?.jumpToAdjacentPage(delta: delta) }
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = collectionView
         scrollView.drawsBackground = false
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = false
-        scrollView.horizontalScrollElasticity = .allowed
 
         pageControl.translatesAutoresizingMaskIntoConstraints = false
         pageControl.onSelectPage = { [weak self] index in self?.jumpToPage(index) }
+        pageControl.onPrevious = { [weak self] in self?.jumpToAdjacentPage(delta: -1) }
+        pageControl.onNext = { [weak self] in self?.jumpToAdjacentPage(delta: 1) }
 
         root.addSubview(scrollView)
         root.addSubview(pageControl)
@@ -73,7 +84,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
             pageControl.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             pageControl.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24),
-            pageControl.heightAnchor.constraint(equalToConstant: 16)
+            pageControl.widthAnchor.constraint(equalToConstant: 240),
+            pageControl.heightAnchor.constraint(equalToConstant: 32)
         ])
 
         view = root
@@ -82,6 +94,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     public func reload() {
         layout.settings = model.gridSettings
+        if currentPage >= model.pages.count {
+            currentPage = max(model.pages.count - 1, 0)
+        }
         collectionView.reloadData()
         pageControl.numberOfPages = model.pages.count
         pageControl.currentPage = currentPage
@@ -96,20 +111,18 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
         let columns = max(model.gridSettings.columns, 1)
         var flat = current.item + deltaColumns + deltaRows * columns
-        var section = current.section
-        let count = model.pages.indices.contains(section) ? model.pages[section].count : 0
+        let count = model.pages.indices.contains(currentPage) ? model.pages[currentPage].count : 0
 
         if flat < 0 {
-            guard section > 0 else { return }
-            section -= 1
-            flat = max(model.pages[section].count - 1, 0)
+            guard currentPage > 0 else { return }
+            jumpToPage(currentPage - 1)
+            flat = max(model.pages[currentPage].count - 1, 0)
         } else if flat >= count {
-            guard section < model.pages.count - 1 else { return }
-            section += 1
+            guard currentPage < model.pages.count - 1 else { return }
+            jumpToPage(currentPage + 1)
             flat = 0
         }
-        select(IndexPath(item: flat, section: section))
-        jumpToPage(section)
+        select(IndexPath(item: flat, section: 0))
     }
 
     public func launchSelection() {
@@ -118,24 +131,27 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     private func select(_ indexPath: IndexPath) {
-        guard model.pages.indices.contains(indexPath.section),
-              model.pages[indexPath.section].indices.contains(indexPath.item) else { return }
+        guard model.pages.indices.contains(currentPage),
+              model.pages[currentPage].indices.contains(indexPath.item) else { return }
         collectionView.selectionIndexPaths = [indexPath]
         collectionView.reloadItems(at: [indexPath])
     }
 
     private func jumpToPage(_ index: Int) {
-        guard model.pages.indices.contains(index) else { return }
+        guard model.pages.indices.contains(index), index != currentPage || collectionView.numberOfSections == 0 else { return }
         currentPage = index
         pageControl.currentPage = index
-        scrollView.contentView.animator().setBoundsOrigin(layout.originForPage(index))
-        scrollView.reflectScrolledClipView(scrollView.contentView)
+        collectionView.reloadData()
+    }
+
+    private func jumpToAdjacentPage(delta: Int) {
+        jumpToPage(currentPage + delta)
     }
 
     private func activate(at indexPath: IndexPath) {
-        guard model.pages.indices.contains(indexPath.section),
-              model.pages[indexPath.section].indices.contains(indexPath.item) else { return }
-        let item = model.pages[indexPath.section][indexPath.item]
+        guard model.pages.indices.contains(currentPage),
+              model.pages[currentPage].indices.contains(indexPath.item) else { return }
+        let item = model.pages[currentPage][indexPath.item]
         switch item {
         case .app(let id):
             guard let record = model.record(for: id) else { return }
@@ -158,8 +174,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 self?.onLaunch(record)
             },
             onItemDraggedOut: { [weak self] folderPage, folderIndex in
-                self?.model.removeFromFolder(folderID, folderPage: folderPage, folderIndex: folderIndex, toPage: self?.currentPage ?? 0)
-                Task { await self?.model.save() }
+                guard let self else { return }
+                self.model.removeFromFolder(folderID, folderPage: folderPage, folderIndex: folderIndex, toPage: self.currentPage)
+                Task { await self.model.save() }
             }
         )
         let popover = NSPopover()
@@ -174,9 +191,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     private func contextMenu(for indexPath: IndexPath) -> NSMenu? {
-        guard model.pages.indices.contains(indexPath.section),
-              model.pages[indexPath.section].indices.contains(indexPath.item) else { return nil }
-        let item = model.pages[indexPath.section][indexPath.item]
+        guard model.pages.indices.contains(currentPage),
+              model.pages[currentPage].indices.contains(indexPath.item) else { return nil }
+        let item = model.pages[currentPage][indexPath.item]
 
         switch item {
         case .folder:
@@ -202,7 +219,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     private func promptRenameFolder(at indexPath: IndexPath) {
-        guard case .folder(let folderID) = model.pages[indexPath.section][indexPath.item],
+        guard case .folder(let folderID) = model.pages[currentPage][indexPath.item],
               let folder = model.folders[folderID] else { return }
         presentRenameAlert(currentName: folder.name) { [weak self] newName in
             self?.model.renameFolder(folderID, to: newName)
@@ -239,45 +256,58 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     // MARK: NSCollectionViewDataSource
+    //
+    // Always exactly one section: `model.pages[currentPage]`. See the type's
+    // doc comment for why pages are a data-source swap, not a scroll
+    // position.
 
     public func numberOfSections(in collectionView: NSCollectionView) -> Int {
-        model.pages.count
+        model.pages.isEmpty ? 0 : 1
     }
 
     public func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
-        model.pages.indices.contains(section) ? model.pages[section].count : 0
+        model.pages.indices.contains(currentPage) ? model.pages[currentPage].count : 0
     }
 
     public func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
         guard let cell = collectionView.makeItem(withIdentifier: itemIdentifier, for: indexPath) as? GridCellItem,
-              model.pages.indices.contains(indexPath.section),
-              model.pages[indexPath.section].indices.contains(indexPath.item) else {
+              model.pages.indices.contains(currentPage),
+              model.pages[currentPage].indices.contains(indexPath.item) else {
             return NSCollectionViewItem()
         }
         let isSelected = collectionView.selectionIndexPaths.contains(indexPath)
-        switch model.pages[indexPath.section][indexPath.item] {
+        // Scale to the cell's actual computed size rather than a fixed pixel
+        // value: with only 7x5 cells per page, each cell is far larger than
+        // any one fixed icon size, so a constant made icons look tiny inside
+        // huge empty cells. `gridSettings.iconSize` still acts as a ceiling
+        // for users who want visibly smaller icons via a denser grid.
+        let cellSize = layout.currentCellSize
+        let proportionalSize = min(cellSize.width, cellSize.height) * 0.55
+        let iconSize = proportionalSize > 0 ? min(proportionalSize, model.gridSettings.iconSize * 1.5) : model.gridSettings.iconSize
+        switch model.pages[currentPage][indexPath.item] {
         case .app(let id):
             guard let record = model.record(for: id) else { return cell }
             let cache = iconCache
-            cell.configureAsApp(record: record, icon: NSImage(), isSelected: isSelected)
+            cell.configureAsApp(record: record, icon: NSImage(), isSelected: isSelected, iconSize: iconSize)
             Task { @MainActor in
                 let icon = await cache.icon(for: record)
-                cell.configureAsApp(record: record, icon: icon, isSelected: isSelected)
+                cell.configureAsApp(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize)
             }
         case .folder(let folderID):
             let folder = model.folders[folderID]
             let count = folder?.pages.reduce(0) { $0 + $1.count } ?? 0
-            cell.configureAsFolder(name: folder?.name ?? "Folder", itemCount: count, isSelected: isSelected)
+            cell.configureAsFolder(name: folder?.name ?? "Folder", itemCount: count, isSelected: isSelected, iconSize: iconSize)
         }
         return cell
     }
 
     public func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
-        // Single click selects; a second click on an already-selected item
-        // (or Enter) activates — matches Phase 3's search-list convention.
+        // Single click launches/opens — matches real Launchpad convention.
+        guard let indexPath = indexPaths.first else { return }
+        activate(at: indexPath)
     }
 
-    // MARK: Drag and drop
+    // MARK: Drag and drop (within the current page only — see type doc comment)
     //
     // Including `.fileURL` on the pasteboard item for `.app` cells is what
     // makes "drag onto the real Dock" (2.9) work for free: NSCollectionView's
@@ -289,13 +319,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     public func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
-        guard model.pages.indices.contains(indexPath.section),
-              model.pages[indexPath.section].indices.contains(indexPath.item) else { return nil }
+        guard model.pages.indices.contains(currentPage),
+              model.pages[currentPage].indices.contains(indexPath.item) else { return nil }
         let pbItem = NSPasteboardItem()
-        if let payload = try? JSONEncoder().encode(DragPayload(page: indexPath.section, index: indexPath.item)) {
-            pbItem.setData(payload, forType: Self.internalDragType)
-        }
-        if case .app(let id) = model.pages[indexPath.section][indexPath.item], let record = model.record(for: id) {
+        pbItem.setString("\(indexPath.item)", forType: Self.internalDragType)
+        if case .app(let id) = model.pages[currentPage][indexPath.item], let record = model.record(for: id) {
             pbItem.setString(record.bundleURL.absoluteString, forType: .fileURL)
         }
         return pbItem
@@ -307,7 +335,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>,
         dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>
     ) -> NSDragOperation {
-        guard draggingInfo.draggingPasteboard.availableType(from: [Self.internalDragType]) != nil else { return [] }
+        guard draggingInfo.draggingPasteboard.string(forType: Self.internalDragType) != nil else { return [] }
         return .move
     }
 
@@ -317,21 +345,21 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         indexPath: IndexPath,
         dropOperation: NSCollectionView.DropOperation
     ) -> Bool {
-        guard let data = draggingInfo.draggingPasteboard.data(forType: Self.internalDragType),
-              let payload = try? JSONDecoder().decode(DragPayload.self, from: data) else { return false }
+        guard let sourceIndexString = draggingInfo.draggingPasteboard.string(forType: Self.internalDragType),
+              let sourceIndex = Int(sourceIndexString) else { return false }
 
         if dropOperation == .on {
             model.createOrJoinFolder(
-                sourcePage: payload.page,
-                sourceIndex: payload.index,
-                destinationPage: indexPath.section,
+                sourcePage: currentPage,
+                sourceIndex: sourceIndex,
+                destinationPage: currentPage,
                 destinationIndex: indexPath.item
             )
         } else {
             model.moveItem(
-                fromPage: payload.page,
-                fromIndex: payload.index,
-                toPage: indexPath.section,
+                fromPage: currentPage,
+                fromIndex: sourceIndex,
+                toPage: currentPage,
                 toIndex: indexPath.item
             )
         }
