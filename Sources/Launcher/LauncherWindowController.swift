@@ -17,6 +17,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private let iconCache: IconCache
     private var hasAttemptedLegacyImport = false
     private var onOpenSettings: (() -> Void)?
+    private var onRequestUninstall: ((String) -> Void)?
 
     /// Reads the window's own real visibility rather than a separately
     /// tracked bool — a manually-maintained `isVisible` flag drifted out of
@@ -39,6 +40,13 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// circular initializer dependency between the two.
     public func setOnOpenSettings(_ handler: @escaping () -> Void) {
         onOpenSettings = handler
+    }
+
+    /// Set once by the composition root, same reasoning as
+    /// `setOnOpenSettings` — avoids a circular initializer dependency with
+    /// the Settings window controller.
+    public func setOnRequestUninstall(_ handler: @escaping (String) -> Void) {
+        onRequestUninstall = handler
     }
 
     public func loadGridDocument() async {
@@ -129,6 +137,10 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             onOpenSettings: { [weak self] in
                 self?.hide()
                 self?.onOpenSettings?()
+            },
+            onRequestUninstall: { [weak self] bundleIdentifier in
+                self?.hide()
+                self?.onRequestUninstall?(bundleIdentifier)
             }
         )
 

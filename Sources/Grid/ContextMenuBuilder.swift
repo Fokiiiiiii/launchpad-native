@@ -14,9 +14,7 @@ public enum ContextMenuBuilder {
         public var removeFromFolder: (() -> Void)?
         public var getInfo: () -> Void
         public var showWindows: (() -> Void)?
-        // Uninstall (Phase 8) is wired once that phase exists; the menu item
-        // is still built here, disabled, so the capability-driven structure
-        // doesn't change later.
+        public var uninstall: (() -> Void)?
     }
 
     public static func menu(for record: ApplicationRecord, isInFolder: Bool, actions: Actions) -> NSMenu {
@@ -44,10 +42,14 @@ public enum ContextMenuBuilder {
             menu.addItem(makeItem("Show Windows", action: showWindows))
         }
 
-        let uninstall = makeItem("Uninstall\u{2026}", action: {})
-        uninstall.isEnabled = false
-        uninstall.toolTip = "Available once the Uninstall Planner (Phase 8) lands"
-        menu.addItem(uninstall)
+        // System-protected apps (bundled with the OS) never get an Uninstall
+        // item at all — `RemovalPlanner` would reject them outright, so
+        // there's nothing useful the item could do for one.
+        if !record.isSystemProtected, let uninstall = actions.uninstall {
+            let item = makeItem("Uninstall\u{2026}", action: uninstall)
+            item.toolTip = "Preview what would be removed (Settings ▸ Uninstall). No files are deleted yet."
+            menu.addItem(item)
+        }
 
         menu.addItem(.separator())
         menu.addItem(makeItem("Get Info", action: actions.getInfo))

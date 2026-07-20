@@ -11,4 +11,5 @@ public enum DiagnosticsLog {
     public static let launcher = Logger(subsystem: subsystem, category: "Launcher")
     public static let privateAPI = Logger(subsystem: subsystem, category: "PrivateAPI")
     public static let triggers = Logger(subsystem: subsystem, category: "Triggers")
+    public static let uninstall = Logger(subsystem: subsystem, category: "Uninstall")
 }

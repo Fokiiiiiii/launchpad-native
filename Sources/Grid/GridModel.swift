@@ -65,6 +65,13 @@ public final class GridModel {
         recordsByIDValue[id.value]
     }
 
+    /// Every app currently known to the catalog, regardless of hidden state
+    /// or placement — used by surfaces (e.g. the Uninstall picker) that need
+    /// the full set, not just what's on a grid page.
+    public var allRecords: [ApplicationRecord] {
+        Array(recordsByIDValue.values)
+    }
+
     /// Reconciles the live catalog against the persisted arrangement: apps no
     /// longer installed (or newly hidden) are pruned from pages/folders;
     /// newly discovered apps are appended in alphabetical order.

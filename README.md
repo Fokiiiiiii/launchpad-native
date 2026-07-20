@@ -142,6 +142,31 @@ to the front (confirmed via `System Events` frontmost-process query) — with
 Accessibility correctly reported as untrusted for this dev binary, falling
 back to app-level-only activation exactly as designed.
 
+Phase 8 (Complete Uninstall), part 1 — evidence, classification, fixture — is
+implemented: `Uninstall` adds `OwnershipEvidenceCollector` (reads
+Application Support/Caches/Preferences, user/system LaunchAgents and
+LaunchDaemons, `pkgutil` package receipts, and `NSExtension` declarations —
+all read-only, no file is ever moved, deleted, or executed) and
+`RemovalPlanner` (a pure classification function: `owned` / `sharedRisk` /
+`unknown`, with system-protected apps rejected outright and root-owned or
+`/Library`-domain items flagged as needing a Privileged Helper this phase
+doesn't implement). `OperationReport`/`OperationReportStore` persist a
+dry-run plan using the same atomic-write-plus-backup pattern as
+`Persistence.LayoutStore`. A purpose-built fixture
+(`Scripts/build-uninstall-fixture.sh` + `Tools/UninstallFixtureProbe`) proves
+the real filesystem-reading code end-to-end without ever touching a real
+installed app — including a real `sharedRisk` classification when a
+same-code-signing-team sibling's data is nested inside another app's folder.
+The Settings window gained a read-only "Uninstall" tab (color-coded
+owned/shared-risk/unknown), reachable from the grid's "Uninstall…" context
+menu item (previously a disabled stub). **This phase intentionally stops
+short of executing any removal** — no app is stopped, no file moved to
+Trash, no LaunchAgent unloaded, no Privileged Helper installed — per this
+project's "verify before wrap" discipline applied to an operation category
+that can otherwise irreversibly affect a user's real data; that execution
+step is deferred to a follow-up round that verifies each destructive action
+against the fixture first.
+
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
   but not actually implemented in `GridViewController`/`PagedGridLayout` yet

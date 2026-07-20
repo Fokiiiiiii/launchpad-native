@@ -11,6 +11,10 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model: GridModel
     private let onTriggerSettingsChanged: () -> Void
+    /// Built once, alongside the window, and kept alive for the controller's
+    /// lifetime — `showUninstallTab(for:)` needs to reach it even when the
+    /// window already exists and `show()` takes its early-return path.
+    private var viewModel: SettingsViewModel?
 
     public init(model: GridModel, onTriggerSettingsChanged: @escaping () -> Void) {
         self.model = model
@@ -26,6 +30,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
 
         let viewModel = SettingsViewModel(model: model, onTriggerSettingsChanged: onTriggerSettingsChanged)
+        self.viewModel = viewModel
         let hosting = NSHostingController(rootView: SettingsView(viewModel: viewModel))
         let window = NSWindow(contentViewController: hosting)
         window.title = "LaunchpadNative Settings"
@@ -38,6 +43,13 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.window = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Opens Settings on the Uninstall tab with `bundleIdentifier`
+    /// preselected — the grid context menu's "Uninstall…" item routes here.
+    public func showUninstallTab(for bundleIdentifier: String) {
+        show()
+        viewModel?.preselectUninstallCandidate(bundleIdentifier: bundleIdentifier)
     }
 
     public func windowWillClose(_ notification: Notification) {

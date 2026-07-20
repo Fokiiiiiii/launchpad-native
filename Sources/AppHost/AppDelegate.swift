@@ -37,6 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         launcherWindowController.setOnOpenSettings { [weak self] in
             self?.settingsWindowController.show()
         }
+        launcherWindowController.setOnRequestUninstall { [weak self] bundleIdentifier in
+            self?.settingsWindowController.showUninstallTab(for: bundleIdentifier)
+        }
 
         Task {
             await launcherWindowController.loadGridDocument()
@@ -76,6 +79,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_AUTOSHOW"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.launcherWindowController.show()
+            }
+        }
+
+        // Same reasoning as LAUNCHPAD_DEBUG_AUTOSHOW: opens Settings on the
+        // Uninstall tab directly so it can be verified end-to-end without
+        // needing GUI-scripting permission to click the gear button/tab.
+        if let bundleID = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_UNINSTALL"], !bundleID.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.settingsWindowController.showUninstallTab(for: bundleID)
             }
         }
     }

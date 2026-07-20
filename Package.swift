@@ -44,13 +44,18 @@ let package = Package(
         ),
         .target(
             name: "Settings",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Uninstall"],
             path: "Sources/Settings"
         ),
         .target(
             name: "WindowBrowser",
             dependencies: ["Diagnostics"],
             path: "Sources/WindowBrowser"
+        ),
+        .target(
+            name: "Uninstall",
+            dependencies: ["Diagnostics", "Catalog", "Persistence"],
+            path: "Sources/Uninstall"
         ),
         .executableTarget(
             name: "ContractProbe",
@@ -69,6 +74,11 @@ let package = Package(
             name: "WindowBrowserProbe",
             dependencies: ["WindowBrowser"],
             path: "Tools/WindowBrowserProbe"
+        ),
+        .executableTarget(
+            name: "UninstallFixtureProbe",
+            dependencies: ["Uninstall", "Catalog"],
+            path: "Tools/UninstallFixtureProbe"
         ),
         .testTarget(
             name: "DiagnosticsTests",
@@ -104,6 +114,11 @@ let package = Package(
             name: "WindowBrowserTests",
             dependencies: ["WindowBrowser"],
             path: "Tests/WindowBrowserTests"
+        ),
+        .testTarget(
+            name: "UninstallTests",
+            dependencies: ["Uninstall", "Catalog"],
+            path: "Tests/UninstallTests"
         )
     ]
 )

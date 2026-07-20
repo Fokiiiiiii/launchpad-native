@@ -1,6 +1,7 @@
 import AppKit
 import Persistence
 import SwiftUI
+import Uninstall
 
 public struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
@@ -10,11 +11,12 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
-        TabView {
-            gridTab.tabItem { Label("Grid", systemImage: "square.grid.3x3") }
-            triggersTab.tabItem { Label("Triggers", systemImage: "hand.tap") }
-            sourcesTab.tabItem { Label("Sources", systemImage: "folder") }
-            hiddenTab.tabItem { Label("Hidden Apps", systemImage: "eye.slash") }
+        TabView(selection: $viewModel.selectedTab) {
+            gridTab.tabItem { Label("Grid", systemImage: "square.grid.3x3") }.tag(SettingsTab.grid)
+            triggersTab.tabItem { Label("Triggers", systemImage: "hand.tap") }.tag(SettingsTab.triggers)
+            sourcesTab.tabItem { Label("Sources", systemImage: "folder") }.tag(SettingsTab.sources)
+            hiddenTab.tabItem { Label("Hidden Apps", systemImage: "eye.slash") }.tag(SettingsTab.hidden)
+            uninstallTab.tabItem { Label("Uninstall", systemImage: "trash") }.tag(SettingsTab.uninstall)
         }
         .padding()
         .frame(width: 480, height: 420)
@@ -102,6 +104,69 @@ public struct SettingsView: View {
             }
         }
         .padding()
+    }
+
+    private var uninstallTab: some View {
+        HStack(spacing: 0) {
+            List(viewModel.uninstallCandidates, selection: Binding(
+                get: { viewModel.selectedUninstallRecordID },
+                set: { newValue in
+                    guard let newValue else { return }
+                    viewModel.selectUninstallCandidate(newValue)
+                }
+            )) { record in
+                Text(viewModel.displayName(for: record)).tag(record.id)
+            }
+            .frame(width: 200)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                if viewModel.selectedUninstallRecordID == nil {
+                    Text("Select an app to see what would be removed.")
+                        .foregroundStyle(.secondary)
+                        .padding()
+                } else if viewModel.uninstallPlan.isEmpty {
+                    Text("No related files or registrations were found for this app.")
+                        .foregroundStyle(.secondary)
+                        .padding()
+                } else {
+                    Text("This is a preview only — nothing is deleted or stopped yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    List(Array(viewModel.uninstallPlan.enumerated()), id: \.offset) { _, item in
+                        HStack {
+                            classificationBadge(item.classification)
+                            Text(item.path.path)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            if item.requiresPrivilegedHelper {
+                                Text("needs helper")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Button("Save Dry-Run Report") { viewModel.saveUninstallDryRunReport() }
+                }
+            }
+            .padding()
+        }
+    }
+
+    private func classificationBadge(_ classification: OwnershipClassification) -> some View {
+        let (label, color): (String, Color) = switch classification {
+        case .owned: ("owned", .green)
+        case .sharedRisk: ("shared risk", .yellow)
+        case .unknown: ("unknown", .red)
+        }
+        return Text(label)
+            .font(.caption2)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.25))
+            .clipShape(Capsule())
     }
 
     private func addFolder() {
