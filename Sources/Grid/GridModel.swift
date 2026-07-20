@@ -32,6 +32,14 @@ public final class GridModel {
         gridSettings = document.gridSettings
     }
 
+    public var triggerSettings: TriggerSettings {
+        document.triggerSettings
+    }
+
+    public func updateTriggerSettings(_ settings: TriggerSettings) {
+        document.triggerSettings = settings
+    }
+
     public func record(for identifier: StableAppIdentifier) -> ApplicationRecord? {
         recordsByIDValue[identifier.value]
     }

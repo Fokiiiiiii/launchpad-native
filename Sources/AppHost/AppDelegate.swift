@@ -3,6 +3,7 @@ import Catalog
 import Diagnostics
 import Launcher
 import Persistence
+import Triggers
 
 /// LaunchpadNative runs as a resident, Dock-icon-less utility (LSUIElement).
 /// When bundled as a proper `.app` this is declared via Info.plist; setting the
@@ -13,6 +14,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let layoutStore = LayoutStore()
     private let iconCache = IconCache()
     private lazy var launcherWindowController = LauncherWindowController(iconCache: iconCache, layoutStore: layoutStore)
+    private lazy var triggerCoordinator = TriggerCoordinator(onActivate: { [weak self] in
+        DiagnosticsLog.triggers.info("Trigger fired — toggling launcher")
+        self?.launcherWindowController.toggle()
+    })
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -25,19 +30,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             launcherWindowController.updateRecords(snapshot.records)
             await scanner.startWatching()
 
+            var settings = launcherWindowController.triggerSettings
+            // Debug-only override so Phase 5's triggers can be verified live
+            // on this machine without needing a Settings UI (Phase 6) yet to
+            // opt in — persisted user settings are untouched otherwise.
+            if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_ALL_TRIGGERS"] == "1" {
+                settings.f4Enabled = true
+                settings.hotCornersEnabled["bottomRight"] = true
+                settings.multitouchGestureEnabled = true
+            }
+            let report = triggerCoordinator.apply(settings)
+            DiagnosticsLog.triggers.info(
+                "Triggers applied: hotkey=\(report.hotkeyRegistered, privacy: .public) f4=\(report.f4Active, privacy: .public) multitouch=\(report.multitouchActive, privacy: .public)"
+            )
+
             for await update in await scanner.updates() {
                 launcherWindowController.updateRecords(update.records)
             }
         }
 
-        // Global triggers (hotkey/hot corner/F4/gesture) land in Phase 5.
         // This env var exists solely so the launcher surface can be manually
-        // verified end-to-end before those triggers are wired up.
+        // verified end-to-end without needing a real trigger.
         if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_AUTOSHOW"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.launcherWindowController.show()
             }
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        triggerCoordinator.stopAll()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

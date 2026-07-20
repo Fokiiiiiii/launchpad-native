@@ -28,6 +28,15 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         await gridModel.loadDocument()
     }
 
+    public var triggerSettings: TriggerSettings {
+        gridModel.triggerSettings
+    }
+
+    public func updateTriggerSettings(_ settings: TriggerSettings) async {
+        gridModel.updateTriggerSettings(settings)
+        await gridModel.save()
+    }
+
     public func updateRecords(_ records: [ApplicationRecord]) {
         viewModel.setRecords(records)
 
