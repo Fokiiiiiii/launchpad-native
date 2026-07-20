@@ -16,6 +16,10 @@ let package = Package(
             name: "Diagnostics",
             path: "Sources/Diagnostics"
         ),
+        .executableTarget(
+            name: "ContractProbe",
+            path: "Tools/ContractProbe"
+        ),
         .testTarget(
             name: "DiagnosticsTests",
             dependencies: ["Diagnostics"],
