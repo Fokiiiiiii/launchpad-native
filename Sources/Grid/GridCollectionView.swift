@@ -12,6 +12,10 @@ final class GridCollectionView: NSCollectionView {
     var menuProvider: ((IndexPath) -> NSMenu?)?
     /// Fires with `-1` (previous) or `+1` (next) once per completed swipe.
     var onSwipePage: ((Int) -> Void)?
+    /// Fires when a click lands within a cell's bounding box but outside its
+    /// actual icon+label content — see `GridCellItem.contentHitTestFrame`.
+    /// Treated the same as clicking the launcher's empty background: dismiss.
+    var onBackgroundClick: (() -> Void)?
 
     private var swipeAccumulatedDeltaX: CGFloat = 0
     private var swipeIsHorizontal = false
@@ -24,6 +28,24 @@ final class GridCollectionView: NSCollectionView {
             selectionIndexPaths = [indexPath]
         }
         return menuProvider?(indexPath)
+    }
+
+    /// Only forwards to normal NSCollectionView click handling (selection,
+    /// drag initiation) when the click actually lands on a cell's rendered
+    /// icon/label — not just anywhere in its much larger bounding box. A
+    /// margin of a few points is added around the content so clicking right
+    /// at an icon's edge still registers.
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let indexPath = indexPathForItem(at: point),
+           let cell = item(at: indexPath) as? GridCellItem {
+            let localPoint = cell.view.convert(point, from: self)
+            if cell.contentHitTestFrame.insetBy(dx: -10, dy: -10).contains(localPoint) {
+                super.mouseDown(with: event)
+                return
+            }
+        }
+        onBackgroundClick?()
     }
 
     /// A page fits entirely in the viewport (no horizontal scroll content),

@@ -97,4 +97,17 @@ final class GridCellItem: NSCollectionViewItem {
             ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.35).cgColor
             : NSColor.clear.cgColor
     }
+
+    /// The icon+label's actual rendered bounds, in this cell's own view
+    /// coordinate space. A 7x5 grid's cells are far larger than any one
+    /// icon, so treating the *whole cell* as clickable (NSCollectionView's
+    /// default) meant clicking what looked like empty space between icons
+    /// still launched/selected something — confirmed as a real usability
+    /// bug during hands-on testing ("判定がアイコンより大きすぎる"/hit area
+    /// is way bigger than the icon). `GridCollectionView` uses this to tell
+    /// "really clicked the icon" from "clicked the gap around it," treating
+    /// the latter as a background click.
+    var contentHitTestFrame: NSRect {
+        iconView.frame.union(label.frame)
+    }
 }

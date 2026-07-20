@@ -29,6 +29,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private let model: GridModel
     private let iconCache: IconCache
     private let onLaunch: (ApplicationRecord) -> Void
+    private let onBackgroundClick: () -> Void
 
     private let collectionView = GridCollectionView()
     private let scrollView = NSScrollView()
@@ -38,10 +39,16 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private var currentPage = 0
     private var openFolderPopover: NSPopover?
 
-    public init(model: GridModel, iconCache: IconCache, onLaunch: @escaping (ApplicationRecord) -> Void) {
+    public init(
+        model: GridModel,
+        iconCache: IconCache,
+        onLaunch: @escaping (ApplicationRecord) -> Void,
+        onBackgroundClick: @escaping () -> Void
+    ) {
         self.model = model
         self.iconCache = iconCache
         self.onLaunch = onLaunch
+        self.onBackgroundClick = onBackgroundClick
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -62,6 +69,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.registerForDraggedTypes([Self.internalDragType])
         collectionView.menuProvider = { [weak self] indexPath in self?.contextMenu(for: indexPath) }
         collectionView.onSwipePage = { [weak self] delta in self?.jumpToAdjacentPage(delta: delta) }
+        collectionView.onBackgroundClick = { [weak self] in self?.onBackgroundClick() }
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = collectionView

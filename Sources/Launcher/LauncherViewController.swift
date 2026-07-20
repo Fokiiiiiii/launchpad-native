@@ -23,7 +23,8 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private lazy var gridViewController = GridViewController(
         model: gridModel,
         iconCache: iconCache,
-        onLaunch: { [weak self] record in self?.launch(record) }
+        onLaunch: { [weak self] record in self?.launch(record) },
+        onBackgroundClick: { [weak self] in self?.onDidCancel() }
     )
 
     init(
