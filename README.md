@@ -52,6 +52,20 @@ session (no Accessibility permission for GUI-scripting tools) — covered
 instead by 33 passing unit tests and code review of the standard
 NSCollectionView drag-and-drop API used.
 
+Phase 5 (global triggers) is implemented: `Triggers` adds a system-wide
+hotkey (Carbon `RegisterEventHotKey`), event-driven hot corners (`NSEvent`
+global mouse-moved monitor, not a polling timer), F4/Launch-Panel key capture
+(`CGEventTap` at `.cghidEventTap`), and a raw multitouch thumb+3-finger pinch
+recognizer built on the `Finger` struct verified by live hardware capture
+(`Tools/MultitouchProbe`). `TriggerCoordinator` applies all four
+independently, so one failing never takes another down. Verified live on
+this machine (release build, `LAUNCHPAD_DEBUG_ALL_TRIGGERS=1` temporarily
+forces settings on until Phase 6's Settings UI exists): F4 correctly failed
+with a clear diagnostic (this app bundle lacks Input Monitoring permission,
+as Phase 1 predicted), and the multitouch trigger activated and toggled the
+launcher open from a real physical pinch gesture with no explicit `show()`
+call in the code path.
+
 **Known limitations:**
 - Xcode.app is required for `swift test` (Command Line Tools alone can't
   resolve `Testing`/`XCTest`) and will also be needed for Instruments-based
