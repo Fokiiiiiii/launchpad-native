@@ -124,12 +124,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Fires when the already-running app is reopened — a second Finder
-    /// double-click, or a Dock icon click if the app is pinned there. Same
-    /// reasoning as the auto-show above: clicking the icon should always
-    /// visibly do something, matching how a normal (non-`.accessory`) app's
-    /// Dock icon brings its window back.
+    /// double-click, or a Dock icon click if the app is pinned there. Uses
+    /// `toggle()`, not `show()`: every other trigger (hot corner, hotkey,
+    /// F4) already closes the launcher on a repeat activation while it's
+    /// open, and reopening via the icon staying stuck open with no way to
+    /// dismiss it that way was a real reported inconsistency — clicking the
+    /// icon again should behave the same as every other trigger.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        launcherWindowController.show()
+        launcherWindowController.toggle()
         return true
     }
 }

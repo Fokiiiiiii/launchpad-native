@@ -163,7 +163,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         pageControl.currentPage = index
 
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.09
+            context.duration = 0.14
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             collectionView.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
@@ -177,7 +177,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 self.currentPage = index
                 self.collectionView.reloadData()
                 NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.14
+                    context.duration = 0.20
                     context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                     self.collectionView.animator().alphaValue = 1
                 }

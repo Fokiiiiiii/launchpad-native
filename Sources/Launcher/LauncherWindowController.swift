@@ -139,7 +139,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             if let layer = rootContentView?.layer {
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
-                layer.transform = CATransform3DMakeScale(0.96, 0.96, 1)
+                layer.transform = CATransform3DMakeScale(0.90, 0.90, 1)
                 CATransaction.commit()
             }
         }
@@ -169,13 +169,13 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             layer.removeAllAnimations()
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            layer.transform = CATransform3DMakeScale(0.97, 0.97, 1)
+            layer.transform = CATransform3DMakeScale(0.94, 0.94, 1)
             CATransaction.commit()
-            layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.0, to: 0.97, damping: 1.0, response: 0.2), forKey: "scaleOut")
+            layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.0, to: 0.94, damping: 1.0, response: 0.28), forKey: "scaleOut")
         }
 
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.16
+            context.duration = 0.30
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             window.animator().alphaValue = 0
         }, completionHandler: { [weak self, weak window] in
@@ -201,15 +201,16 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         })
     }
 
-    /// Fade + a subtle critically-damped "settle" scale — apple-design's
-    /// guidance is to reserve bounce/overshoot for gesture-driven momentum,
-    /// and this entrance isn't carrying any (it's the same animation
-    /// whether triggered by a hotkey, hot corner, or gesture), so damping
-    /// stays at 1.0 rather than adding a spring bounce that isn't earned by
-    /// an actual flick.
+    /// Fade + a gently under-damped "settle" scale, closer to iOS/iPadOS's
+    /// own app-open and sheet-presentation motion (noticeably longer than a
+    /// UI micro-transition, with a small overshoot as it lands) than the
+    /// stricter apple-design default of "no bounce without gesture
+    /// momentum" — the user explicitly asked for this to read more like
+    /// iPhone/iPad, so damping loosens to 0.82 rather than staying
+    /// critically damped at 1.0.
     private func animateIn(window: NSWindow) {
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.22
+            context.duration = 0.45
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         }
@@ -218,7 +219,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             CATransaction.setDisableActions(true)
             layer.transform = CATransform3DIdentity
             CATransaction.commit()
-            layer.add(Self.springAnimation(keyPath: "transform.scale", from: 0.96, to: 1.0, damping: 1.0, response: 0.3), forKey: "scaleIn")
+            layer.add(Self.springAnimation(keyPath: "transform.scale", from: 0.90, to: 1.0, damping: 0.82, response: 0.45), forKey: "scaleIn")
         }
     }
 
