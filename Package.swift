@@ -80,6 +80,14 @@ let package = Package(
             dependencies: ["Uninstall", "Catalog"],
             path: "Tools/UninstallFixtureProbe"
         ),
+        .executableTarget(
+            name: "PrivilegedHelperProbe",
+            path: "Tools/PrivilegedHelperProbe"
+        ),
+        .executableTarget(
+            name: "PrivilegedHelperRegistrationProbe",
+            path: "Tools/PrivilegedHelperRegistrationProbe"
+        ),
         .testTarget(
             name: "DiagnosticsTests",
             dependencies: ["Diagnostics"],

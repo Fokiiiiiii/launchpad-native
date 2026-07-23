@@ -33,8 +33,12 @@ verification before the phases that depend on them proceed:
   actual Launchpad/Spotlight usage on this machine to see if it's still being
   touched. Blocks Phase 4's exact framing (not the read path itself, which is
   ready to implement).
-- **Privileged Helper communication** — not started; only relevant once
-  Phase 8 (Uninstall) begins, and only if `SMAppService`-registered helpers
-  turn out insufficient for root-owned artifact removal.
+- **Privileged Helper communication** — **resolved: not viable under this
+  project's constraints.** Tested live (Phase 8 part 4): `SMAppService.daemon(plistName:).register()`
+  fails with `SMAppServiceErrorDomain Code=1 "Operation not permitted"` on
+  an ad-hoc-signed build (`TeamIdentifier=not set`). See
+  `privileged-helper.md` for the full result. Root-owned artifact removal
+  remains permanently unimplemented; `RemovalExecutor` refuses those items
+  and the UI directs the user to remove them manually.
 - **Dock drag acceptance** — `NSDraggingSession` drop onto the live Dock
   process has not been tried yet. Blocks Phase 4.

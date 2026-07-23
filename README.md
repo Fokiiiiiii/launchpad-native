@@ -177,11 +177,7 @@ owned Caches folder and LaunchAgent plist (both recoverable in
 `~/.Trash`, confirmed with `ls`) while correctly refusing to touch the
 sharedRisk Application Support folder that nests the sibling fixture's own
 data. **Privileged Helper removal, system extension deactivation, and
-package receipt removal remain unimplemented** — this project is
-deliberately unsigned/unnotarized, so whether `SMAppService` daemon
-registration even works at all here is still unverified; that's the next
-round's first task, before any code that would run with elevated
-privileges gets written.
+package receipt removal remain unimplemented.**
 
 Phase 8 part 3 — broader related-file detection — is implemented:
 `OwnershipEvidenceCollector` now also checks `~/Library/Containers`
@@ -204,6 +200,23 @@ live: the fixture script now also creates a Container, a Saved Application
 State folder, and a Group Container, and `UninstallFixtureProbe --execute`
 confirmed the first two get trashed as `owned` while the Group Container
 is correctly left untouched.
+
+Phase 8 part 4 — Privileged Helper feasibility — is **resolved: not
+viable**, and this concludes Phase 8's active work. `SMAppService.daemon(plistName:).register()`
+was tested live against a real ad-hoc-signed copy of this app (no other
+signing option exists without a paid Apple Developer Program membership)
+carrying a deliberately inert daemon payload (writes one log line to
+`/tmp`, touches nothing else). It failed immediately with
+`SMAppServiceErrorDomain Code=1 "Operation not permitted"` — confirmed via
+`codesign -dv` that the bundle's `TeamIdentifier` is `not set` (ad-hoc
+signatures have none), and confirmed via `launchctl print system/...` and
+the log file's absence that the daemon never registered or ran. Full
+result in `ReverseEngineering/Contracts/privileged-helper.md`. Root-owned
+removal (`/Library`-domain LaunchAgents/Daemons, package receipts) is
+therefore a **permanent** limitation of this project's unsigned/Git-only
+distribution model, not a "not yet implemented" gap — `RemovalExecutor`
+already refuses those items with an explanation, and the Uninstall tab
+directs the user to remove them manually.
 
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted

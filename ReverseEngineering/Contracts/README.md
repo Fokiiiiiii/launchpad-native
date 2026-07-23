@@ -24,3 +24,4 @@ the affected contract whenever the target OS build changes.
 - [public-tier1.md](public-tier1.md) — Tier 1 public replacements confirmed present in this SDK
 - [f4-hid.md](f4-hid.md) — HID-level F4/Launch Panel key constant
 - [open-items.md](open-items.md) — Phase 1 work not yet verified
+- [privileged-helper.md](privileged-helper.md) — Tier 1 public API, resolved not viable (SMAppService daemon registration fails without a paid Team ID)
