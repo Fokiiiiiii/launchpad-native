@@ -10,13 +10,17 @@ import SwiftUI
 public final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model: GridModel
-    private let onTriggerSettingsChanged: () -> Void
+    /// Re-applies trigger settings to the live `TriggerCoordinator` and
+    /// returns whether F4 actually activated — so the Triggers tab can tell
+    /// "enabled but missing Input Monitoring permission" apart from
+    /// "genuinely working," not just record what the user asked for.
+    private let onTriggerSettingsChanged: () -> Bool
     /// Built once, alongside the window, and kept alive for the controller's
     /// lifetime — `showUninstallTab(for:)` needs to reach it even when the
     /// window already exists and `show()` takes its early-return path.
     private var viewModel: SettingsViewModel?
 
-    public init(model: GridModel, onTriggerSettingsChanged: @escaping () -> Void) {
+    public init(model: GridModel, onTriggerSettingsChanged: @escaping () -> Bool) {
         self.model = model
         self.onTriggerSettingsChanged = onTriggerSettingsChanged
         super.init()
@@ -30,6 +34,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
 
         let viewModel = SettingsViewModel(model: model, onTriggerSettingsChanged: onTriggerSettingsChanged)
+        viewModel.refreshF4Status()
         self.viewModel = viewModel
         let hosting = NSHostingController(rootView: SettingsView(viewModel: viewModel))
         let window = NSWindow(contentViewController: hosting)

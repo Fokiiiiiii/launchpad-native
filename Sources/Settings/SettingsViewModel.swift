@@ -15,7 +15,7 @@ public enum SettingsTab: Hashable, Sendable {
 @MainActor
 public final class SettingsViewModel: ObservableObject {
     private let model: GridModel
-    private let onTriggerSettingsChanged: () -> Void
+    private let onTriggerSettingsChanged: () -> Bool
 
     @Published public var selectedTab: SettingsTab = .grid
     @Published public var columns: Int
@@ -24,7 +24,14 @@ public final class SettingsViewModel: ObservableObject {
     @Published public var layoutMode: LayoutMode
 
     @Published public var f4Enabled: Bool
+    /// Whether F4 is actually registered right now — distinct from
+    /// `f4Enabled` (what the user asked for). Refreshed whenever triggers
+    /// are (re)applied, so the Triggers tab can show a real permission
+    /// hint instead of just trusting the toggle.
+    @Published public var f4Active: Bool = false
     @Published public var hotkeyEnabled: Bool
+    @Published public var hotkeyKeyCode: UInt16?
+    @Published public var hotkeyCarbonModifiers: UInt
     @Published public var hotCornerTopLeft: Bool
     @Published public var hotCornerTopRight: Bool
     @Published public var hotCornerBottomLeft: Bool
@@ -48,7 +55,7 @@ public final class SettingsViewModel: ObservableObject {
 
     private let reportStore = OperationReportStore()
 
-    public init(model: GridModel, onTriggerSettingsChanged: @escaping () -> Void) {
+    public init(model: GridModel, onTriggerSettingsChanged: @escaping () -> Bool) {
         self.model = model
         self.onTriggerSettingsChanged = onTriggerSettingsChanged
 
@@ -61,6 +68,8 @@ public final class SettingsViewModel: ObservableObject {
         let triggers = model.triggerSettings
         f4Enabled = triggers.f4Enabled
         hotkeyEnabled = triggers.hotkeyEnabled
+        hotkeyKeyCode = triggers.hotkeyKeyCode
+        hotkeyCarbonModifiers = triggers.hotkeyModifierFlags
         hotCornerTopLeft = triggers.hotCornersEnabled["topLeft"] ?? false
         hotCornerTopRight = triggers.hotCornersEnabled["topRight"] ?? false
         hotCornerBottomLeft = triggers.hotCornersEnabled["bottomLeft"] ?? false
@@ -155,6 +164,8 @@ public final class SettingsViewModel: ObservableObject {
         var triggers = model.triggerSettings
         triggers.f4Enabled = f4Enabled
         triggers.hotkeyEnabled = hotkeyEnabled
+        triggers.hotkeyKeyCode = hotkeyKeyCode
+        triggers.hotkeyModifierFlags = hotkeyCarbonModifiers
         triggers.hotCornersEnabled = [
             "topLeft": hotCornerTopLeft,
             "topRight": hotCornerTopRight,
@@ -165,7 +176,22 @@ public final class SettingsViewModel: ObservableObject {
         triggers.multitouchSensitivity = multitouchSensitivity
         model.updateTriggerSettings(triggers)
         persist()
-        onTriggerSettingsChanged()
+        f4Active = onTriggerSettingsChanged()
+    }
+
+    /// Records a captured key combo from `HotkeyRecorderView` — stored but
+    /// not yet applied until `saveTriggerSettings()` (matching every other
+    /// control on this tab, which all require the "Apply" button).
+    public func recordHotkey(keyCode: UInt16, carbonModifiers: UInt) {
+        hotkeyKeyCode = keyCode
+        hotkeyCarbonModifiers = carbonModifiers
+    }
+
+    /// Re-reads live trigger state without changing any setting — used when
+    /// the Triggers tab first appears, so "F4 needs permission" reflects
+    /// reality immediately rather than only after the user hits Apply once.
+    public func refreshF4Status() {
+        f4Active = onTriggerSettingsChanged()
     }
 
     public func addCustomSource(path: String) {

@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     )
     private lazy var settingsWindowController = SettingsWindowController(model: launcherWindowController.model) { [weak self] in
-        self?.applyCurrentTriggerSettings()
+        self?.applyCurrentTriggerSettings() ?? false
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -69,20 +69,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             applyCurrentTriggerSettings()
 
+            // Double-clicking the app in Finder is the single most natural
+            // thing a first-time user tries — and until now it did nothing
+            // visible at all (LSUIElement means no Dock icon, no window
+            // unless a trigger fires). Showing the launcher once the
+            // catalog is ready means that first double-click actually shows
+            // something, instead of silently backgrounding with no
+            // discoverable way to know it worked.
+            launcherWindowController.show()
+
             for await update in await scanner.updates() {
                 launcherWindowController.updateRecords(update.records)
             }
         }
 
-        // This env var exists solely so the launcher surface can be manually
-        // verified end-to-end without needing a real trigger.
-        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_AUTOSHOW"] == "1" {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                self?.launcherWindowController.show()
-            }
-        }
-
-        // Same reasoning as LAUNCHPAD_DEBUG_AUTOSHOW: opens Settings on the
+        // Opens Settings on the
         // Uninstall tab directly so it can be verified end-to-end without
         // needing GUI-scripting permission to click the gear button/tab.
         if let bundleID = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_UNINSTALL"], !bundleID.isEmpty {
@@ -94,8 +95,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Re-applies trigger settings — called at launch and whenever the
     /// Settings window saves a change, since `TriggerCoordinator.apply`
-    /// unregisters/reregisters everything idempotently.
-    private func applyCurrentTriggerSettings() {
+    /// unregisters/reregisters everything idempotently. Returns whether F4
+    /// actually activated, so Settings can tell "enabled but not granted
+    /// Input Monitoring" apart from "genuinely working."
+    @discardableResult
+    private func applyCurrentTriggerSettings() -> Bool {
         var settings = launcherWindowController.triggerSettings
         // Debug-only override so triggers can be forced on for verification
         // without going through the Settings window.
@@ -108,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DiagnosticsLog.triggers.info(
             "Triggers applied: hotkey=\(report.hotkeyRegistered, privacy: .public) f4=\(report.f4Active, privacy: .public) multitouch=\(report.multitouchActive, privacy: .public)"
         )
+        return report.f4Active
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -116,5 +121,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// Fires when the already-running app is reopened — a second Finder
+    /// double-click, or a Dock icon click if the app is pinned there. Same
+    /// reasoning as the auto-show above: clicking the icon should always
+    /// visibly do something, matching how a normal (non-`.accessory`) app's
+    /// Dock icon brings its window back.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        launcherWindowController.show()
+        return true
     }
 }

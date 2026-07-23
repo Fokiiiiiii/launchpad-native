@@ -100,11 +100,18 @@ final class GridCellItem: NSCollectionViewItem {
         view.setAccessibilityLabel("\(name) folder, \(itemCount) items")
     }
 
+    /// A soft glass highlight (translucent white fill + thin bright edge)
+    /// rather than a flat system-accent block — reads as a piece of the
+    /// same glass material lifting slightly, matching how Liquid Glass
+    /// surfaces (Control Center's own selection state) highlight rather
+    /// than painting a solid color over themselves.
     private func applySelection(_ isSelected: Bool) {
         view.layer?.cornerRadius = 12
         view.layer?.backgroundColor = isSelected
-            ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.35).cgColor
+            ? NSColor.white.withAlphaComponent(0.14).cgColor
             : NSColor.clear.cgColor
+        view.layer?.borderWidth = isSelected ? 1 : 0
+        view.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
     }
 
     /// The icon+label's actual rendered bounds, in this cell's own view

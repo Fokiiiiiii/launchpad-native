@@ -235,6 +235,38 @@ artifact exists anywhere in this repo or its history, added
 fresh `git clone` into a scratch directory builds and passes all 80 tests
 with no dependency on this machine's existing build cache.
 
+**Trigger discoverability and Liquid Glass redesign** are implemented,
+following real hands-on feedback that the only working trigger (the
+4-finger pinch) wasn't discoverable and that the visual design didn't
+commit fully to macOS's own Liquid Glass material. Fixes:
+- `TriggerSettings.default` now enables the bottom-right hot corner
+  out of the box (classic Launchpad's own convention), alongside the
+  existing multitouch default.
+- The Settings Triggers tab gained a real hotkey recorder
+  (`HotkeyRecorderView` — click, press a combo, it's captured and
+  converted to the Carbon modifier bits `GlobalHotkeyTrigger` actually
+  needs) and an inline "F4 needs Input Monitoring permission" hint with a
+  button that opens System Settings' Privacy pane directly, so a
+  non-working F4 toggle no longer looks like a silent bug.
+- Double-clicking the `.app` in Finder — the single most natural thing a
+  first-time user tries — now actually shows the launcher once the
+  catalog is ready, instead of doing nothing visible at all (this app has
+  no Dock icon by design). `applicationShouldHandleReopen` brings it back
+  the same way clicking a normal app's Dock icon would.
+- The search field, settings button, and page-control chevrons/dots are
+  now each their own small piece of floating Liquid Glass (decorative
+  `NSGlassEffectView` siblings behind the real controls, never containers
+  for them — same hit-testing rule established in Phase 3/5), rather than
+  bare controls sitting directly on the one full-screen background glass.
+  Grid cell selection changed from a flat system-accent block to a soft
+  translucent highlight with a thin bright edge, closer to how Liquid
+  Glass surfaces themselves indicate selection. `NSGlassEffectContainerView`
+  (confirmed present in the SDK, Tier 1) was evaluated but not adopted —
+  merging the background with the small floating capsules into one
+  container would mean either giving up the sibling-not-container
+  hit-testing pattern or a much larger restructuring for a benefit (shared
+  blur sampling) that isn't visually load-bearing at this UI's scale.
+
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
   but not actually implemented in `GridViewController`/`PagedGridLayout` yet

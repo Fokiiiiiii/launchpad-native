@@ -101,18 +101,20 @@ public struct TriggerSettings: Codable, Sendable, Hashable {
     public var multitouchGestureEnabled: Bool
     public var multitouchSensitivity: Double
 
-    // multitouchGestureEnabled defaults to true: there is no Settings UI yet
-    // (Phase 6) for a user to opt in themselves, and the multitouch pinch is
-    // meant to be this app's primary everyday trigger — shipping it off by
-    // default would mean the launcher has no working trigger at all for
-    // anyone running the plain app (F4 needs Input Monitoring permission
-    // this app bundle doesn't request yet; the hotkey needs a key code no
-    // UI lets you set).
+    // multitouchGestureEnabled defaults to true, and hotCornersEnabled
+    // defaults with bottomRight on: real hands-on testing found that
+    // relying on the 4-finger gesture alone left no *discoverable* trigger
+    // for a first-time user — nobody finds a pinch gesture by accident the
+    // way they'd notice a screen corner. bottomRight matches classic
+    // Launchpad's own hot-corner convention. F4 needs Input Monitoring
+    // permission this app bundle doesn't request yet; the hotkey needs a
+    // key code, which the Settings UI now lets you record (see
+    // HotkeyRecorderView) but still defaults to off until you set one.
     public static let `default` = TriggerSettings(
         hotkeyEnabled: false,
         hotkeyKeyCode: nil,
         hotkeyModifierFlags: 0,
-        hotCornersEnabled: [:],
+        hotCornersEnabled: ["bottomRight": true],
         f4Enabled: true,
         multitouchGestureEnabled: true,
         multitouchSensitivity: 0.5

@@ -19,6 +19,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private let onRequestUninstall: (String) -> Void
 
     private let searchField = NSTextField()
+    private let searchIcon = NSImageView()
     private let settingsButton = NSButton()
     private let searchResultsCollectionView = NSCollectionView()
     private let searchResultsScrollView = NSScrollView()
@@ -57,14 +58,36 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         let root = BackgroundClickCatcherView()
         root.onBackgroundClick = { [weak self] in self?.onDidCancel() }
 
+        // The search field reads as its own floating glass capsule (Spotlight's
+        // own search field is a distinct material, not bare text on the
+        // ambient background) — `searchBarGlass` is a purely decorative
+        // sibling behind `searchIcon`/`searchField`, never their container,
+        // for the same hit-testing reason `GlassBackgroundView`'s doc
+        // comment explains for the full-screen background.
+        let searchBarGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 20)
+        searchBarGlass.translatesAutoresizingMaskIntoConstraints = false
+
+        searchIcon.translatesAutoresizingMaskIntoConstraints = false
+        searchIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 16, weight: .medium))
+        searchIcon.contentTintColor = .secondaryLabelColor
+
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchField.placeholderString = "Search"
+        searchField.placeholderAttributedString = NSAttributedString(
+            string: "Search",
+            attributes: [.kern: -0.4, .foregroundColor: NSColor.placeholderTextColor]
+        )
         searchField.font = .systemFont(ofSize: 20, weight: .regular)
         searchField.isBordered = false
         searchField.drawsBackground = false
         searchField.focusRingType = .none
         searchField.delegate = self
         searchField.setAccessibilityLabel("Search applications")
+
+        // A small circular glass chip, same reasoning as the search
+        // capsule above — decorative sibling, button drawn on top of it.
+        let settingsGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 14)
+        settingsGlass.translatesAutoresizingMaskIntoConstraints = false
 
         settingsButton.translatesAutoresizingMaskIntoConstraints = false
         settingsButton.bezelStyle = .circular
@@ -97,26 +120,65 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         addChild(gridViewController)
         gridViewController.view.translatesAutoresizingMaskIntoConstraints = false
 
-        root.addSubview(searchField)
-        root.addSubview(settingsButton)
+        // Plain positioning containers (not glass themselves) — each holds
+        // one glass shape plus the real interactive control(s) as siblings
+        // drawn on top of it, so the capsule/chip reads as one floating
+        // piece of glass while every click still hits a normal AppKit
+        // control directly.
+        let searchBar = NSView()
+        searchBar.translatesAutoresizingMaskIntoConstraints = false
+        searchBar.addSubview(searchBarGlass)
+        searchBar.addSubview(searchIcon)
+        searchBar.addSubview(searchField)
+
+        let settingsChip = NSView()
+        settingsChip.translatesAutoresizingMaskIntoConstraints = false
+        settingsChip.addSubview(settingsGlass)
+        settingsChip.addSubview(settingsButton)
+
+        root.addSubview(searchBar)
+        root.addSubview(settingsChip)
         root.addSubview(gridViewController.view)
         root.addSubview(searchResultsScrollView)
         NSLayoutConstraint.activate([
-            searchField.topAnchor.constraint(equalTo: root.topAnchor, constant: 40),
-            searchField.centerXAnchor.constraint(equalTo: root.centerXAnchor),
-            searchField.widthAnchor.constraint(equalToConstant: 360),
+            searchBar.topAnchor.constraint(equalTo: root.topAnchor, constant: 36),
+            searchBar.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            searchBar.widthAnchor.constraint(equalToConstant: 400),
+            searchBar.heightAnchor.constraint(equalToConstant: 44),
 
-            settingsButton.centerYAnchor.constraint(equalTo: searchField.centerYAnchor),
-            settingsButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
+            searchBarGlass.leadingAnchor.constraint(equalTo: searchBar.leadingAnchor),
+            searchBarGlass.trailingAnchor.constraint(equalTo: searchBar.trailingAnchor),
+            searchBarGlass.topAnchor.constraint(equalTo: searchBar.topAnchor),
+            searchBarGlass.bottomAnchor.constraint(equalTo: searchBar.bottomAnchor),
+
+            searchIcon.leadingAnchor.constraint(equalTo: searchBar.leadingAnchor, constant: 16),
+            searchIcon.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+
+            searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 10),
+            searchField.trailingAnchor.constraint(equalTo: searchBar.trailingAnchor, constant: -16),
+            searchField.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+
+            settingsChip.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+            settingsChip.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
+            settingsChip.widthAnchor.constraint(equalToConstant: 32),
+            settingsChip.heightAnchor.constraint(equalToConstant: 32),
+
+            settingsGlass.leadingAnchor.constraint(equalTo: settingsChip.leadingAnchor),
+            settingsGlass.trailingAnchor.constraint(equalTo: settingsChip.trailingAnchor),
+            settingsGlass.topAnchor.constraint(equalTo: settingsChip.topAnchor),
+            settingsGlass.bottomAnchor.constraint(equalTo: settingsChip.bottomAnchor),
+
+            settingsButton.centerXAnchor.constraint(equalTo: settingsChip.centerXAnchor),
+            settingsButton.centerYAnchor.constraint(equalTo: settingsChip.centerYAnchor),
             settingsButton.widthAnchor.constraint(equalToConstant: 28),
             settingsButton.heightAnchor.constraint(equalToConstant: 28),
 
-            gridViewController.view.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 24),
+            gridViewController.view.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 24),
             gridViewController.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             gridViewController.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             gridViewController.view.bottomAnchor.constraint(equalTo: root.bottomAnchor),
 
-            searchResultsScrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 24),
+            searchResultsScrollView.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 24),
             searchResultsScrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             searchResultsScrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             searchResultsScrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
@@ -159,6 +221,16 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     }
 
     // MARK: NSTextFieldDelegate
+
+    /// Large display text wants slightly negative tracking (Apple's own
+    /// type-detail guidance — at 20pt, zero/positive tracking reads too
+    /// loose). `NSTextField` has no direct kerning property for live-typed
+    /// text; the field editor's `typingAttributes` is the actual hook.
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        if let fieldEditor = obj.userInfo?["NSFieldEditor"] as? NSTextView {
+            fieldEditor.typingAttributes[.kern] = -0.4
+        }
+    }
 
     func controlTextDidChange(_ obj: Notification) {
         let query = searchField.stringValue

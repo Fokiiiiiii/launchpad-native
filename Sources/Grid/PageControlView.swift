@@ -13,6 +13,34 @@ final class PageControlView: NSView {
     var onPrevious: (() -> Void)?
     var onNext: (() -> Void)?
 
+    /// A small glass pill behind the chevrons/dots (Photos' floating page
+    /// control is the reference) — a decorative sibling, added first so it
+    /// sits behind the buttons, never their container (same hit-testing
+    /// reasoning as `Launcher.GlassBackgroundFactory`, which this can't
+    /// import directly: `Grid` sits below `Launcher` in the dependency
+    /// graph, so this is a small, deliberately-duplicated local copy rather
+    /// than a cross-module dependency inversion).
+    private static func makeGlassPill(cornerRadius: CGFloat) -> NSView {
+        let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        let background: NSView
+        if #available(macOS 26.0, *), !reduceTransparency {
+            let glass = NSGlassEffectView()
+            glass.cornerRadius = cornerRadius
+            glass.tintColor = NSColor.black.withAlphaComponent(0.08)
+            background = glass
+        } else {
+            let fallback = NSVisualEffectView()
+            fallback.material = reduceTransparency ? .sidebar : .underWindowBackground
+            fallback.blendingMode = .behindWindow
+            fallback.state = .active
+            fallback.wantsLayer = true
+            fallback.layer?.cornerRadius = cornerRadius
+            fallback.layer?.masksToBounds = true
+            background = fallback
+        }
+        return background
+    }
+
     var numberOfPages: Int = 1 {
         didSet {
             rebuildDots()
@@ -42,11 +70,20 @@ final class PageControlView: NSView {
         configureChevron(previousButton, symbol: "chevron.left", label: "Previous Page", action: #selector(previousTapped))
         configureChevron(nextButton, symbol: "chevron.right", label: "Next Page", action: #selector(nextTapped))
 
+        let glassPill = Self.makeGlassPill(cornerRadius: 18)
+        glassPill.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(glassPill)
         addSubview(previousButton)
         addSubview(dotStack)
         addSubview(nextButton)
 
         NSLayoutConstraint.activate([
+            glassPill.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -8),
+            glassPill.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 8),
+            glassPill.topAnchor.constraint(equalTo: topAnchor, constant: -4),
+            glassPill.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 4),
+
             previousButton.leadingAnchor.constraint(equalTo: leadingAnchor),
             previousButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             previousButton.widthAnchor.constraint(equalToConstant: 32),

@@ -45,7 +45,15 @@ public struct SettingsView: View {
     private var triggersTab: some View {
         Form {
             Toggle("F4 / Spotlight key", isOn: $viewModel.f4Enabled)
+            if viewModel.f4Enabled && !viewModel.f4Active {
+                f4PermissionHint
+            }
+
             Toggle("Global hotkey", isOn: $viewModel.hotkeyEnabled)
+            if viewModel.hotkeyEnabled {
+                HotkeyRecorderView(keyCode: $viewModel.hotkeyKeyCode, carbonModifiers: $viewModel.hotkeyCarbonModifiers)
+                    .frame(width: 160, height: 24)
+            }
 
             GroupBox("Hot Corners") {
                 Toggle("Top Left", isOn: $viewModel.hotCornerTopLeft)
@@ -67,6 +75,28 @@ public struct SettingsView: View {
                 .keyboardShortcut(.defaultAction)
         }
         .padding()
+    }
+
+    /// Shown only when F4 is turned on but genuinely isn't working — this
+    /// app bundle needs Input Monitoring permission for the CGEventTap F4
+    /// relies on, which macOS never grants automatically. Without this,
+    /// the toggle silently does nothing and looks like a bug.
+    private var f4PermissionHint: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("F4 needs Input Monitoring permission")
+                    .font(.caption)
+                Button("Open Privacy Settings…") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .font(.caption)
+            }
+        }
+        .padding(.leading, 16)
     }
 
     private var sourcesTab: some View {
