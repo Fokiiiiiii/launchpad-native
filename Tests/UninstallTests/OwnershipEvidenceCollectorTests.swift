@@ -97,4 +97,74 @@ struct OwnershipEvidenceCollectorTests {
         let evidence = OwnershipEvidenceCollector.collect(for: record)
         #expect(evidence.systemExtensionIdentifiers.isEmpty)
     }
+
+    /// Real files under the real home directory, using a bundle identifier
+    /// exclusive to this test run — `OwnershipEvidenceCollector` always
+    /// reads the real `~/Library`, so proving the newer categories
+    /// (Containers, Group Containers, Saved Application State, WebKit,
+    /// HTTPStorages, Cookies, Logs, Application Scripts, ByHost prefs) work
+    /// means creating and then cleaning up real files there, same as the
+    /// fixture script does for manual verification.
+    @Test("newer related-path categories are detected under the real home directory")
+    func newerCategoriesDetected() throws {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        let bundleID = "com.launchpadnative.uninstalltests.\(UUID().uuidString)"
+
+        let container = home.appendingPathComponent("Library/Containers/\(bundleID)")
+        let groupContainer = home.appendingPathComponent("Library/Group Containers/group.\(bundleID)")
+        let savedState = home.appendingPathComponent("Library/Saved Application State/\(bundleID).savedState")
+        let webKit = home.appendingPathComponent("Library/WebKit/\(bundleID)")
+        let httpStorages = home.appendingPathComponent("Library/HTTPStorages/\(bundleID)")
+        let cookies = home.appendingPathComponent("Library/Cookies/\(bundleID).binarycookies")
+        let logs = home.appendingPathComponent("Library/Logs/\(bundleID)")
+        let appScripts = home.appendingPathComponent("Library/Application Scripts/\(bundleID)")
+        let byHost = home.appendingPathComponent("Library/Preferences/ByHost/\(bundleID).0123ABCD.plist")
+
+        let directories = [container, groupContainer, savedState, webKit, httpStorages, logs, appScripts]
+        for directory in directories {
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        try Data().write(to: cookies)
+        try fm.createDirectory(at: byHost.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: byHost)
+
+        defer {
+            for directory in directories { try? fm.removeItem(at: directory) }
+            try? fm.removeItem(at: cookies)
+            try? fm.removeItem(at: byHost)
+        }
+
+        let record = ApplicationRecord(
+            id: StableAppID(bundleURL: URL(fileURLWithPath: "/tmp/\(bundleID).app"), bundleIdentifier: bundleID, teamIdentifier: nil),
+            bundleIdentifier: bundleID,
+            bundleURL: URL(fileURLWithPath: "/tmp/\(bundleID).app"),
+            executableURL: nil,
+            displayName: bundleID,
+            originalDisplayName: bundleID,
+            bundleVersion: "1.0",
+            teamIdentifier: nil,
+            category: nil,
+            sourceID: "test",
+            isSystemProtected: false,
+            isBackgroundOnly: false,
+            iconCacheKey: bundleID,
+            canLaunch: false,
+            canOpenNewInstance: false,
+            lastSeenModificationDate: Date()
+        )
+
+        let evidence = OwnershipEvidenceCollector.collect(for: record)
+        let categories = Set(evidence.relatedPaths.filter(\.exists).map(\.category))
+
+        #expect(categories.contains(.containers))
+        #expect(categories.contains(.groupContainers))
+        #expect(categories.contains(.savedApplicationState))
+        #expect(categories.contains(.webKit))
+        #expect(categories.contains(.httpStorages))
+        #expect(categories.contains(.cookies))
+        #expect(categories.contains(.logs))
+        #expect(categories.contains(.applicationScripts))
+        #expect(categories.contains(.preferencesByHost))
+    }
 }

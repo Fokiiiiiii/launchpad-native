@@ -168,6 +168,27 @@ struct RemovalPlannerTests {
         #expect(plan[0].requiresPrivilegedHelper == true)
     }
 
+    @Test("a Group Container is always sharedRisk, even with no team-sharing sibling installed")
+    func groupContainerIsAlwaysSharedRisk() {
+        // No teamIdentifier at all, and no siblingRecords — the ordinary
+        // classify() rule would call this `.owned` (nothing to compare
+        // against), but Group Containers are shared by design and must
+        // never be treated as safely owned regardless.
+        let record = makeRecord(bundleIdentifier: "com.example.solo", teamIdentifier: nil)
+        let groupPath = URL(fileURLWithPath: "/tmp/group.com.example.solo")
+        let evidence = OwnershipEvidence(
+            bundleURL: record.bundleURL,
+            relatedPaths: [RelatedPath(url: groupPath, category: .groupContainers, exists: true)],
+            userLaunchAgents: [],
+            systemLaunchItems: [],
+            receiptPackageIDs: [],
+            systemExtensionIdentifiers: []
+        )
+        let plan = RemovalPlanner.plan(for: record, evidence: evidence)
+        #expect(plan.count == 1)
+        #expect(plan[0].classification == .sharedRisk)
+    }
+
     @Test("nonexistent related paths are excluded from the plan")
     func nonexistentPathsExcluded() {
         let record = makeRecord(bundleIdentifier: "com.example.solo", teamIdentifier: nil)

@@ -60,7 +60,7 @@ public enum RemovalPlanner {
         var items: [RemovalItem] = []
 
         for related in evidence.relatedPaths where related.exists {
-            let classification = classify(path: related.url, record: record, siblingRecords: siblingRecords)
+            let classification = classify(related, record: record, siblingRecords: siblingRecords)
             items.append(RemovalItem(path: related.url, classification: classification, requiresPrivilegedHelper: false))
         }
 
@@ -85,17 +85,23 @@ public enum RemovalPlanner {
         return items
     }
 
-    /// A path is `.sharedRisk` if another installed app with the same
-    /// code-signing team (but a different bundle identifier) has its own
-    /// data nested underneath it — deleting the parent would take the
-    /// sibling's data with it. Otherwise, since evidence collection only
-    /// ever returns paths keyed by this app's own bundle identifier,
-    /// anything that exists is `.owned`.
+    /// A path is `.sharedRisk` if either:
+    /// - it's a Group Container — shared *by design* across every app in
+    ///   the group, regardless of whether a sibling with a matching
+    ///   code-signing team is even currently installed, or
+    /// - another installed app with the same code-signing team (but a
+    ///   different bundle identifier) has its own data nested underneath it
+    ///   — deleting the parent would take the sibling's data with it.
+    /// Otherwise, since evidence collection only ever returns paths keyed by
+    /// this app's own bundle identifier, anything that exists is `.owned`.
     private static func classify(
-        path: URL,
+        _ related: RelatedPath,
         record: ApplicationRecord,
         siblingRecords: [ApplicationRecord]
     ) -> OwnershipClassification {
+        if case .groupContainers = related.category { return .sharedRisk }
+        let path = related.url
+
         guard let teamIdentifier = record.teamIdentifier else { return .owned }
 
         let siblingsSharingTeam = siblingRecords.filter {

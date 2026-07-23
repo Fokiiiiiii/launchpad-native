@@ -183,6 +183,28 @@ registration even works at all here is still unverified; that's the next
 round's first task, before any code that would run with elevated
 privileges gets written.
 
+Phase 8 part 3 — broader related-file detection — is implemented:
+`OwnershipEvidenceCollector` now also checks `~/Library/Containers`
+(sandboxed app container), `~/Library/Saved Application State`,
+`~/Library/WebKit`, `~/Library/HTTPStorages`, `~/Library/Cookies`,
+`~/Library/Logs`, `~/Library/Application Scripts`,
+`~/Library/Preferences/ByHost` (per-host prefs, matched by filename
+prefix), and `~/Library/Group Containers` — every one of them still strictly
+under the user's own home directory, so none of this needed a Privileged
+Helper or changed the non-privileged execution scope from part 2. Group
+Containers get a dedicated rule in `RemovalPlanner`: since they're shared
+*by design* across every app in the same App Group, a Group Container
+match is always classified `sharedRisk`, never `owned`, regardless of
+whether a same-team sibling is even currently installed — deliberately
+more conservative than the ordinary sibling-nesting check used for
+everything else. (Crash reports under `~/Library/Logs/DiagnosticReports`
+were deliberately left out — their filenames aren't reliably keyed by
+bundle identifier, so matching on them risks false positives.) Verified
+live: the fixture script now also creates a Container, a Saved Application
+State folder, and a Group Container, and `UninstallFixtureProbe --execute`
+confirmed the first two get trashed as `owned` while the Group Container
+is correctly left untouched.
+
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
   but not actually implemented in `GridViewController`/`PagedGridLayout` yet

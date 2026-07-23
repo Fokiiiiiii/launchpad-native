@@ -20,6 +20,11 @@
 #     com.launchpadnative.uninstallfixture.helpertool/               — nested sibling
 #       dummy.txt                                                     data ⇒ "sharedRisk"
 #   ~/Library/Caches/com.launchpadnative.uninstallfixture/dummy.txt
+#   ~/Library/Containers/com.launchpadnative.uninstallfixture/dummy.txt
+#   ~/Library/Saved Application State/com.launchpadnative.uninstallfixture.savedState/dummy.txt
+#   ~/Library/Group Containers/group.com.launchpadnative.uninstallfixture/dummy.txt
+#     — a Group Container is shared *by design*; RemovalPlanner must always
+#       classify it sharedRisk regardless of the sibling-team-ID check.
 #   ~/Library/LaunchAgents/com.launchpadnative.uninstallfixture.helper.plist
 #     — a plain plist file only; never `launchctl load`ed, so nothing is
 #       actually registered with launchd.
@@ -30,9 +35,12 @@ SIBLING_BUNDLE_ID="com.launchpadnative.uninstallfixture.helpertool"
 APP_ROOT="$HOME/.cache/launchpad-native/fixtures"
 APP_SUPPORT="$HOME/Library/Application Support/$BUNDLE_ID"
 CACHES="$HOME/Library/Caches/$BUNDLE_ID"
+CONTAINER="$HOME/Library/Containers/$BUNDLE_ID"
+SAVED_STATE="$HOME/Library/Saved Application State/$BUNDLE_ID.savedState"
+GROUP_CONTAINER="$HOME/Library/Group Containers/group.$BUNDLE_ID"
 LAUNCH_AGENT="$HOME/Library/LaunchAgents/$BUNDLE_ID.helper.plist"
 
-rm -rf "$APP_ROOT" "$APP_SUPPORT" "$CACHES" "$LAUNCH_AGENT"
+rm -rf "$APP_ROOT" "$APP_SUPPORT" "$CACHES" "$CONTAINER" "$SAVED_STATE" "$GROUP_CONTAINER" "$LAUNCH_AGENT"
 mkdir -p "$APP_ROOT/UninstallFixture.app/Contents/MacOS"
 
 cat > "$APP_ROOT/UninstallFixture.app/Contents/Info.plist" <<PLIST
@@ -58,6 +66,15 @@ echo "sibling fixture data" > "$APP_SUPPORT/$SIBLING_BUNDLE_ID/dummy.txt"
 mkdir -p "$CACHES"
 echo "cache fixture data" > "$CACHES/dummy.txt"
 
+mkdir -p "$CONTAINER"
+echo "container fixture data" > "$CONTAINER/dummy.txt"
+
+mkdir -p "$SAVED_STATE"
+echo "saved state fixture data" > "$SAVED_STATE/dummy.txt"
+
+mkdir -p "$GROUP_CONTAINER"
+echo "group container fixture data" > "$GROUP_CONTAINER/dummy.txt"
+
 cat > "$LAUNCH_AGENT" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -70,4 +87,4 @@ cat > "$LAUNCH_AGENT" <<PLIST
 PLIST
 
 echo "Built fixture app at $APP_ROOT/UninstallFixture.app"
-echo "Fixture evidence under ~/Library/{Application Support,Caches,LaunchAgents}/$BUNDLE_ID*"
+echo "Fixture evidence under ~/Library/{Application Support,Caches,Containers,Saved Application State,Group Containers,LaunchAgents}/$BUNDLE_ID*"
