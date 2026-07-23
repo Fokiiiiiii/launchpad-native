@@ -218,6 +218,23 @@ distribution model, not a "not yet implemented" gap — `RemovalExecutor`
 already refuses those items with an explanation, and the Uninstall tab
 directs the user to remove them manually.
 
+Phase 9 (Performance, Accessibility, Reliability) and Phase 10 (OSS
+Repository Finalization) are implemented, scoped to what's actually
+verifiable without Instruments' GUI or an interactive VoiceOver session
+(this project's sandboxed dev environment has no Accessibility permission
+to drive either). Full measurements, methodology, and honestly-disclosed
+gaps are in [`Diagnostics/Performance.md`](Diagnostics/Performance.md) —
+warm-open latency, search-filter timing at the 1,000-app target size, idle
+CPU, leak analysis, and a live crash-recovery test all passed their targets.
+Accessibility labels were added to every previously-unlabeled interactive
+control; Reduce Transparency/Increase Contrast were already handled and
+Reduce Motion has nothing to gate (no custom animation exists). For Phase
+10: confirmed (via `find` + `git log`) that no prohibited distribution
+artifact exists anywhere in this repo or its history, added
+`CONTRIBUTING.md`/`SECURITY.md`/issue templates, and verified a genuinely
+fresh `git clone` into a scratch directory builds and passes all 80 tests
+with no dependency on this machine's existing build cache.
+
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
   but not actually implemented in `GridViewController`/`PagedGridLayout` yet
