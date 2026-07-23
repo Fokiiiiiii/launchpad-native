@@ -53,3 +53,15 @@ private func record(_ name: String, id: String, backgroundOnly: Bool = false) ->
     let result = LauncherFiltering.filter(records, query: "XCO")
     #expect(result.count == 1)
 }
+
+/// Phase 9 performance target: filtering must stay well under one frame
+/// (16ms at 60Hz) on MainActor even at catalog sizes around 1,000 apps —
+/// the real search field calls this synchronously while the user types.
+@Test @MainActor func filteringOneThousandRecordsStaysUnderOneFrame() {
+    let records = (0..<1000).map { record("App \($0)", id: "app\($0)") }
+    let start = DispatchTime.now()
+    let result = LauncherFiltering.filter(records, query: "App 5")
+    let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+    #expect(!result.isEmpty)
+    #expect(ms < 16, "filtering 1,000 records took \(ms)ms, expected < 16ms")
+}

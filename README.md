@@ -276,6 +276,21 @@ public replacement (e.g. `NSGlassEffectView`, `SMAppService`,
 `OSSystemExtensionRequest`, `NSWindow.CollectionBehavior`), the public API is
 used instead.
 
+## Third-Party Dependencies
+
+None. This project has no Swift Package Manager dependencies (no
+`Package.resolved` — check `Package.swift`'s `dependencies:` to confirm)
+and links only Apple's own system frameworks (AppKit, SwiftUI,
+ServiceManagement, ScreenCaptureKit, SystemExtensions, Security, etc.) plus
+the system's `libsqlite3` for the legacy Launchpad DB import. There is no
+third-party license list because there is nothing to list.
+
+## Contributing & Security
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for build/test expectations and
+this project's rules around private-API changes, and
+[`SECURITY.md`](SECURITY.md) for how to report a vulnerability.
+
 ## License
 
 MIT — see `LICENSE`.

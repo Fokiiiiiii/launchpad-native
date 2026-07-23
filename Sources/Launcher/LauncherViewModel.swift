@@ -54,7 +54,13 @@ public final class LauncherViewModel {
 
     private func refilter() {
         let previouslySelectedID = selectedRecord?.id
+        // Phase 9 measurement: this whole call happens synchronously on
+        // MainActor while the user is typing — target is <16ms even at
+        // catalog sizes around 1,000 apps (one frame at 60Hz).
+        let start = DispatchTime.now()
         filteredRecords = LauncherFiltering.filter(allRecords, query: query)
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+        DiagnosticsLog.launcher.info("search filter: \(self.allRecords.count, privacy: .public) records took \(ms, privacy: .public)ms")
         if let previouslySelectedID, let newIndex = filteredRecords.firstIndex(where: { $0.id == previouslySelectedID }) {
             selectedIndex = newIndex
         } else {

@@ -29,6 +29,7 @@ public struct SettingsView: View {
             VStack(alignment: .leading) {
                 Text("Icon size: \(Int(viewModel.iconSize))pt")
                 Slider(value: $viewModel.iconSize, in: 48...160)
+                    .accessibilityLabel("Icon size")
             }
             Picker("Layout", selection: $viewModel.layoutMode) {
                 Text("Paged").tag(LayoutMode.paged)
@@ -58,6 +59,7 @@ public struct SettingsView: View {
                 VStack(alignment: .leading) {
                     Text("Sensitivity")
                     Slider(value: $viewModel.multitouchSensitivity, in: 0.3...0.8)
+                        .accessibilityLabel("Gesture sensitivity")
                 }
             }
 

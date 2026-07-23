@@ -64,6 +64,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchField.drawsBackground = false
         searchField.focusRingType = .none
         searchField.delegate = self
+        searchField.setAccessibilityLabel("Search applications")
 
         settingsButton.translatesAutoresizingMaskIntoConstraints = false
         settingsButton.bezelStyle = .circular

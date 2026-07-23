@@ -39,8 +39,8 @@ final class PageControlView: NSView {
         dotStack.orientation = .horizontal
         dotStack.spacing = 8
 
-        configureChevron(previousButton, symbol: "chevron.left", action: #selector(previousTapped))
-        configureChevron(nextButton, symbol: "chevron.right", action: #selector(nextTapped))
+        configureChevron(previousButton, symbol: "chevron.left", label: "Previous Page", action: #selector(previousTapped))
+        configureChevron(nextButton, symbol: "chevron.right", label: "Next Page", action: #selector(nextTapped))
 
         addSubview(previousButton)
         addSubview(dotStack)
@@ -65,15 +65,16 @@ final class PageControlView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unavailable") }
 
-    private func configureChevron(_ button: NSButton, symbol: String, action: Selector) {
+    private func configureChevron(_ button: NSButton, symbol: String, label: String, action: Selector) {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.bezelStyle = .circular
         button.isBordered = false
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: symbol)?
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
             .withSymbolConfiguration(.init(pointSize: 16, weight: .semibold))
         button.contentTintColor = .labelColor
         button.target = self
         button.action = action
+        button.setAccessibilityLabel(label)
     }
 
     private func rebuildDots() {
@@ -86,6 +87,7 @@ final class PageControlView: NSView {
             button.wantsLayer = true
             button.layer?.cornerRadius = 3
             button.setContentHuggingPriority(.required, for: .horizontal)
+            button.setAccessibilityLabel("Page \(index + 1)")
             NSLayoutConstraint.activate([
                 button.widthAnchor.constraint(equalToConstant: 6),
                 button.heightAnchor.constraint(equalToConstant: 6)

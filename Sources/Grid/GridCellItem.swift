@@ -72,9 +72,15 @@ final class GridCellItem: NSCollectionViewItem {
     func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, displayName: String? = nil) {
         applyIconSize(iconSize)
         iconView.image = icon
-        label.stringValue = displayName ?? record.displayName
+        let name = displayName ?? record.displayName
+        label.stringValue = name
         countBadge.isHidden = true
         applySelection(isSelected)
+        // VoiceOver reads the cell as one element ("AppName"), matching how
+        // Finder/Launchpad read an app icon — not icon and label separately.
+        view.setAccessibilityElement(true)
+        view.setAccessibilityRole(.button)
+        view.setAccessibilityLabel(name)
     }
 
     func configureAsFolder(name: String, itemCount: Int, isSelected: Bool, iconSize: Double) {
@@ -89,6 +95,9 @@ final class GridCellItem: NSCollectionViewItem {
         countBadge.layer?.cornerRadius = 9
         countBadge.layer?.backgroundColor = NSColor.systemRed.cgColor
         applySelection(isSelected)
+        view.setAccessibilityElement(true)
+        view.setAccessibilityRole(.button)
+        view.setAccessibilityLabel("\(name) folder, \(itemCount) items")
     }
 
     private func applySelection(_ isSelected: Bool) {

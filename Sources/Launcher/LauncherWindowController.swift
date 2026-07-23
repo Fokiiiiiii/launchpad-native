@@ -106,6 +106,10 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     }
 
     public func show() {
+        // Phase 9 measurement: "warm trigger to first frame" — the window
+        // already exists on every call after the first, so this number
+        // reflects steady-state (warm) open latency, not cold construction.
+        let start = DispatchTime.now()
         let screen = Self.targetScreen()
         let window = window ?? makeWindow(on: screen)
         window.setFrame(screen.frame, display: true)
@@ -117,6 +121,8 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // key (closing itself) within ~50ms of every trigger firing.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+        DiagnosticsLog.launcher.info("warm open: trigger to makeKeyAndOrderFront took \(ms, privacy: .public)ms")
     }
 
     public func hide() {

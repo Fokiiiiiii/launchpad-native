@@ -28,8 +28,8 @@ final class WindowBrowserCellItem: NSCollectionViewItem {
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.maximumNumberOfLines = 1
 
-        configureButton(closeButton, symbol: "xmark.circle.fill", action: #selector(closeTapped))
-        configureButton(minimizeButton, symbol: "minus.circle.fill", action: #selector(minimizeTapped))
+        configureButton(closeButton, symbol: "xmark.circle.fill", label: "Close Window", action: #selector(closeTapped))
+        configureButton(minimizeButton, symbol: "minus.circle.fill", label: "Minimize Window", action: #selector(minimizeTapped))
 
         container.addSubview(thumbnailView)
         container.addSubview(titleLabel)
@@ -59,19 +59,23 @@ final class WindowBrowserCellItem: NSCollectionViewItem {
         view = container
     }
 
-    private func configureButton(_ button: NSButton, symbol: String, action: Selector) {
+    private func configureButton(_ button: NSButton, symbol: String, label: String, action: Selector) {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.isBordered = false
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: symbol)?
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
             .withSymbolConfiguration(.init(pointSize: 14, weight: .regular))
         button.contentTintColor = .secondaryLabelColor
         button.target = self
         button.action = action
+        button.setAccessibilityLabel(label)
     }
 
     func configure(title: String, thumbnail: NSImage?) {
-        titleLabel.stringValue = title.isEmpty ? "Untitled Window" : title
+        let resolvedTitle = title.isEmpty ? "Untitled Window" : title
+        titleLabel.stringValue = resolvedTitle
         thumbnailView.image = thumbnail
+        view.setAccessibilityElement(true)
+        view.setAccessibilityLabel(resolvedTitle)
     }
 
     @objc private func closeTapped() { onClose?() }

@@ -152,9 +152,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private func jumpToPage(_ index: Int) {
         guard model.pages.indices.contains(index), index != currentPage || collectionView.numberOfSections == 0 else { return }
+        let start = DispatchTime.now()
         currentPage = index
         pageControl.currentPage = index
         collectionView.reloadData()
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+        DiagnosticsLog.launcher.info("page transition: reloadData took \(ms, privacy: .public)ms")
     }
 
     private func jumpToAdjacentPage(delta: Int) {
@@ -175,6 +178,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     private func openFolder(_ folderID: FolderID, anchorIndexPath: IndexPath) {
+        let start = DispatchTime.now()
         guard let folder = model.folders[folderID],
               let cell = collectionView.item(at: anchorIndexPath) else { return }
 
@@ -201,6 +205,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         openFolderPopover = popover
         _ = folder // silence unused-in-release warnings if folder gains more fields later
         popover.show(relativeTo: cell.view.bounds, of: cell.view, preferredEdge: .maxY)
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+        DiagnosticsLog.launcher.info("folder transition: build+show popover took \(ms, privacy: .public)ms")
     }
 
     private func showWindows(for record: ApplicationRecord, anchorIndexPath: IndexPath) {
