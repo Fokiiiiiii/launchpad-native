@@ -12,12 +12,23 @@ import Persistence
 public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private var window: LauncherWindow?
     private var viewController: LauncherViewController?
+    private var rootContentView: NSView?
     private let viewModel = LauncherViewModel()
     private let gridModel: GridModel
     private let iconCache: IconCache
     private var hasAttemptedLegacyImport = false
     private var onOpenSettings: (() -> Void)?
     private var onRequestUninstall: ((String) -> Void)?
+    /// Incremented on every show()/hide() call — a hide() animation's
+    /// completion handler checks this before calling `orderOut`, so an
+    /// interrupting show() (same-trigger reopen mid-close-animation, or the
+    /// pinch/spread gestures firing in quick succession) never has its
+    /// window yanked back out from under it by a stale completion. This is
+    /// the AppKit-reachable version of apple-design's interruptibility rule
+    /// — there's no true velocity-carrying spring re-target across a
+    /// reversal here, but a reversal can never leave the window in the
+    /// wrong final state either.
+    private var animationGeneration = 0
 
     /// Reads the window's own real visibility rather than a separately
     /// tracked bool — a manually-maintained `isVisible` flag drifted out of
@@ -112,8 +123,27 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         let start = DispatchTime.now()
         let screen = Self.targetScreen()
         let window = window ?? makeWindow(on: screen)
+        let wasVisible = window.isVisible
         window.setFrame(screen.frame, display: true)
         viewController?.resetSearch()
+
+        animationGeneration += 1
+
+        // Only play the entrance animation on an actual hidden->shown
+        // transition — real Launchpad semantics route the pinch gesture
+        // straight to show() (not toggle()), so a redundant pinch while
+        // already open must just refocus, not replay the animation.
+        if !wasVisible {
+            rootContentView?.layer?.removeAllAnimations()
+            window.alphaValue = 0
+            if let layer = rootContentView?.layer {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                layer.transform = CATransform3DMakeScale(0.96, 0.96, 1)
+                CATransaction.commit()
+            }
+        }
+
         // Activate the app *before* asking the panel to become key — doing
         // it in the other order (as a prior version did) let `activate`
         // reassign key status right after `makeKeyAndOrderFront`, which
@@ -121,12 +151,94 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // key (closing itself) within ~50ms of every trigger firing.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+
+        if !wasVisible {
+            animateIn(window: window)
+        }
+
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.launcher.info("warm open: trigger to makeKeyAndOrderFront took \(ms, privacy: .public)ms")
     }
 
     public func hide() {
-        window?.orderOut(nil)
+        guard let window, window.isVisible else { return }
+        animationGeneration += 1
+        let generation = animationGeneration
+
+        if let layer = rootContentView?.layer {
+            layer.removeAllAnimations()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.transform = CATransform3DMakeScale(0.97, 0.97, 1)
+            CATransaction.commit()
+            layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.0, to: 0.97, damping: 1.0, response: 0.2), forKey: "scaleOut")
+        }
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.16
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            window.animator().alphaValue = 0
+        }, completionHandler: { [weak self, weak window] in
+            // `NSAnimationContext`'s completion handler type isn't
+            // `@MainActor`-annotated in the SDK, so the compiler can't see
+            // that this always actually runs on the main thread — hop
+            // explicitly rather than accessing main-actor state from a
+            // nominally-Sendable closure.
+            Task { @MainActor in
+                guard let self, self.animationGeneration == generation, let window else { return }
+                window.orderOut(nil)
+                // Reset to the resting state so the next show() starts clean —
+                // this only runs if nothing interrupted this close (the
+                // generation check above), so it never clobbers a reopen.
+                window.alphaValue = 1
+                if let layer = self.rootContentView?.layer {
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    layer.transform = CATransform3DIdentity
+                    CATransaction.commit()
+                }
+            }
+        })
+    }
+
+    /// Fade + a subtle critically-damped "settle" scale — apple-design's
+    /// guidance is to reserve bounce/overshoot for gesture-driven momentum,
+    /// and this entrance isn't carrying any (it's the same animation
+    /// whether triggered by a hotkey, hot corner, or gesture), so damping
+    /// stays at 1.0 rather than adding a spring bounce that isn't earned by
+    /// an actual flick.
+    private func animateIn(window: NSWindow) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.22
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().alphaValue = 1
+        }
+        if let layer = rootContentView?.layer {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.transform = CATransform3DIdentity
+            CATransaction.commit()
+            layer.add(Self.springAnimation(keyPath: "transform.scale", from: 0.96, to: 1.0, damping: 1.0, response: 0.3), forKey: "scaleIn")
+        }
+    }
+
+    /// Builds a `CASpringAnimation` from Apple's damping-ratio/response
+    /// parameters (see apple-design's spring guidance) rather than the raw
+    /// mass/stiffness/damping triplet `CASpringAnimation` actually takes —
+    /// `mass` is fixed at 1, so `stiffness = (2π/response)²` and
+    /// `damping = 2 × dampingRatio × sqrt(stiffness)`.
+    private static func springAnimation(keyPath: String, from: CGFloat, to: CGFloat, damping dampingRatio: CGFloat, response: CGFloat) -> CASpringAnimation {
+        let animation = CASpringAnimation(keyPath: keyPath)
+        let angularFrequency = 2 * .pi / response
+        let stiffness = angularFrequency * angularFrequency
+        animation.mass = 1
+        animation.stiffness = stiffness
+        animation.damping = 2 * dampingRatio * sqrt(stiffness)
+        animation.initialVelocity = 0
+        animation.fromValue = from
+        animation.toValue = to
+        animation.duration = animation.settlingDuration
+        return animation
     }
 
     private func makeWindow(on screen: NSScreen) -> LauncherWindow {
@@ -155,6 +267,10 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // applies to every button/cell. See GlassBackgroundView.swift's doc
         // comment for why (NSGlassEffectView.contentView broke mouse events).
         let root = NSView(frame: screen.frame)
+        // Backs the open/close scale animation — animated on `root`'s own
+        // layer, a level above `background`/`content.view`, so scaling
+        // never fights with either of their own layer usage.
+        root.wantsLayer = true
         let background = GlassBackgroundFactory.makeBackground(cornerRadius: 0)
         background.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(background)
@@ -180,6 +296,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
 
         self.window = window
         self.viewController = content
+        self.rootContentView = root
         startOutsideClickMonitorIfNeeded()
         return window
     }

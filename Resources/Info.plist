@@ -8,6 +8,8 @@
     <string>LaunchpadNative</string>
     <key>CFBundleIdentifier</key>
     <string>com.launchpadnative.app</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>AppHost</string>
     <key>CFBundlePackageType</key>

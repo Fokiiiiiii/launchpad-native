@@ -27,9 +27,12 @@ swift build --package-path "$ROOT" --scratch-path "$SCRATCH" -c "$CONFIG"
 BIN="$SCRATCH/$CONFIG/AppHost"
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$BIN" "$APP/Contents/MacOS/AppHost"
+if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
+    cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+fi
 
 echo "Built $APP"
 
@@ -37,4 +40,8 @@ pkill -f "Applications/LaunchpadNative.app/Contents/MacOS/AppHost" 2>/dev/null |
 mkdir -p "$HOME/Applications"
 rm -rf "$INSTALLED_APP"
 cp -R "$APP" "$INSTALLED_APP"
+# Finder/the Dock/LaunchServices cache icons aggressively by (bundle path,
+# mtime); touching the bundle after install nudges LaunchServices to notice
+# the icon changed rather than keep showing a stale generic-app glyph.
+touch "$INSTALLED_APP"
 echo "Installed $INSTALLED_APP — open it from Finder/Spotlight, or run: open \"$INSTALLED_APP\""

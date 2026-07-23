@@ -150,12 +150,40 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.reloadItems(at: [indexPath])
     }
 
+    /// The data-source-swap approach itself (as opposed to scroll-position
+    /// paging) is unchanged and stays that way — see this file's top-level
+    /// doc comment for why the earlier scroll-based version never reliably
+    /// worked live. This only adds a visual transition *around* the swap: a
+    /// quick crossfade, so a page change reads as a transition instead of a
+    /// hard cut, without touching the reload logic that's already proven
+    /// reliable.
     private func jumpToPage(_ index: Int) {
         guard model.pages.indices.contains(index), index != currentPage || collectionView.numberOfSections == 0 else { return }
         let start = DispatchTime.now()
-        currentPage = index
         pageControl.currentPage = index
-        collectionView.reloadData()
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.09
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            collectionView.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            // Same reasoning as `LauncherWindowController.hide()`:
+            // `NSAnimationContext`'s completion handler isn't `@MainActor`-
+            // annotated in the SDK, so hop explicitly rather than touching
+            // main-actor-isolated view state from a nominally-Sendable
+            // closure.
+            Task { @MainActor in
+                guard let self else { return }
+                self.currentPage = index
+                self.collectionView.reloadData()
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.14
+                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    self.collectionView.animator().alphaValue = 1
+                }
+            }
+        })
+
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.launcher.info("page transition: reloadData took \(ms, privacy: .public)ms")
     }

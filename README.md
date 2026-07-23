@@ -267,6 +267,31 @@ commit fully to macOS's own Liquid Glass material. Fixes:
   hit-testing pattern or a much larger restructuring for a benefit (shared
   blur sampling) that isn't visually load-bearing at this UI's scale.
 
+**Custom app icon and open/close/page animations** are implemented,
+following a request for both. The real Apple Launchpad icon doesn't exist
+anywhere to use — modern macOS folded Launchpad into the Dock and doesn't
+ship it as a separate `.app` with its own icon asset (confirmed by
+inspecting `Dock.app`'s `Assets.car` directly on this machine), and this
+project won't bundle Apple's copyrighted artwork into a publicly-cloned
+OSS repo regardless. `Tools/IconGenerator` draws an original squircle
+gradient tile with a 3x3 grid of colorful rounded squares (the "apps in a
+grid" concept, no Apple pixels involved) at every required resolution via
+Core Graphics, assembled into `Resources/AppIcon.icns` with `iconutil`;
+`Scripts/build-app.sh` now copies it into the bundle and touches the
+installed copy so LaunchServices picks up the new icon. Opening/closing
+the launcher now fades and scales in/out (`NSAnimationContext` + a
+`CASpringAnimation` built from apple-design's damping-ratio/response
+parameters, critically damped since neither transition carries gesture
+momentum to earn a bounce) instead of appearing/disappearing instantly,
+and is interruption-safe (a generation counter means a same-trigger reopen
+mid-close-animation can't have the window yanked back out from under it
+by a stale completion handler). Page changes now crossfade around the
+existing (deliberately-kept) data-source-swap reload instead of hard-
+cutting. Live-verified: the release build launches with the new icon in
+`~/Applications`, shows the animated entrance with no errors in
+`log stream`, and a screenshot confirms the glass search
+capsule/settings chip/page-control pill all render correctly together.
+
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
   but not actually implemented in `GridViewController`/`PagedGridLayout` yet

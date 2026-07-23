@@ -85,6 +85,10 @@ let package = Package(
             path: "Tools/PrivilegedHelperProbe"
         ),
         .executableTarget(
+            name: "IconGenerator",
+            path: "Tools/IconGenerator"
+        ),
+        .executableTarget(
             name: "PrivilegedHelperRegistrationProbe",
             path: "Tools/PrivilegedHelperRegistrationProbe"
         ),
