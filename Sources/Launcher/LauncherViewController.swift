@@ -306,8 +306,12 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         item.configure(record: record, icon: NSWorkspace.shared.icon(for: .applicationBundle), isSelected: isSelected)
 
         let cache = iconCache
+        let expectedKey = record.iconCacheKey
         Task { @MainActor in
             let icon = await cache.icon(for: record)
+            // Search results reload on every keystroke, recycling cells —
+            // same cell-reuse guard as Grid.GridCellItem, see its comment.
+            guard item.currentRequestKey == expectedKey else { return }
             item.configure(record: record, icon: icon, isSelected: isSelected)
         }
         return item

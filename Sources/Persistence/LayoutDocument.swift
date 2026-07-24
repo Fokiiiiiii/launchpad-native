@@ -101,22 +101,32 @@ public struct TriggerSettings: Codable, Sendable, Hashable {
     public var multitouchGestureEnabled: Bool
     public var multitouchSensitivity: Double
 
-    // multitouchGestureEnabled defaults to true, and hotCornersEnabled
-    // defaults with bottomRight on: real hands-on testing found that
-    // relying on the 4-finger gesture alone left no *discoverable* trigger
-    // for a first-time user — nobody finds a pinch gesture by accident the
-    // way they'd notice a screen corner. bottomRight matches classic
-    // Launchpad's own hot-corner convention. F4 needs Input Monitoring
-    // permission this app bundle doesn't request yet; the hotkey needs a
-    // key code, which the Settings UI now lets you record (see
-    // HotkeyRecorderView) but still defaults to off until you set one.
+    // hotCornersEnabled defaults with bottomRight on: real hands-on testing
+    // found that relying on the 4-finger gesture alone left no
+    // *discoverable* trigger for a first-time user — nobody finds a pinch
+    // gesture by accident the way they'd notice a screen corner.
+    // bottomRight matches classic Launchpad's own hot-corner convention.
+    // F4 needs Input Monitoring permission this app bundle doesn't request
+    // yet; the hotkey needs a key code, which the Settings UI now lets you
+    // record (see HotkeyRecorderView) but still defaults to off until you
+    // set one.
+    //
+    // multitouchGestureEnabled defaults to false (flipped back from an
+    // earlier true default): real hands-on testing found the 4-finger
+    // pinch/spread collides with macOS's own default trackpad gesture
+    // assignment for Launchpad/Mission Control — both this app's raw
+    // MultitouchSupport listener and the system's own handler react to the
+    // same physical gesture at once, which read as "barely usable," not a
+    // bug in the gesture-matching logic itself. The hot corner (above) and
+    // a user-recordable hotkey are enough of a discoverable default trigger
+    // set without needing a gesture that fights the OS for the same input.
     public static let `default` = TriggerSettings(
         hotkeyEnabled: false,
         hotkeyKeyCode: nil,
         hotkeyModifierFlags: 0,
         hotCornersEnabled: ["bottomRight": true],
         f4Enabled: true,
-        multitouchGestureEnabled: true,
+        multitouchGestureEnabled: false,
         multitouchSensitivity: 0.5
     )
 }

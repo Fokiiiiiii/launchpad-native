@@ -292,6 +292,28 @@ cutting. Live-verified: the release build launches with the new icon in
 `log stream`, and a screenshot confirms the glass search
 capsule/settings chip/page-control pill all render correctly together.
 
+**Cell-reuse icon corruption and gesture/system conflict fixes** are
+implemented, from user-reported bugs: changing the icon size and then
+searching made some app icons vanish or show the wrong app. Root cause:
+`NSCollectionView` recycles cell instances across `reloadData()` calls
+(which fire on every grid-settings Apply and every search keystroke), and
+`GridCellItem`/`AppIconCollectionViewItem`'s async icon fetch had no check
+that the cell still represented the same record by the time the fetch
+completed — a fast burst of reloads could apply a stale (or blank) icon
+onto a cell already recycled for a different app. Fixed with a cell-reuse
+guard (`currentRequestKey`, set synchronously on configure, checked before
+an async fetch's result is applied) across all three call sites
+(`GridViewController`, `FolderContentsViewController`,
+`LauncherViewController`). Separately, the 4-finger pinch/spread gesture
+(previously default-on) was confirmed to collide with macOS's own default
+trackpad gesture assignment for Launchpad/Mission Control — both this
+app's raw `MultitouchSupport` listener and the system's own handler react
+to the same physical gesture, which read as "barely usable." Default
+flipped back to off (the bottom-right hot corner and a user-recordable
+hotkey are enough of a discoverable default without it), and the Settings
+Triggers tab now shows a standing warning with a button to open Trackpad
+system settings whenever the gesture is turned on.
+
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
   but not actually implemented in `GridViewController`/`PagedGridLayout` yet

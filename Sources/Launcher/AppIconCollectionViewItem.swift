@@ -6,6 +6,10 @@ import Catalog
 /// architecture. The custom paged/vertical grid layout itself is Phase 4 —
 /// this item view is what that layout will arrange.
 final class AppIconCollectionViewItem: NSCollectionViewItem {
+    /// Same cell-reuse guard as `Grid.GridCellItem` — see its doc comment.
+    /// Search results reload on every keystroke, which recycles cells even
+    /// more aggressively than the main grid does.
+    private(set) var currentRequestKey: String?
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
 
@@ -38,6 +42,7 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     }
 
     func configure(record: ApplicationRecord, icon: NSImage, isSelected: Bool) {
+        currentRequestKey = record.iconCacheKey
         iconView.image = icon
         label.stringValue = record.displayName
         view.layer?.cornerRadius = 12

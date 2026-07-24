@@ -5,6 +5,16 @@ import Catalog
 /// name + item count). Both are visually similar on purpose — apps and
 /// folders live in the same grid and should read as siblings.
 final class GridCellItem: NSCollectionViewItem {
+    /// Identifies which record this cell is *currently* configured for.
+    /// `NSCollectionView` recycles cell instances across `reloadData()`
+    /// calls — a burst of reloads (grid-settings Apply, each search
+    /// keystroke) can recycle a cell to a new record before an in-flight
+    /// async icon fetch for the *previous* record finishes. Callers set
+    /// this synchronously in `configureAsApp`/`configureAsFolder`, then
+    /// compare it against the key they captured before the fetch — if it
+    /// no longer matches, the cell's been reused and the stale icon must
+    /// be dropped, not applied over whatever now belongs there.
+    private(set) var currentRequestKey: String?
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let countBadge = NSTextField(labelWithString: "")
@@ -70,6 +80,7 @@ final class GridCellItem: NSCollectionViewItem {
     }
 
     func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, displayName: String? = nil) {
+        currentRequestKey = record.iconCacheKey
         applyIconSize(iconSize)
         iconView.image = icon
         let name = displayName ?? record.displayName
@@ -84,6 +95,10 @@ final class GridCellItem: NSCollectionViewItem {
     }
 
     func configureAsFolder(name: String, itemCount: Int, isSelected: Bool, iconSize: Double) {
+        // No async icon fetch for folders, but clear this so a pending
+        // app-icon task from this cell's *previous* life (if it was an app
+        // cell before being recycled into a folder cell) can never match.
+        currentRequestKey = nil
         applyIconSize(iconSize)
         let symbolConfig = NSImage.SymbolConfiguration(pointSize: iconSize * 0.42, weight: .regular)
         iconView.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: name)?

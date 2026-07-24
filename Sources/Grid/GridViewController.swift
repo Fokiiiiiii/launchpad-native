@@ -352,8 +352,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             let cache = iconCache
             let displayName = model.displayName(for: record)
             cell.configureAsApp(record: record, icon: NSImage(), isSelected: isSelected, iconSize: iconSize, displayName: displayName)
+            let expectedKey = record.iconCacheKey
             Task { @MainActor in
                 let icon = await cache.icon(for: record)
+                // The cell may have been recycled for a different record by
+                // the time this fetch completes (reloadData() fires on
+                // every grid-settings Apply and search keystroke) — only
+                // apply if it's still showing what we started fetching for.
+                guard cell.currentRequestKey == expectedKey else { return }
                 cell.configureAsApp(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize, displayName: displayName)
             }
         case .folder(let folderID):

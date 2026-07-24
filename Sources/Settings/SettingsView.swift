@@ -69,6 +69,9 @@ public struct SettingsView: View {
                     Slider(value: $viewModel.multitouchSensitivity, in: 0.3...0.8)
                         .accessibilityLabel("Gesture sensitivity")
                 }
+                if viewModel.multitouchEnabled {
+                    gestureConflictHint
+                }
             }
 
             Button("Apply") { viewModel.saveTriggerSettings() }
@@ -90,6 +93,31 @@ public struct SettingsView: View {
                     .font(.caption)
                 Button("Open Privacy Settings…") {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .font(.caption)
+            }
+        }
+        .padding(.leading, 16)
+    }
+
+    /// Shown whenever the gesture is turned on — not conditioned on
+    /// detecting an actual conflict (there's no public API to introspect
+    /// the system's own trackpad gesture assignments), since real hands-on
+    /// testing found this gesture collides with macOS's own default
+    /// Launchpad/Mission Control trackpad assignment often enough that a
+    /// standing warning is more honest than a one-time toggle.
+    private var gestureConflictHint: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("This gesture may conflict with macOS's own Launchpad/Mission Control trackpad gestures. If it feels unreliable, open Trackpad settings and disable the matching system gesture.")
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Open Trackpad Settings…") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.trackpad") {
                         NSWorkspace.shared.open(url)
                     }
                 }

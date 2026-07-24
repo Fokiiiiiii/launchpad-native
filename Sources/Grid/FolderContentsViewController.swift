@@ -117,8 +117,11 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
             // user's main-grid icon size setting.
             let folderIconSize = 56.0
             cell.configureAsApp(record: record, icon: NSImage(), isSelected: false, iconSize: folderIconSize)
+            let expectedKey = record.iconCacheKey
             Task { @MainActor in
                 let icon = await cache.icon(for: record)
+                // Same cell-reuse guard as GridViewController — see its comment.
+                guard cell.currentRequestKey == expectedKey else { return }
                 cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: folderIconSize)
             }
         }
