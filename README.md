@@ -716,6 +716,73 @@ can't be verified without a real mouse — build/test/log evidence only;
 click-to-launch, drag-to-reorder, and drag-onto-another-icon-to-fold
 all need the user's own hands-on check.
 
+**Drag-tracked continuous page paging, reattempted a third time with a
+structurally hardened design** (after explicit, informed user consent to
+retry, given the two prior real-hardware failures above). This version
+is deliberately different in the ways that matter for safety, not just in
+degree:
+- **The live `collectionView` is never hidden.** The previous failure's
+  worst-case was a stuck-hidden grid with no way back; this version
+  applies `layer.transform.translation.x` directly to the live
+  `collectionView` itself (always visible, always the real content) and
+  only snapshots the *one* adjacent page in the drag's direction (not
+  both neighbors) as a single `NSImageView` tracking alongside it. Worst
+  case if the snapshot fails to render: the neighbor image is missing,
+  but the current page stays fully visible and interactive throughout.
+- **A 15pt minimum-distance gate** on `GridCollectionView`'s `.changed`
+  handler before `onSwipeBegan` fires at all — incidental trackpad
+  contact/jitter no longer engages the drag-paging state machine.
+- **A hard, fixed 1-second fallback timer**, independent of the spring's
+  `settlingDuration` math, force-resets the drag state regardless of what
+  the spring animation does — guarded by a generation counter so it can't
+  double-fire against a normal completion.
+- **State resets on every `show()`** and on background click
+  (`resetDragStateIfNeeded()`), so even if something were left stuck, the
+  very next time the launcher opens it starts clean.
+Verified via the same debug-hook technique as before,
+`LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG=commit|abort`, exercising both the
+commit and the abort/spring-back paths through the real production code
+against `log stream`: `debugSimulatePageDrag: starting at page 0,
+commit=true` → `ended at page 1 (was 0)`, and `commit=false` → `ended at
+page 0 (was 0)` — both with the process confirmed still running
+afterward (`ps aux`, no crash). Full suite: 84/84 pass. **Disclosed
+limitation, unchanged from every prior attempt in this area**: a debug
+hook proves the state machine transitions correctly and doesn't crash —
+it cannot prove the gesture *feels* right under a real finger. This is
+the third attempt in an area with two prior real-world failures; the
+user's own hands-on trackpad test is still required before considering
+this closed.
+
+**Settings window redesign: grouped sections and SF Symbols throughout**,
+scoped down from a much larger LaunchOS-feature-parity request (the user
+chose to redesign only the Settings UI visually this round, deferring the
+larger feature checklist). Every tab (`Grid`/`Triggers`/`Sources`/
+`Hidden`) now uses `Form { Section { ... } header: { Label(...) } }
+.formStyle(.grouped)`, matching System Settings' own grouped-card
+convention instead of a flat stack of controls. The grid layout-mode
+picker uses `.pickerStyle(.radioGroup).horizontalRadioGroupLayout()` for
+classic macOS-style radio buttons. Hot corner toggles get directional SF
+Symbols (`arrow.up.left.square` etc.), the uninstall tab's ownership
+badges are colored `Label`s (green `checkmark.circle.fill` = owned,
+yellow `exclamationmark.triangle.fill` = shared risk, red
+`questionmark.circle.fill` = unknown), Save/Trash buttons get icon
+`Label`s (Trash uses `role: .destructive`), and a new
+`ContentUnavailableLikeHint` centers the tab's empty states. The window
+grew from 480×420 to 620×560 to fit the grouped layout comfortably. No
+logic changed — `confirmAndExecuteRemoval()`, `classificationBadge(_:)`,
+`addFolder()`, and all `L10n` string bindings are untouched; this is a
+visual pass only. Full suite: 84/84 pass, release build succeeds.
+**Disclosed limitation**: this session cannot reliably screenshot the
+SwiftUI Settings window, so the actual visual result (does it look good,
+does it match the reference design) needs the user's own look. Explicitly
+deferred to a future round, per the user's own scoping choice: the
+General/Interface/Apps/Advanced/About tab split, a Sort By dropdown, a
+Reorganize button, a Hide Dock toggle, wallpaper/glass background-type
+switching, a blur-wallpaper toggle, and the dozens of other items in the
+full feature-parity spec (pinyin search, multiple sort modes,
+backup/restore, multi-display strategies, a small-window mode, icon style
+switching, etc.).
+
 **Known limitations:**
 - Only English and Japanese are localized so far. macOS's other ~38
   supported languages are intentionally deferred to a later round —
