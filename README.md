@@ -1033,6 +1033,23 @@ scheduled data-swap. `swift test`: 91/91. Verified via
 This tunes feel, which still needs the user's own confirmation — the log
 evidence proves the mechanics, not that the new timing feels right.
 
+Follow-up user report: "next page's content isn't visible during the
+drag." Added a pixel-sampling diagnostic to `renderPageSnapshot`
+(`GridViewController.swift`) and confirmed via `debugSimulatePageDrag` +
+`log stream` that the neighbor-page snapshot bitmap was 100% transparent
+(0/64 sampled points) even though `cacheDisplay(in:to:)` reported success.
+Root cause: the offscreen `NSCollectionView` used to render a page's
+snapshot was never inserted into a real `NSWindow`; `cacheDisplay`'s
+display path only produces real pixels for layer-backed views (every
+`GridCellItem` sets `wantsLayer = true`) that have actually been drawn by
+a window at least once. Fixed by briefly hosting the offscreen collection
+view in a permanent, never-visually-shown `NSWindow` (parked far outside
+any display's coordinate space) just long enough to render, then ordering
+it back out. Re-verified with the same diagnostic: sampled points are now
+non-transparent (5/64, 12/64 across two pages — low counts are expected,
+since most of a page is empty grid space between icons, not missing
+content). `swift test`: 91/91.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
