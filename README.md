@@ -863,6 +863,25 @@ this session — `screencapture` only captured this session's own
 foreground window rather than the launched app — so those two specifically
 still need the user's own look.
 
+**Two real bugs from hands-on testing of the round above, fixed the same
+day.** (1) Onboarding and the launcher could appear at once — the default-
+on bottom-right hot corner got armed before the onboarding-vs-launcher
+decision, so it could fire mid-launch (if the cursor already happened to
+be near that corner) and pop the launcher open right on top of the
+wizard. Trigger registration is now deferred until onboarding is actually
+skipped or finished. (2) Horizontal swipe paging stopped working — the
+vertical-axis addition could lock onto a transient vertical blip (real
+fingers landing on a trackpad almost always produce one before a
+horizontal sweep takes over) and then silently discard the rest of that
+gesture's clearly-horizontal motion. Horizontal now gets unconditional
+engage priority, identical to its pre-vertical-support behavior; vertical
+only claims a gesture when it clearly dominates (>2x horizontal's
+magnitude). `swift test`: 87/87. The axis-lock fix specifically can't be
+exercised by the existing debug hook (it drives `GridViewController`'s
+drag methods directly, bypassing `GridCollectionView`'s event-driven state
+machine) — verified by code review only; needs the user's own trackpad
+test to confirm.
+
 **Known limitations:**
 - Only English and Japanese are localized so far. macOS's other ~38
   supported languages are intentionally deferred to a later round —
