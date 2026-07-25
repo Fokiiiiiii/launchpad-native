@@ -31,14 +31,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self?.applyCurrentTriggerSettings() ?? false
     }
     /// Shown instead of the launcher on the very first cold start (see
-    /// `OnboardingState`) — everything else in `applicationDidFinishLaunching`
-    /// (trigger registration, catalog scan, FSEvents watching) still runs
-    /// unconditionally in the background, so by the time onboarding
-    /// finishes and the launcher actually appears, the catalog is already
-    /// populated exactly like the existing "scan finishes after show()"
-    /// pattern.
+    /// `OnboardingState`) — the catalog scan/FSEvents watching still run
+    /// unconditionally in the background regardless, so by the time
+    /// onboarding finishes and the launcher actually appears, the catalog
+    /// is already populated exactly like the existing "scan finishes after
+    /// show()" pattern. Trigger registration, however, is deliberately
+    /// deferred until onboarding actually finishes (see `shouldShowOnboarding`
+    /// below) — arming it earlier caused a real, confirmed bug: the
+    /// default-on bottom-right hot corner could fire mid-launch if the
+    /// cursor already happened to be there, popping the launcher open at
+    /// the same time as this wizard.
     private lazy var onboardingWindowController = OnboardingWindowController { [weak self] in
-        self?.launcherWindowController.show()
+        guard let self else { return }
+        applyCurrentTriggerSettings()
+        launcherWindowController.show()
+    }
+
+    /// `LAUNCHPAD_DEBUG_FORCE_ONBOARDING=1` forces the wizard for
+    /// verification without needing to actually clear `OnboardingState`.
+    /// Shared by the initial-launch branch and `applicationShouldHandleReopen`
+    /// so both agree on whether onboarding still owns this launch.
+    private var shouldShowOnboarding: Bool {
+        ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_FORCE_ONBOARDING"] == "1" || !OnboardingState.hasCompleted()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -66,8 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // fills in real records moments later exactly the same way the
             // live FSEvents watcher's incremental updates already do, so
             // there's nothing new to reconcile.
-            applyCurrentTriggerSettings()
-
+            //
             // Double-clicking the app in Finder is the single most natural
             // thing a first-time user tries — and until now it did nothing
             // visible at all (LSUIElement means no Dock icon, no window
@@ -76,11 +89,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // away, instead of silently backgrounding while waiting on a
             // full catalog scan with no discoverable way to know it worked.
             // On a genuine first run, the onboarding wizard takes this slot
-            // instead — it shows the launcher itself once finished.
-            let forceOnboarding = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_FORCE_ONBOARDING"] == "1"
-            if forceOnboarding || !OnboardingState.hasCompleted() {
+            // instead, and triggers stay unarmed until it finishes (see
+            // `onboardingWindowController`'s doc comment) — otherwise the
+            // default-on hot corner could pop the launcher open right on
+            // top of the wizard.
+            if shouldShowOnboarding {
                 onboardingWindowController.show()
             } else {
+                applyCurrentTriggerSettings()
                 launcherWindowController.show()
             }
 
@@ -184,7 +200,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// dismiss it that way was a real reported inconsistency — clicking the
     /// icon again should behave the same as every other trigger.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        launcherWindowController.toggle()
+        if shouldShowOnboarding {
+            onboardingWindowController.show()
+        } else {
+            launcherWindowController.toggle()
+        }
         return true
     }
 }

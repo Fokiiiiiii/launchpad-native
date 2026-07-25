@@ -46,14 +46,27 @@ final class GridCollectionView: NSCollectionView {
     /// Which axis a 2-finger swipe engaged on — horizontal was the only
     /// supported axis originally; vertical was added so up/down swipes page
     /// too (a real user ask: the grid has no vertical scroll content of its
-    /// own to preserve, so this axis was free to repurpose). Both axes
-    /// share one cumulative-delta pipeline: whichever axis's cumulative
-    /// distance first clears `minimumEngageDistance` wins for the rest of
-    /// the gesture, and its raw accumulated delta (not a converted/flipped
-    /// value) feeds the same `onSwipeChanged`/`onSwipeEnded` callbacks
-    /// `GridViewController` already treats as axis-agnostic. Direction
-    /// mapping (which way is "next page") is an unverified judgment call
-    /// for the vertical axis specifically — see the README disclosure.
+    /// own to preserve, so this axis was free to repurpose).
+    ///
+    /// History: a first version picked "whichever axis's cumulative
+    /// magnitude is currently larger" as the engage candidate, re-evaluated
+    /// every sample. That was a real regression for the *existing*,
+    /// long-working horizontal gesture: real fingers landing on a trackpad
+    /// almost always produce a brief vertical blip before a horizontal
+    /// swipe's sweep takes over, and if that blip alone crossed
+    /// `minimumEngageDistance` in Y before X caught up, the axis locked as
+    /// vertical for the *entire* gesture — the subsequent, clearly
+    /// intentional horizontal motion kept accumulating into
+    /// `swipeAccumulatedDeltaX` but was never read again, since the locked
+    /// axis was already vertical. Confirmed via user report ("horizontal
+    /// swipe stopped paging"). Fixed by giving horizontal unconditional
+    /// priority — it engages the instant its own cumulative distance
+    /// clears the threshold, exactly like before vertical support existed,
+    /// with zero dependency on the concurrent Y value. Vertical only
+    /// engages when it clearly dominates (more than double X's magnitude)
+    /// *and* horizontal hasn't already claimed the gesture — a conservative
+    /// bar specifically so it can't misfire on the same kind of incidental
+    /// blip in the other direction.
     private enum SwipeAxis { case horizontal, vertical }
 
     private var swipeAccumulatedDeltaX: CGFloat = 0
@@ -142,16 +155,21 @@ final class GridCollectionView: NSCollectionView {
             swipeAccumulatedDeltaX += event.scrollingDeltaX
             swipeAccumulatedDeltaY += event.scrollingDeltaY
             if !swipeEngaged {
-                // Whichever axis's *cumulative* magnitude is currently
-                // larger is the candidate — re-evaluated every sample until
-                // engagement, so a gesture that starts diagonal but
-                // straightens out still resolves to the axis it settles on.
-                let candidateAxis: SwipeAxis = abs(swipeAccumulatedDeltaX) >= abs(swipeAccumulatedDeltaY) ? .horizontal : .vertical
-                let candidateMagnitude = candidateAxis == .horizontal ? abs(swipeAccumulatedDeltaX) : abs(swipeAccumulatedDeltaY)
-                guard candidateMagnitude >= minimumEngageDistance else { break }
-                swipeAxis = candidateAxis
-                swipeEngaged = true
-                onSwipeBegan?()
+                // Horizontal gets unconditional priority (see the type's
+                // doc comment) — engages the moment its own cumulative
+                // distance clears the threshold, regardless of Y. Vertical
+                // only gets a look-in when horizontal hasn't already
+                // crossed and clearly dominates.
+                if abs(swipeAccumulatedDeltaX) >= minimumEngageDistance {
+                    swipeAxis = .horizontal
+                    swipeEngaged = true
+                    onSwipeBegan?()
+                } else if abs(swipeAccumulatedDeltaY) >= minimumEngageDistance
+                    && abs(swipeAccumulatedDeltaY) > abs(swipeAccumulatedDeltaX) * 2 {
+                    swipeAxis = .vertical
+                    swipeEngaged = true
+                    onSwipeBegan?()
+                }
             }
             guard let axis = swipeAxis else { break }
             let effectiveDelta = axis == .horizontal ? swipeAccumulatedDeltaX : swipeAccumulatedDeltaY
