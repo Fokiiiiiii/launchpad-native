@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 
 /// Borderless overlay panel, not a normal document window: it can become key
 /// (so the search field can type) but never main, joins every Space, and
@@ -19,7 +20,16 @@ final class LauncherWindow: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        level = .popUpMenu
+        // `.popUpMenu` (101) sat well above the real Dock's window level
+        // (`CGWindowLevelForKey(.dockWindow)`, ~20), so the launcher always
+        // painted over the Dock, hiding it — unlike real Launchpad, where
+        // the Dock stays visible on top. `CGWindowLevelForKey` and
+        // `.dockWindow` are public CoreGraphics API (Quartz Window
+        // Services), not a private one — placing this window one level
+        // below the Dock's own keeps the same "floats above regular/
+        // fullscreen app windows" behavior while letting the real Dock
+        // render in front, matching the user's explicit ask.
+        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) - 1)
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
         isMovable = false
         hidesOnDeactivate = false

@@ -462,10 +462,36 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         return cell
     }
 
+    /// Set the instant a native drag session actually begins (see the
+    /// jiggle-mode delegate methods below) so a pending launch can check it
+    /// before firing — see `didSelectItemsAt`'s doc comment for why this is
+    /// necessary at all.
+    private var dragSessionStartedDuringCurrentGesture = false
+
     public func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
         // Single click launches/opens — matches real Launchpad convention.
+        // BUT: NSCollectionView fires selection (and this delegate method)
+        // synchronously on mouseDown, *before* it's known whether the
+        // gesture continues into a drag — so launching here unconditionally
+        // fired on every attempt to drag-reorder an icon or drag one icon
+        // onto another to create a folder, before the drag was ever
+        // recognized (confirmed via real user report: dragging opened the
+        // app instead of moving it, and folder creation — already
+        // implemented and unit-tested in `createOrJoinFolder` below — was
+        // effectively unusable over real mouse input for exactly this
+        // reason). Deferring the launch decision to the next run-loop tick
+        // (not a fixed timer) works because `collectionView(_:draggingSession:
+        // willBeginAt:forItemsAt:)` fires synchronously within this same
+        // mouseDown-tracking call if a drag *does* get recognized — by the
+        // time this `async` block runs (after that whole tracking loop has
+        // returned), `dragSessionStartedDuringCurrentGesture` already
+        // reflects whether this gesture turned into a drag.
         guard let indexPath = indexPaths.first else { return }
-        activate(at: indexPath)
+        dragSessionStartedDuringCurrentGesture = false
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.dragSessionStartedDuringCurrentGesture else { return }
+            self.activate(at: indexPath)
+        }
     }
 
     // MARK: Drag and drop (within the current page only — see type doc comment)
@@ -545,6 +571,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         willBeginAt screenPoint: NSPoint,
         forItemsAt indexPaths: Set<IndexPath>
     ) {
+        dragSessionStartedDuringCurrentGesture = true
         startWobble()
     }
 

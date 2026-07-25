@@ -678,6 +678,44 @@ keep passing, and a new
 `updatingSettingsWithoutCapacityChangePreservesNonCompactArrangement`
 test covers the previously-broken case. Full suite: 84/84 pass.
 
+**The real macOS Dock now stays visible over the launcher, like real
+Launchpad.** `LauncherWindow`'s window level was `.popUpMenu` (101), well
+above the real Dock's own window level
+(`CGWindowLevelForKey(.dockWindow)`, a public CoreGraphics/Quartz Window
+Services API, ~20), so the launcher always painted over the Dock,
+hiding it — unlike real Launchpad, where the Dock stays on top. Now set
+to `CGWindowLevelForKey(.dockWindow) - 1`: one level below the Dock, so
+it renders in front, while the launcher still floats above regular and
+fullscreen app windows (both far below the Dock's level). No change to
+`collectionBehavior` — Space-joining and fullscreen participation are
+independent of window level.
+
+**Fixed a real, previously-undetected bug: dragging a grid icon (to
+reorder, or onto another to create a folder) launched the app instead**,
+confirmed via user report — and once fixed, this also makes the
+already-implemented, already-unit-tested folder feature
+(`GridModel.createOrJoinFolder`) actually usable over real mouse input
+for the first time; it was never a missing feature, just blocked by this
+bug. Root cause: `NSCollectionView` fires `didSelectItemsAt` synchronously
+on mouse-down, before it's known whether the gesture continues into a
+drag, and `GridViewController` launched immediately on every selection —
+so starting to drag an icon always launched it first, regardless of
+whether a reorder/folder-create drag followed. This went undetected all
+session because unit tests only exercise `GridModel`'s data logic
+(`moveItem`/`createOrJoinFolder`), not real AppKit mouse-event
+disambiguation, and this session has no Accessibility permission to
+test actual mouse drags interactively. Fixed by deferring the launch
+decision to the next run-loop tick (`DispatchQueue.main.async`, not a
+fixed timer) and checking a flag set by
+`collectionView(_:draggingSession:willBeginAt:forItemsAt:)` (already
+present for jiggle mode) — both fire synchronously within the same
+mouseDown-tracking call, so by the time the deferred check runs, it
+correctly reflects whether this gesture became a drag. Full suite:
+84/84 pass. Disclosed limitation: this is exactly the class of bug that
+can't be verified without a real mouse — build/test/log evidence only;
+click-to-launch, drag-to-reorder, and drag-onto-another-icon-to-fold
+all need the user's own hands-on check.
+
 **Known limitations:**
 - Only English and Japanese are localized so far. macOS's other ~38
   supported languages are intentionally deferred to a later round —
