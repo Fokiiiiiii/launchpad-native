@@ -1297,6 +1297,34 @@ anywhere in the app while one is still active (idempotent against the
 normal path — whichever fires first wins, the other sees `nil` and
 no-ops). `swift test`: 95/95. Release build launches cleanly.
 
+**4th round, root-caused via Plan Mode + an Explore-agent static review**:
+user report — "nothing improved, the grabbed icon doesn't move from its
+spot, surrounding icons shift oddly, and for some reason only the top
+item opens." This codebase has a consistent internal convention: every
+place that continuously mutates a CALayer transform either sets
+`wantsLayer = true` on that exact view first, or pairs the write with an
+active `CAAnimation`. Two places broke from it: (1) `GridViewController.view`
+(the plain root `NSView`) was never `wantsLayer = true` — the floating
+drag-preview's only active animation was the one-shot "lift" spring
+(auto-removed after ~0.2s), after which `updateItemDrag`'s per-frame bare
+`transform.translation` writes had nothing keeping that layer under
+active compositing, so the model value updated but stopped reliably
+repainting ("doesn't move from its spot"); (2) `endItemDrag`/`revertItemDrag`
+called `stopWobble()` (which removes cells' one continuous animation)
+*before* `resetItemTransform`'s own bare identity-transform write — that
+reset could likewise fail to repaint, leaving cells visually stuck at
+their last offset even though hit-testing (always computed from
+untransformed layout) had already reverted to normal, explaining "only
+the top one opens." Fixed: `root.wantsLayer = true` in `loadView()`;
+reordered both methods to reset transforms before `stopWobble()`, not
+after. Also added `GridCellItem.prepareForReuse()` (previously absent)
+as defense-in-depth against recycled cells inheriting stale transform/
+animation/hidden state. Verified against a backed-up/restored real
+`layout.json`; also caught, live, a *second* genuine concurrent user
+drag whose `mouseUp` was again lost via the normal path but correctly
+recovered by the global-monitor safety net from the prior round —
+confirming that fix holds up under repeated real use. `swift test`: 95/95.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
