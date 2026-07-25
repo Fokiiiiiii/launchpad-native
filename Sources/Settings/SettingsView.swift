@@ -19,66 +19,124 @@ public struct SettingsView: View {
             hiddenTab.tabItem { Label(L10n.tabHidden, systemImage: "eye.slash") }.tag(SettingsTab.hidden)
             uninstallTab.tabItem { Label(L10n.tabUninstall, systemImage: "trash") }.tag(SettingsTab.uninstall)
         }
-        .padding()
-        .frame(width: 480, height: 420)
+        .frame(width: 620, height: 560)
     }
+
+    // MARK: Grid
 
     private var gridTab: some View {
         Form {
-            Stepper(L10n.columnsLabel(viewModel.columns), value: $viewModel.columns, in: 3...12)
-            Stepper(L10n.rowsLabel(viewModel.rows), value: $viewModel.rows, in: 2...8)
-            VStack(alignment: .leading) {
-                Text(L10n.iconSizeLabel(Int(viewModel.iconSize)))
-                Slider(value: $viewModel.iconSize, in: 48...160)
-                    .accessibilityLabel(L10n.iconSizeAccessibilityLabel)
+            Section {
+                Picker(L10n.layoutPickerLabel, selection: $viewModel.layoutMode) {
+                    Text(L10n.layoutModePaged).tag(LayoutMode.paged)
+                    Text(L10n.layoutModeVerticalScroll).tag(LayoutMode.verticalScroll)
+                }
+                .pickerStyle(.radioGroup)
+                .horizontalRadioGroupLayout()
+            } header: {
+                Label(L10n.layoutPickerLabel, systemImage: "rectangle.3.group")
             }
-            Picker(L10n.layoutPickerLabel, selection: $viewModel.layoutMode) {
-                Text(L10n.layoutModePaged).tag(LayoutMode.paged)
-                Text(L10n.layoutModeVerticalScroll).tag(LayoutMode.verticalScroll)
+
+            Section {
+                Stepper(value: $viewModel.columns, in: 3...12) {
+                    Label(L10n.columnsLabel(viewModel.columns), systemImage: "rectangle.grid.2x2")
+                }
+                Stepper(value: $viewModel.rows, in: 2...8) {
+                    Label(L10n.rowsLabel(viewModel.rows), systemImage: "rectangle.grid.1x2")
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(L10n.iconSizeLabel(Int(viewModel.iconSize)), systemImage: "app.badge")
+                    Slider(value: $viewModel.iconSize, in: 48...160)
+                        .accessibilityLabel(L10n.iconSizeAccessibilityLabel)
+                }
+            } header: {
+                Label(L10n.tabGrid, systemImage: "square.grid.3x3.fill")
             }
-            .pickerStyle(.segmented)
-            Button(L10n.applyButton) { viewModel.saveGridSettings() }
-                .keyboardShortcut(.defaultAction)
+
+            Section {
+                HStack {
+                    Spacer()
+                    Button {
+                        viewModel.saveGridSettings()
+                    } label: {
+                        Label(L10n.applyButton, systemImage: "checkmark.circle.fill")
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
         }
-        .padding()
+        .formStyle(.grouped)
     }
+
+    // MARK: Triggers
 
     private var triggersTab: some View {
         Form {
-            Toggle(L10n.f4ToggleLabel, isOn: $viewModel.f4Enabled)
-            if viewModel.f4Enabled && !viewModel.f4Active {
-                f4PermissionHint
+            Section {
+                Toggle(isOn: $viewModel.f4Enabled) {
+                    Label(L10n.f4ToggleLabel, systemImage: "keyboard")
+                }
+                if viewModel.f4Enabled && !viewModel.f4Active {
+                    f4PermissionHint
+                }
+
+                Toggle(isOn: $viewModel.hotkeyEnabled) {
+                    Label(L10n.globalHotkeyToggleLabel, systemImage: "command")
+                }
+                if viewModel.hotkeyEnabled {
+                    HotkeyRecorderView(keyCode: $viewModel.hotkeyKeyCode, carbonModifiers: $viewModel.hotkeyCarbonModifiers)
+                        .frame(width: 160, height: 24)
+                }
+            } header: {
+                Label(L10n.tabTriggers, systemImage: "hand.tap.fill")
             }
 
-            Toggle(L10n.globalHotkeyToggleLabel, isOn: $viewModel.hotkeyEnabled)
-            if viewModel.hotkeyEnabled {
-                HotkeyRecorderView(keyCode: $viewModel.hotkeyKeyCode, carbonModifiers: $viewModel.hotkeyCarbonModifiers)
-                    .frame(width: 160, height: 24)
+            Section {
+                Toggle(isOn: $viewModel.hotCornerTopLeft) {
+                    Label(L10n.hotCornerTopLeft, systemImage: "arrow.up.left.square")
+                }
+                Toggle(isOn: $viewModel.hotCornerTopRight) {
+                    Label(L10n.hotCornerTopRight, systemImage: "arrow.up.right.square")
+                }
+                Toggle(isOn: $viewModel.hotCornerBottomLeft) {
+                    Label(L10n.hotCornerBottomLeft, systemImage: "arrow.down.left.square")
+                }
+                Toggle(isOn: $viewModel.hotCornerBottomRight) {
+                    Label(L10n.hotCornerBottomRight, systemImage: "arrow.down.right.square")
+                }
+            } header: {
+                Label(L10n.hotCornersGroupTitle, systemImage: "rectangle.inset.filled")
             }
 
-            GroupBox(L10n.hotCornersGroupTitle) {
-                Toggle(L10n.hotCornerTopLeft, isOn: $viewModel.hotCornerTopLeft)
-                Toggle(L10n.hotCornerTopRight, isOn: $viewModel.hotCornerTopRight)
-                Toggle(L10n.hotCornerBottomLeft, isOn: $viewModel.hotCornerBottomLeft)
-                Toggle(L10n.hotCornerBottomRight, isOn: $viewModel.hotCornerBottomRight)
-            }
-
-            GroupBox(L10n.trackpadGestureGroupTitle) {
-                Toggle(L10n.multitouchToggleLabel, isOn: $viewModel.multitouchEnabled)
-                VStack(alignment: .leading) {
-                    Text(L10n.sensitivityLabel)
+            Section {
+                Toggle(isOn: $viewModel.multitouchEnabled) {
+                    Label(L10n.multitouchToggleLabel, systemImage: "hand.draw")
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(L10n.sensitivityLabel, systemImage: "dial.medium")
                     Slider(value: $viewModel.multitouchSensitivity, in: 0.3...0.8)
                         .accessibilityLabel(L10n.gestureSensitivityAccessibilityLabel)
                 }
                 if viewModel.multitouchEnabled {
                     gestureConflictHint
                 }
+            } header: {
+                Label(L10n.trackpadGestureGroupTitle, systemImage: "hand.point.up.braille")
             }
 
-            Button(L10n.applyButton) { viewModel.saveTriggerSettings() }
-                .keyboardShortcut(.defaultAction)
+            Section {
+                HStack {
+                    Spacer()
+                    Button {
+                        viewModel.saveTriggerSettings()
+                    } label: {
+                        Label(L10n.applyButton, systemImage: "checkmark.circle.fill")
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
         }
-        .padding()
+        .formStyle(.grouped)
     }
 
     /// Shown only when F4 is turned on but genuinely isn't working — this
@@ -100,7 +158,6 @@ public struct SettingsView: View {
                 .font(.caption)
             }
         }
-        .padding(.leading, 16)
     }
 
     /// Shown whenever the gesture is turned on — not conditioned on
@@ -125,47 +182,78 @@ public struct SettingsView: View {
                 .font(.caption)
             }
         }
-        .padding(.leading, 16)
     }
+
+    // MARK: Sources
 
     private var sourcesTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            List {
-                ForEach(viewModel.customSources, id: \.id) { source in
-                    HStack {
-                        Text(source.rootPath)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer()
-                        Button(L10n.removeButton) { viewModel.removeCustomSource(id: source.id) }
+        Form {
+            Section {
+                if viewModel.customSources.isEmpty {
+                    Text(L10n.chooseFolderPanelMessage)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.customSources, id: \.id) { source in
+                        HStack {
+                            Label {
+                                Text(source.rootPath)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            } icon: {
+                                Image(systemName: "folder.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button(role: .destructive) {
+                                viewModel.removeCustomSource(id: source.id)
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                        }
                     }
                 }
+                HStack {
+                    Spacer()
+                    Button {
+                        addFolder()
+                    } label: {
+                        Label(L10n.addFolderButton, systemImage: "plus.circle.fill")
+                    }
+                }
+            } header: {
+                Label(L10n.tabSources, systemImage: "folder.fill.badge.plus")
             }
-            Button(L10n.addFolderButton) { addFolder() }
         }
-        .padding()
+        .formStyle(.grouped)
     }
 
+    // MARK: Hidden
+
     private var hiddenTab: some View {
-        VStack(alignment: .leading) {
-            if viewModel.hiddenApps.isEmpty {
-                Text(L10n.noHiddenAppsMessage)
-                    .foregroundStyle(.secondary)
-                    .padding()
-            } else {
-                List {
+        Form {
+            Section {
+                if viewModel.hiddenApps.isEmpty {
+                    Text(L10n.noHiddenAppsMessage)
+                        .foregroundStyle(.secondary)
+                } else {
                     ForEach(viewModel.hiddenApps, id: \.identifier) { entry in
                         HStack {
-                            Text(entry.name)
+                            Label(entry.name, systemImage: "eye.slash.fill")
                             Spacer()
                             Button(L10n.unhideButton) { viewModel.unhide(entry.identifier) }
                         }
                     }
                 }
+            } header: {
+                Label(L10n.tabHidden, systemImage: "eye.slash.circle.fill")
             }
         }
-        .padding()
+        .formStyle(.grouped)
     }
+
+    // MARK: Uninstall
 
     private var uninstallTab: some View {
         HStack(spacing: 0) {
@@ -176,23 +264,26 @@ public struct SettingsView: View {
                     viewModel.selectUninstallCandidate(newValue)
                 }
             )) { record in
-                Text(viewModel.displayName(for: record)).tag(record.id)
+                Label(viewModel.displayName(for: record), systemImage: "app.fill")
+                    .tag(record.id)
             }
-            .frame(width: 200)
+            .frame(width: 220)
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 if viewModel.selectedUninstallRecordID == nil {
-                    Text(L10n.uninstallSelectPrompt)
-                        .foregroundStyle(.secondary)
-                        .padding()
+                    ContentUnavailableLikeHint(
+                        systemImage: "trash.circle",
+                        text: L10n.uninstallSelectPrompt
+                    )
                 } else if viewModel.uninstallPlan.isEmpty {
-                    Text(L10n.uninstallNoItemsFound)
-                        .foregroundStyle(.secondary)
-                        .padding()
+                    ContentUnavailableLikeHint(
+                        systemImage: "checkmark.circle",
+                        text: L10n.uninstallNoItemsFound
+                    )
                 } else {
-                    Text(L10n.uninstallPreviewNotice)
+                    Label(L10n.uninstallPreviewNotice, systemImage: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     List(Array(viewModel.uninstallPlan.enumerated()), id: \.offset) { _, item in
@@ -203,23 +294,55 @@ public struct SettingsView: View {
                                 .truncationMode(.middle)
                             Spacer()
                             if item.requiresPrivilegedHelper {
-                                Text(L10n.needsHelperLabel)
+                                Label(L10n.needsHelperLabel, systemImage: "lock.fill")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
                         }
                     }
                     HStack {
-                        Button(L10n.saveDryRunReportButton) { viewModel.saveUninstallDryRunReport() }
+                        Button {
+                            viewModel.saveUninstallDryRunReport()
+                        } label: {
+                            Label(L10n.saveDryRunReportButton, systemImage: "doc.text")
+                        }
                         Spacer()
-                        Button(L10n.moveToTrashButton) { confirmAndExecuteRemoval() }
-                            .disabled(viewModel.itemsEligibleForRemoval.isEmpty)
+                        Button(role: .destructive) {
+                            confirmAndExecuteRemoval()
+                        } label: {
+                            Label(L10n.moveToTrashButton, systemImage: "trash")
+                        }
+                        .disabled(viewModel.itemsEligibleForRemoval.isEmpty)
                     }
-                    Text(L10n.uninstallSafetyNotice)
+                    Label(L10n.uninstallSafetyNotice, systemImage: "shield.checkerboard")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// A small `Label` + secondary text placeholder, matching the tone of
+    /// SwiftUI's `ContentUnavailableView` (not used directly since this
+    /// project's minimum, macOS 15, technically supports it, but a plain
+    /// `Label` keeps this file's styling consistent with the rest of the
+    /// hand-built rows above rather than mixing two different idioms).
+    private struct ContentUnavailableLikeHint: View {
+        let systemImage: String
+        let text: String
+
+        var body: some View {
+            VStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 32))
+                    .foregroundStyle(.secondary)
+                Text(text)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()
         }
     }
@@ -246,16 +369,17 @@ public struct SettingsView: View {
     }
 
     private func classificationBadge(_ classification: OwnershipClassification) -> some View {
-        let (label, color): (String, Color) = switch classification {
-        case .owned: (L10n.classificationOwned, .green)
-        case .sharedRisk: (L10n.classificationSharedRisk, .yellow)
-        case .unknown: (L10n.classificationUnknown, .red)
+        let (label, symbol, color): (String, String, Color) = switch classification {
+        case .owned: (L10n.classificationOwned, "checkmark.circle.fill", .green)
+        case .sharedRisk: (L10n.classificationSharedRisk, "exclamationmark.triangle.fill", .yellow)
+        case .unknown: (L10n.classificationUnknown, "questionmark.circle.fill", .red)
         }
-        return Text(label)
+        return Label(label, systemImage: symbol)
             .font(.caption2)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(color.opacity(0.25))
+            .foregroundStyle(color)
+            .background(color.opacity(0.18))
             .clipShape(Capsule())
     }
 

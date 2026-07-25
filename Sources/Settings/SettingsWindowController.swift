@@ -40,7 +40,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentViewController: hosting)
         window.title = "LaunchpadNative Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 480, height: 460))
+        window.setContentSize(NSSize(width: 620, height: 560))
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
