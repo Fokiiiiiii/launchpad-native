@@ -143,7 +143,12 @@ final class GridCellItem: NSCollectionViewItem {
     /// large, mostly-empty colored rectangle around a small icon —
     /// confirmed by the user as visibly broken-looking ("これどう見ても
     /// おかしい") via a debug-driven screenshot of a real search result.
-    private func applySelection(_ isSelected: Bool) {
+    /// Not `private`: `GridViewController`'s item-drag press feedback calls
+    /// this directly on the already-existing cell view, instead of going
+    /// through `collectionView.reloadItems(at:)` — see that call site's doc
+    /// comment for why `reloadItems` specifically must not be called from
+    /// inside a mouseDown handler for the same item.
+    func applySelection(_ isSelected: Bool) {
         highlightView.layer?.cornerRadius = 12
         highlightView.layer?.backgroundColor = isSelected
             ? NSColor.white.withAlphaComponent(0.14).cgColor

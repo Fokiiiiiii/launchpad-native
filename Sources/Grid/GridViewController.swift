@@ -1130,8 +1130,22 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private func handleItemMouseDown(indexPath: IndexPath, event: NSEvent) {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(indexPath.item) else { return }
+        // Real, confirmed regression: this used to call
+        // `collectionView.reloadItems(at: [indexPath])` right here to make
+        // the selection highlight visible. Reloading the very cell that's
+        // mid-mouseDown reconfigures (and can recreate) its view instance —
+        // AppKit routes subsequent mouseDragged/mouseUp to whichever view
+        // received mouseDown, so swapping that view out from under an
+        // in-flight press broke every drag entirely (dragging did nothing
+        // at all). Toggling the highlight directly on the already-existing
+        // live cell views avoids touching the view identity mid-gesture.
+        let previousSelection = collectionView.selectionIndexPaths
         collectionView.selectionIndexPaths = [indexPath]
-        collectionView.reloadItems(at: [indexPath])
+        for previous in previousSelection where previous != indexPath {
+            (collectionView.item(at: previous) as? GridCellItem)?.applySelection(false)
+        }
+        (collectionView.item(at: indexPath) as? GridCellItem)?.applySelection(true)
+
         let point = collectionView.convert(event.locationInWindow, from: nil)
         pendingItemPress = (indexPath, point)
         applyPressFeedback(at: indexPath, pressed: true)
