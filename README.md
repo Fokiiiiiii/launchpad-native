@@ -908,6 +908,66 @@ test to confirm.
   `-c release`. Benchmark with `swift build -c release` before drawing any
   performance conclusion.
 
+**Round 7: Codable backward-compatibility retrofit, defensive folder-prune
+hardening, and a Settings tab reorg with three new controls.**
+
+`GridSettings`, `TriggerSettings`, and `LayoutDocument` now use hand-written
+`Codable` (`decodeIfPresent(...) ?? default`) instead of the synthesized
+conformance. A synthesized decoder requires every key present in the JSON,
+so adding any new field to these types — which this project has now done
+more than once (`multitouchFingerCount`, and this round's `sortMode`/
+`hideDockWhileLauncherOpen`) — would fail to decode any real `layout.json`
+saved before that field existed, falling through past the last-known-good
+backup (usually the same old schema) straight to an empty document. All
+three types decode new fields leniently now. A new regression test strips
+the newer keys from a real encoded document and confirms it still decodes
+with sensible defaults. Separately, `GridModel.pruneMissingItems` now
+dissolves any folder left empty after pruning (reusing the same
+`isFolderEmpty`/`dissolveFolder` pair the user-driven removal path already
+used) and logs exactly what gets pruned, via a new `DiagnosticsLog.grid`
+category.
+
+**Correction, in the interest of accuracy**: this hardening was originally
+prompted by what looked like a real, confirmed data-loss bug — two legacy-
+imported folders ("その他"/"ゲーム") appearing to have 0 items in a live
+`layout.json`, despite project history recording them as populated at
+import time. Re-checking with the actual `Folder` schema
+(`pages: [[LayoutItem]]`) found this was a misreading: the original
+diagnostic script checked a JSON key ("items") that doesn't exist in this
+schema — the real key is "pages" — so it read as empty regardless of the
+file's actual contents. The folders' real contents were intact the whole
+time; there was no data loss. The two hardening changes above are kept
+regardless (defensively correct, no synthesized-`Decodable` risk either
+way), but the specific bug they were originally framed as fixing didn't
+exist.
+
+Settings is reorganized from six tabs (Grid/Triggers/Sources/Hidden/
+Uninstall/About) into five (General/Screen/Apps/Advanced/About), mirroring
+a reference app's structure per a user-confirmed mapping: General holds
+the old Triggers content, Screen holds the old Grid content plus the three
+new controls below, Apps holds the old Hidden content, and Advanced merges
+Sources and Uninstall behind a segmented sub-tab picker (their view shapes
+— a plain form vs. a master-detail list — are different enough that
+merging them into one layout wasn't worth it). New Screen-tab controls:
+**Sort By** (Custom/Name only — Date Added/Last Used aren't implemented,
+since neither piece of metadata is tracked anywhere yet, and a menu entry
+for them would be decorative rather than functional), applying immediately
+and sorting within each existing page/folder-page without changing page
+boundaries or folder membership; **Reorganize**, a manual one-shot button
+calling the grid's existing (now-public) tight-repack logic under the
+current, unchanged settings; and **Hide Dock**, which switches which side
+of the Dock's own window level the launcher sits on (default keeps Phase
+14's "Dock renders on top" behavior; enabling it reverts to painting over
+the Dock like before Phase 14) — this never touches the real Dock process
+or macOS's own autohide setting, only this app's own window level.
+
+`swift test`: 91/91 passing. Release build verified via `log stream`:
+normal launch and the Advanced/Uninstall debug-hook path both show no
+errors, process stays alive. The tab reorg's actual visual result still
+needs the user's own look — this session's `screencapture` consistently
+captures its own foreground window rather than the launched app, a
+limitation reconfirmed (not worked around) this round.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
