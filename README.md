@@ -1225,6 +1225,32 @@ folder created), and cancellation via a background click confirmed to
 revert cleanly with no crash. `swift test`: 95/95. The drag's actual feel
 still needs the user's own hands-on retest.
 
+**Follow-up, real regression found from user report** ("dragging does
+nothing, folders can't even be opened, nothing works"): `handleItemMouseDown`
+called `collectionView.reloadItems(at: [indexPath])` to make the selection
+highlight visible — but reloading the exact cell that just received
+`mouseDown` reconfigures (and can recreate) that view instance. AppKit
+routes subsequent `mouseDragged`/`mouseUp` to whichever view received
+`mouseDown`, so swapping that view's identity out from under an
+in-flight press broke every gesture starting with a click, not just
+drags. Fixed by not reloading at all — `GridCellItem.applySelection(_:)`
+is now internal so the highlight can be toggled directly on the
+already-existing live cell views instead.
+
+Also discovered (and cleaned up) while investigating: the debug hook
+above had been mutating the real, persisted `layout.json` on every test
+run (it calls the actual `model.moveItem`/`createOrJoinFolder` +
+`model.save()`), leaving two "New Folder" 2-item test artifacts behind
+— very likely what read as "folder looks terrible." Confirmed via the
+real file and cleaned up with a temporary, one-off debug hook (already
+removed from source) using the existing `removeFromFolder` path; the
+two real folders were untouched throughout. Lesson for future testing
+in this area: back up/restore `layout.json` around any debug run that
+exercises real model mutations.
+
+`swift test`: 95/95. Still needs the user's own hands-on retest — a
+real click or drag can't be performed from this session.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
