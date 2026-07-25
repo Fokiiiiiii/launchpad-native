@@ -1272,6 +1272,31 @@ the fixed original frame instead. Verified via
 of the real `layout.json` (restored immediately after, per the lesson
 above): clean commit, no crash. `swift test`: 95/95.
 
+**The actual "nothing works" cause, found via a genuine (not simulated)
+drag**: rewrote `LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG` to dispatch through
+`window.sendEvent` instead of calling `handleItemMouseDown/Dragged/Up`
+directly (three prior fix attempts in this area all missed real
+regressions because direct calls bypass `GridCollectionView`'s own
+`mouseDown`/`mouseDragged`/`mouseUp` overrides entirely — the same blind
+spot the search-field bug exposed), and added logging to those overrides
+themselves. This version, running live during verification, captured a
+*genuine* concurrent trackpad drag: `mouseDown` -> `mouseDragged` ->
+`beginItemDrag` all fired correctly, but `mouseUp` never arrived — no
+further log line for 12+ seconds. AppKit's per-window "keep routing to
+whoever got mouseDown" continuity isn't guaranteed if the pointer leaves
+the window's bounds, key status changes mid-drag, or other real-world
+cases a synthetic in-bounds test never hits. With no way out,
+`activeItemDrag` stayed non-nil forever — the floating icon stuck on
+screen, every subsequent press treated as still mid-drag, freezing all
+grid interaction. Unlike the page-drag machinery (which has had a hard
+fallback timer since an early round for exactly this failure class), the
+item-drag system had no safety net at all. Added two, mirroring that
+established pattern: a 15s fallback timer that force-reverts, and a
+*global* mouseUp monitor that commits the drag if a real mouseUp lands
+anywhere in the app while one is still active (idempotent against the
+normal path — whichever fires first wins, the other sees `nil` and
+no-ops). `swift test`: 95/95. Release build launches cleanly.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
