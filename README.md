@@ -1080,6 +1080,45 @@ already-edited new tests included. Always use the `--scratch-path`
 invocation from Build & Run when verifying changes, not just when running
 `Scripts/build-app.sh`.
 
+User report: "search bar can't be clicked, focused, or typed into,"
+plus a brief flicker on page moves, plus a request to be able to group
+apps. Root-caused the search-field issue with a new debug hook
+(`LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM`) rather than guessing:
+`LauncherWindowController.windowDidResignKey` unconditionally called
+`hide()` whenever the launcher resigned key — including when a
+*different window of the same app* (Settings) became key instead of a
+genuinely different app taking focus. Opening Settings therefore hid
+the launcher immediately, silently undoing the Round 6 design where
+Settings floats above the still-visible grid. Fixed by checking
+`NSApp.isActive` (stays true when key merely moved to another of this
+app's own windows, only goes false on a real "clicked a different app").
+Even with that fixed, `LauncherWindow` (a `.nonactivatingPanel`) doesn't
+automatically regain key status the way an ordinary window would once
+Settings actually closes, so `SettingsWindowController.onWillClose`
+(deferred one run-loop turn past `windowWillClose` — calling it
+synchronously got silently overwritten by `NSWindow.close()`'s own
+in-flight teardown) now calls
+`LauncherWindowController.reclaimKeyIfVisible()`, which also
+re-activates the app first. Verified end-to-end via the new debug hook:
+confirmed `isKeyWindow == false` after Settings closed before this fix,
+`true` after — real reproduction, not just code review.
+
+Separately, reduced a plausible flicker source in the page-drag
+snapshot mechanism: `snapshotHostWindow` (from the earlier blank-
+neighbor-snapshot fix) now orders itself front exactly once at creation
+instead of on every single drag gesture, since repeatedly ordering even
+an off-screen window in and out of the window list still forces a
+WindowServer composite pass each time. This is a reasonable, low-risk
+simplification, not independently proven to eliminate the reported
+flicker — still needs the user's own retest.
+
+Folder creation via drag (`createOrJoinFolder`, the deferred-launch-vs-
+drag handling in `didSelectItemsAt`) was reviewed and found already
+correctly wired — no bug found there. Since the key/focus bug above
+could plausibly make any click-and-drag interaction unreliable
+depending on timing, worth retrying now that it's fixed before
+concluding folder creation itself needs work. `swift test`: 95/95.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
