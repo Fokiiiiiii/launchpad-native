@@ -986,6 +986,25 @@ machine still completes correctly (page 0 → 1, no errors); this proves the
 mechanics survived the reorder, not the absence of the visual flash
 itself, which needs the user's own look.
 
+**Prefetch adjacent pages' icons ahead of time.** User report: icons
+visibly "popped in" a few seconds after switching pages, and swiped-to
+pages looked blank right at the moment they were revealed.
+`itemForRepresentedObjectAt:` only starts fetching an icon once its cell
+is actually about to be displayed, so any page nobody has looked at yet
+starts every cell blank; the live drag-neighbor snapshot has the same
+problem one layer down, since it can only use `cachedIconIfAvailable` (a
+synchronous peek). New `GridViewController.prefetchAdjacentPageIcons()`
+fires off async icon fetches for every app on the pages adjacent to
+`currentPage`, called from `reload()` (covers initial load) and from both
+places `currentPage` actually changes — the standing invariant is "pages
+adjacent to whatever's shown are already warm," covering both a swipe
+revealing a neighbor and a discrete dot/arrow jump. `swift test`: 91/91
+(no new automated test — `GridViewController` has no unit-test harness of
+its own). Verified empirically: cleared the on-disk icon cache, launched
+fresh with zero interaction, and confirmed ~80 icons got cached (roughly
+two pages' worth, not just the ~35 actually visible) — proving the
+adjacent page was warmed proactively rather than on first view.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
