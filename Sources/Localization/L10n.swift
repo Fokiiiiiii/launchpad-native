@@ -55,6 +55,8 @@ public enum L10n {
     public static var sortByLabel: String { string("settings.grid.sortby", "Sort By") }
     public static var sortModeCustom: String { string("settings.grid.sortby.custom", "Custom") }
     public static var sortModeName: String { string("settings.grid.sortby.name", "Name") }
+    public static var sortModeDateAdded: String { string("settings.grid.sortby.dateadded", "Date Added") }
+    public static var sortModeLastUsed: String { string("settings.grid.sortby.lastused", "Last Used") }
     public static var reorganizeButton: String { string("settings.grid.reorganize", "Reorganize") }
     public static var hideDockToggleLabel: String { string("settings.grid.hidedock", "Hide Dock") }
     public static var quickMenuAccessibilityLabel: String { string("launcher.quickmenu.accessibility", "View options") }

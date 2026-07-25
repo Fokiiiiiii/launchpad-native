@@ -143,7 +143,11 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
 
         let actions = ContextMenuBuilder.Actions(
             open: { [weak self] in self?.onLaunch(record) },
-            openNewInstance: record.canOpenNewInstance ? { AppLauncher.launch(record, createsNewInstance: true) } : nil,
+            openNewInstance: record.canOpenNewInstance ? { [weak self] in
+                self?.model.recordLaunch(for: record.id)
+                Task { await self?.model.save() }
+                AppLauncher.launch(record, createsNewInstance: true)
+            } : nil,
             showInFinder: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
             addToDock: {},
             rename: {},

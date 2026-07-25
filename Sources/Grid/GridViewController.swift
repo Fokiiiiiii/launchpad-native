@@ -828,7 +828,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             guard let record = model.record(for: id) else { return nil }
             let actions = ContextMenuBuilder.Actions(
                 open: { [weak self] in self?.onLaunch(record) },
-                openNewInstance: record.canOpenNewInstance ? { AppLauncher.launch(record, createsNewInstance: true) } : nil,
+                openNewInstance: record.canOpenNewInstance ? { [weak self] in
+                    self?.model.recordLaunch(for: record.id)
+                    Task { await self?.model.save() }
+                    AppLauncher.launch(record, createsNewInstance: true)
+                } : nil,
                 showInFinder: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
                 addToDock: {
                     DiagnosticsLog.launcher.info("Add to Dock requested for \(record.bundleIdentifier, privacy: .public); drag the icon onto the real Dock to complete this (see GridCollectionView pasteboard writer).")

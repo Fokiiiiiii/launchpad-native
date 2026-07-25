@@ -1,5 +1,6 @@
 import Catalog
 import Diagnostics
+import Foundation
 import Persistence
 
 /// The composition layer between `Catalog` (what's installed) and
@@ -126,35 +127,46 @@ public final class GridModel {
         onChange?()
     }
 
-    /// "カスタム" (manual drag order, unchanged) or "名前順" — the reference
-    /// app's "date added"/"last used" sort modes aren't implemented: neither
-    /// piece of metadata is tracked anywhere yet (`ApplicationRecord` has no
-    /// install-date or last-launch field), and adding that tracking is a
-    /// separate feature, not a Settings-tab wiring change.
+    /// "カスタム" (manual drag order, unchanged), "名前順", "追加日順" (newest
+    /// first), or "最終使用日順" (most recently launched first) — the latter
+    /// two read from `LayoutDocument.dateAddedByID`/`lastUsedByID`, stamped
+    /// by `reconcile(with:)`/`backfillMissingDateAdded()` and
+    /// `recordLaunch(for:)` respectively.
     ///
     /// Sorts *within* each existing page/folder-page rather than flattening
     /// and repacking across them — page boundaries and folder membership
     /// are left exactly as they are, only the order within each container
     /// changes. Switching back to `.custom` is deliberately a no-op beyond
     /// recording the preference: the manual order was already overwritten
-    /// by the last `.name` sort, so there's nothing to restore without
-    /// tracking separate undo history, which isn't worth it for a toggle.
+    /// by the last sort, so there's nothing to restore without tracking
+    /// separate undo history, which isn't worth it for a toggle.
     public func applySortMode(_ mode: SortMode) {
         gridSettings.sortMode = mode
         document.gridSettings = gridSettings
-        if mode == .name {
-            for pageIndex in pages.indices {
-                pages[pageIndex].sort(by: isOrderedByLabel)
-            }
-            for folderID in Array(folders.keys) {
-                guard var folder = folders[folderID] else { continue }
-                for pageIndex in folder.pages.indices {
-                    folder.pages[pageIndex].sort(by: isOrderedByLabel)
-                }
-                folders[folderID] = folder
-            }
+        switch mode {
+        case .custom:
+            break
+        case .name:
+            sortEachContainer(by: isOrderedByLabel)
+        case .dateAdded:
+            sortEachContainer(by: isOrderedByDateAddedNewestFirst)
+        case .lastUsed:
+            sortEachContainer(by: isOrderedByLastUsedMostRecentFirst)
         }
         onChange?()
+    }
+
+    private func sortEachContainer(by areInIncreasingOrder: (LayoutItem, LayoutItem) -> Bool) {
+        for pageIndex in pages.indices {
+            pages[pageIndex].sort(by: areInIncreasingOrder)
+        }
+        for folderID in Array(folders.keys) {
+            guard var folder = folders[folderID] else { continue }
+            for pageIndex in folder.pages.indices {
+                folder.pages[pageIndex].sort(by: areInIncreasingOrder)
+            }
+            folders[folderID] = folder
+        }
     }
 
     private func isOrderedByLabel(_ lhs: LayoutItem, _ rhs: LayoutItem) -> Bool {
@@ -169,6 +181,45 @@ public final class GridModel {
         case .folder(let folderID):
             return folders[folderID]?.name ?? ""
         }
+    }
+
+    /// Folders have no `dateAdded`/`lastUsed` timestamp of their own (they're
+    /// created by joining existing apps, not "added" the way an app is) —
+    /// `.distantPast` sorts them to the end under both "newest/most-recent
+    /// first" comparators below, alongside any app that's never been
+    /// launched or predates this feature and hasn't been backfilled yet.
+    /// Swift's `sort(by:)` is a stable sort, so ties (all the `.distantPast`
+    /// items) keep their existing relative order rather than shuffling.
+    private func isOrderedByDateAddedNewestFirst(_ lhs: LayoutItem, _ rhs: LayoutItem) -> Bool {
+        dateAdded(for: lhs) > dateAdded(for: rhs)
+    }
+
+    private func isOrderedByLastUsedMostRecentFirst(_ lhs: LayoutItem, _ rhs: LayoutItem) -> Bool {
+        lastUsed(for: lhs) > lastUsed(for: rhs)
+    }
+
+    private func dateAdded(for item: LayoutItem) -> Date {
+        guard case .app(let identifier) = item else { return .distantPast }
+        return document.dateAddedByID[identifier] ?? .distantPast
+    }
+
+    private func lastUsed(for item: LayoutItem) -> Date {
+        guard case .app(let identifier) = item else { return .distantPast }
+        return document.lastUsedByID[identifier] ?? .distantPast
+    }
+
+    /// Stamps "now" as this app's most recent launch — the basis for
+    /// `SortMode.lastUsed`. Called from the single funnel point every
+    /// launch path (grid click, search result, folder contents, "Open New
+    /// Instance") ultimately goes through. Deliberately does *not* call
+    /// `onChange?()`: `.lastUsed` is a one-shot sort applied when the user
+    /// picks it in Settings (matching `.name`'s existing semantics, see
+    /// this type's doc comment above), not a continuously-enforced live
+    /// order — re-sorting the grid out from under someone at the exact
+    /// moment they click an icon would be a surprising, distracting UI
+    /// shuffle for no real benefit.
+    public func recordLaunch(for id: StableAppID) {
+        document.lastUsedByID[id.asPersistenceIdentifier] = Date()
     }
 
     public func record(for identifier: StableAppIdentifier) -> ApplicationRecord? {
@@ -195,6 +246,7 @@ public final class GridModel {
         let validIDs = Set(recordsByIDValue.keys).subtracting(hiddenIDs)
 
         pruneMissingItems(validIDs: validIDs)
+        backfillMissingDateAdded()
 
         let placedIDs = allPlacedAppIdentifierValues()
         let newRecords = records
@@ -204,9 +256,46 @@ public final class GridModel {
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
 
         for record in newRecords {
-            appendToLastPage(.app(record.id.asPersistenceIdentifier))
+            let identifier = record.id.asPersistenceIdentifier
+            appendToLastPage(.app(identifier))
+            document.dateAddedByID[identifier] = Date()
         }
         onChange?()
+    }
+
+    /// Apps placed before `dateAddedByID` existed (i.e. every app already in
+    /// a real user's grid the first time they launch a build with this
+    /// feature) have no recorded timestamp. Rather than leaving them all
+    /// tied at "unknown" — which would make `SortMode.dateAdded` fall back
+    /// to an arbitrary order for someone's *entire* existing grid — backfill
+    /// each with a synthetic, strictly-increasing timestamp based on its
+    /// current position: apps get appended to the end of the grid over time
+    /// (see `appendToLastPage`), so existing position is the best available
+    /// proxy for "roughly when this was added" without inventing history
+    /// this app never actually recorded. Anchored to the Unix epoch (not
+    /// "now minus N seconds") so backfilled values always sort older than
+    /// genuinely-new `Date()` timestamps stamped going forward, regardless
+    /// of when this backfill happens to run. Only fills gaps — once an item
+    /// has an entry, this is a no-op for it on every subsequent reconcile.
+    private func backfillMissingDateAdded() {
+        var index = 0
+        for page in pages {
+            for item in page {
+                guard case .app(let id) = item, document.dateAddedByID[id] == nil else { continue }
+                document.dateAddedByID[id] = Date(timeIntervalSince1970: TimeInterval(index))
+                index += 1
+            }
+        }
+        for folderID in folders.keys.sorted(by: { $0.value < $1.value }) {
+            guard let folder = folders[folderID] else { continue }
+            for folderPage in folder.pages {
+                for item in folderPage {
+                    guard case .app(let id) = item, document.dateAddedByID[id] == nil else { continue }
+                    document.dateAddedByID[id] = Date(timeIntervalSince1970: TimeInterval(index))
+                    index += 1
+                }
+            }
+        }
     }
 
     private func allPlacedAppIdentifierValues() -> Set<String> {

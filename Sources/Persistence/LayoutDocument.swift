@@ -36,14 +36,19 @@ public enum LayoutMode: String, Codable, Sendable {
     case verticalScroll
 }
 
-/// "カスタム" (manual drag order, unchanged) or "名前順" (alphabetical by
-/// display name, including aliases). Deliberately just these two — the
-/// reference app's "date added"/"last used" sort modes would need new
-/// per-app metadata tracking that doesn't exist yet (out of scope, see
-/// `GridModel.applySortMode`'s doc comment).
+/// "カスタム" (manual drag order, unchanged), "名前順" (alphabetical by
+/// display name, including aliases), "追加日順" (newest-added first — see
+/// `LayoutDocument.dateAddedByID`), or "最終使用日順" (most-recently-launched
+/// first — see `LayoutDocument.lastUsedByID`). Adding new raw-`String`
+/// cases here is backward compatible on its own (an old `layout.json` never
+/// contains a raw value that didn't exist yet when it was written) — unlike
+/// adding a new *stored property* to a `Codable` struct, no `decodeIfPresent`
+/// dance is needed for the enum itself.
 public enum SortMode: String, Codable, Sendable {
     case custom
     case name
+    case dateAdded
+    case lastUsed
 }
 
 /// Populated in Phase 6 (Customization); present now so the schema doesn't
@@ -267,6 +272,19 @@ public struct LayoutDocument: Codable, Sendable {
     /// behavior) instead of sitting one level below it — see
     /// `LauncherWindow`'s level calculation.
     public var hideDockWhileLauncherOpen: Bool
+    /// When each app was first placed onto a page/into a folder — the basis
+    /// for `SortMode.dateAdded`. Apps placed before this field existed have
+    /// no entry here; `GridModel.backfillMissingDateAdded()` fills those in
+    /// lazily using each app's existing position as a proxy for "roughly
+    /// when added," rather than leaving them all tied at "unknown."
+    public var dateAddedByID: [StableAppIdentifier: Date]
+    /// When each app was last actually launched — the basis for
+    /// `SortMode.lastUsed`. An app never launched (or launched before this
+    /// field existed) simply has no entry; sorting treats that as
+    /// `.distantPast` (see `GridModel`'s sort comparators), so never-used
+    /// apps sink to the end under a "most recent first" sort rather than
+    /// contaminating the order of apps that do have real data.
+    public var lastUsedByID: [StableAppIdentifier: Date]
 
     public init(
         schemaVersion: Int,
@@ -281,7 +299,9 @@ public struct LayoutDocument: Codable, Sendable {
         triggerSettings: TriggerSettings,
         lastSelectedPage: Int,
         lastScrollPosition: Double,
-        hideDockWhileLauncherOpen: Bool = false
+        hideDockWhileLauncherOpen: Bool = false,
+        dateAddedByID: [StableAppIdentifier: Date] = [:],
+        lastUsedByID: [StableAppIdentifier: Date] = [:]
     ) {
         self.schemaVersion = schemaVersion
         self.layoutMode = layoutMode
@@ -296,10 +316,12 @@ public struct LayoutDocument: Codable, Sendable {
         self.lastSelectedPage = lastSelectedPage
         self.lastScrollPosition = lastScrollPosition
         self.hideDockWhileLauncherOpen = hideDockWhileLauncherOpen
+        self.dateAddedByID = dateAddedByID
+        self.lastUsedByID = lastUsedByID
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, layoutMode, gridSettings, pages, folders, itemOrder, aliases, hiddenApplicationIDs, customSources, triggerSettings, lastSelectedPage, lastScrollPosition, hideDockWhileLauncherOpen
+        case schemaVersion, layoutMode, gridSettings, pages, folders, itemOrder, aliases, hiddenApplicationIDs, customSources, triggerSettings, lastSelectedPage, lastScrollPosition, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID
     }
 
     public init(from decoder: Decoder) throws {
@@ -317,6 +339,8 @@ public struct LayoutDocument: Codable, Sendable {
         lastSelectedPage = try container.decode(Int.self, forKey: .lastSelectedPage)
         lastScrollPosition = try container.decode(Double.self, forKey: .lastScrollPosition)
         hideDockWhileLauncherOpen = try container.decodeIfPresent(Bool.self, forKey: .hideDockWhileLauncherOpen) ?? false
+        dateAddedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .dateAddedByID) ?? [:]
+        lastUsedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .lastUsedByID) ?? [:]
     }
 
     public static let currentSchemaVersion = 1
@@ -334,6 +358,8 @@ public struct LayoutDocument: Codable, Sendable {
         triggerSettings: .default,
         lastSelectedPage: 0,
         lastScrollPosition: 0,
-        hideDockWhileLauncherOpen: false
+        hideDockWhileLauncherOpen: false,
+        dateAddedByID: [:],
+        lastUsedByID: [:]
     )
 }

@@ -57,11 +57,12 @@ public struct SettingsView: View {
                 Picker(selection: $viewModel.sortMode) {
                     Text(L10n.sortModeCustom).tag(SortMode.custom)
                     Text(L10n.sortModeName).tag(SortMode.name)
+                    Text(L10n.sortModeDateAdded).tag(SortMode.dateAdded)
+                    Text(L10n.sortModeLastUsed).tag(SortMode.lastUsed)
                 } label: {
                     Label(L10n.sortByLabel, systemImage: "arrow.up.arrow.down")
                 }
                 .pickerStyle(.radioGroup)
-                .horizontalRadioGroupLayout()
 
                 HStack {
                     Spacer()

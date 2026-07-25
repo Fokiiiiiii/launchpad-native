@@ -348,6 +348,11 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     }
 
     private func launch(_ record: ApplicationRecord) {
+        // Every launch path (grid click, search result, folder contents)
+        // funnels through here — the single place to stamp `lastUsed` for
+        // `SortMode.lastUsed` (see `GridModel.recordLaunch`'s doc comment).
+        gridModel.recordLaunch(for: record.id)
+        Task { await gridModel.save() }
         AppLauncher.launch(record) { [weak self] in
             self?.onDidLaunch()
         }

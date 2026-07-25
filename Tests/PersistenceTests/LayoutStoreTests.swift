@@ -18,6 +18,24 @@ import Testing
     #expect(loaded.aliases[StableAppIdentifier(value: "abc")] == "My Alias")
 }
 
+@Test func dateAddedAndLastUsedRoundTrip() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = LayoutStore(directory: dir)
+
+    var doc = LayoutDocument.empty
+    let added = Date(timeIntervalSince1970: 1_700_000_000)
+    let used = Date(timeIntervalSince1970: 1_750_000_000)
+    doc.dateAddedByID[StableAppIdentifier(value: "abc")] = added
+    doc.lastUsedByID[StableAppIdentifier(value: "abc")] = used
+
+    try await store.save(doc)
+    let loaded = await store.load()
+
+    #expect(loaded.dateAddedByID[StableAppIdentifier(value: "abc")] == added)
+    #expect(loaded.lastUsedByID[StableAppIdentifier(value: "abc")] == used)
+}
+
 @Test func loadFallsBackToLastKnownGoodWhenPrimaryIsCorrupted() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -68,6 +86,8 @@ import Testing
 
     var json = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
     json.removeValue(forKey: "hideDockWhileLauncherOpen")
+    json.removeValue(forKey: "dateAddedByID")
+    json.removeValue(forKey: "lastUsedByID")
     var gridSettings = json["gridSettings"] as! [String: Any]
     gridSettings.removeValue(forKey: "sortMode")
     json["gridSettings"] = gridSettings
@@ -86,6 +106,8 @@ import Testing
     #expect(loaded.hideDockWhileLauncherOpen == false)
     #expect(loaded.gridSettings.sortMode == .custom)
     #expect(loaded.triggerSettings.multitouchFingerCount == 4)
+    #expect(loaded.dateAddedByID.isEmpty)
+    #expect(loaded.lastUsedByID.isEmpty)
 }
 
 @Test func secondSaveDoesNotLoseDataIfInterrupted() async throws {

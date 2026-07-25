@@ -24,6 +24,8 @@
 "settings.grid.sortby" = "並べ替え";
 "settings.grid.sortby.custom" = "カスタム";
 "settings.grid.sortby.name" = "名前順";
+"settings.grid.sortby.dateadded" = "追加日順";
+"settings.grid.sortby.lastused" = "最終使用日順";
 "settings.grid.reorganize" = "整理する";
 "settings.grid.hidedock" = "Dockを隠す";
 "settings.triggers.f4" = "F4 / Spotlightキー";

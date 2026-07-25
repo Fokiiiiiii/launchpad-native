@@ -333,6 +333,88 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(model.gridSettings.sortMode == .name)
 }
 
+@Test @MainActor func applySortModeDateAddedOrdersNewestAddedFirst() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+
+    model.reconcile(with: [record("Apple", id: "a")])
+    try await Task.sleep(nanoseconds: 10_000_000) // 10ms — ensure a distinct, later `Date()` for Banana.
+    model.reconcile(with: [record("Apple", id: "a"), record("Banana", id: "b")])
+
+    model.applySortMode(.dateAdded)
+    let order = model.pages[0].compactMap { item -> String? in
+        if case .app(let id) = item { return model.record(for: id)?.displayName }
+        return nil
+    }
+    #expect(order == ["Banana", "Apple"], "Banana was added later, so it sorts first under newest-added-first")
+    #expect(model.gridSettings.sortMode == .dateAdded)
+}
+
+/// Simulates a real user's grid from before `dateAddedByID` tracking
+/// existed: items already placed onto a page, but with no recorded
+/// timestamp at all. `GridModel.backfillMissingDateAdded()` (invoked via
+/// `reconcile`) must assign each a synthetic, increasing timestamp based on
+/// its existing position — apps get appended to the end over time (see
+/// `appendToLastPage`), so existing position is the best available proxy
+/// for "when added." Under a newest-first sort, that means the item that
+/// was already *last* in the page (the most recently appended one,
+/// chronologically) sorts first — i.e. the original order reverses.
+@Test @MainActor func backfillAssignsIncreasingDatesByExistingPositionForPreExistingItems() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = LayoutStore(directory: dir)
+
+    var document = LayoutDocument.empty
+    document.pages = [[
+        LayoutItem.app(StableAppIdentifier(value: "a")),
+        LayoutItem.app(StableAppIdentifier(value: "b")),
+        LayoutItem.app(StableAppIdentifier(value: "c"))
+    ]]
+    #expect(document.dateAddedByID.isEmpty, "sanity check: no dateAdded metadata exists yet")
+    try await store.save(document)
+
+    let model = GridModel(layoutStore: store)
+    await model.loadDocument()
+    // None of these are "new" (all already placed) — this exercises only
+    // the backfill path, not the genuinely-new-record stamping path.
+    model.reconcile(with: [record("Apple", id: "a"), record("Banana", id: "b"), record("Cherry", id: "c")])
+
+    model.applySortMode(.dateAdded)
+    let order = model.pages[0].compactMap { item -> String? in
+        if case .app(let id) = item { return model.record(for: id)?.displayName }
+        return nil
+    }
+    #expect(order == ["Cherry", "Banana", "Apple"])
+}
+
+@Test @MainActor func applySortModeLastUsedOrdersMostRecentlyLaunchedFirstAndNeverUsedLast() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+
+    let apple = record("Apple", id: "a")
+    let banana = record("Banana", id: "b")
+    let cherry = record("Cherry", id: "c")
+    model.reconcile(with: [apple, banana, cherry])
+
+    model.recordLaunch(for: cherry.id)
+    try await Task.sleep(nanoseconds: 10_000_000) // 10ms — ensure a distinct, later `Date()` for Apple's launch.
+    model.recordLaunch(for: apple.id)
+    // Banana is never launched — it should sink to the end, not disturb
+    // the ordering of apps that do have real lastUsed data.
+
+    model.applySortMode(.lastUsed)
+    let order = model.pages[0].compactMap { item -> String? in
+        if case .app(let id) = item { return model.record(for: id)?.displayName }
+        return nil
+    }
+    #expect(order == ["Apple", "Cherry", "Banana"])
+    #expect(model.gridSettings.sortMode == .lastUsed)
+}
+
 @Test @MainActor func reorganizePagesRepacksTightlyUnderCurrentCapacity() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }

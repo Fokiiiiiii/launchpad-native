@@ -24,6 +24,8 @@
 "settings.grid.sortby" = "Sort By";
 "settings.grid.sortby.custom" = "Custom";
 "settings.grid.sortby.name" = "Name";
+"settings.grid.sortby.dateadded" = "Date Added";
+"settings.grid.sortby.lastused" = "Last Used";
 "settings.grid.reorganize" = "Reorganize";
 "settings.grid.hidedock" = "Hide Dock";
 "settings.triggers.f4" = "F4 / Spotlight key";
