@@ -43,6 +43,28 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private var openFolderPopover: NSPopover?
     private let windowThumbnailService = WindowThumbnailService()
 
+    // MARK: Drag-tracked page paging state (see `beginPageDrag`)
+    //
+    // Deliberately minimal: unlike the reverted first attempt, there is no
+    // "hide the live grid, show 3 snapshots" overlay. The live
+    // `collectionView` is transformed directly and is NEVER hidden, so a
+    // stuck drag state can visually shift it at worst — it can't make
+    // content disappear the way the reverted version could.
+
+    /// Only the one snapshot actually needed (whichever neighbor the drag
+    /// direction reveals), created lazily once direction is known — not
+    /// pre-rendered for both sides up front.
+    private var dragNeighborImageView: NSImageView?
+    /// `0` = direction not yet known this gesture, `1` = revealing the next
+    /// page, `-1` = revealing the previous page.
+    private var dragDirection = 0
+    private var dragHasPrev = false
+    private var dragHasNext = false
+    /// Bumped on every begin/finish/force-reset so a stale fallback timer
+    /// or settle callback from a previous gesture can recognize it's stale
+    /// and no-op instead of undoing a newer gesture's state.
+    private var dragGeneration = 0
+
     public init(
         model: GridModel,
         iconCache: IconCache,
@@ -75,7 +97,16 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.registerForDraggedTypes([Self.internalDragType])
         collectionView.menuProvider = { [weak self] indexPath in self?.contextMenu(for: indexPath) }
         collectionView.onSwipePage = { [weak self] delta in self?.jumpToAdjacentPage(delta: delta) }
-        collectionView.onBackgroundClick = { [weak self] in self?.onBackgroundClick() }
+        collectionView.onSwipeBegan = { [weak self] in self?.beginPageDrag() }
+        collectionView.onSwipeChanged = { [weak self] delta in self?.updatePageDrag(deltaX: delta) }
+        collectionView.onSwipeEnded = { [weak self] delta, velocity in self?.endPageDrag(deltaX: delta, velocity: velocity) }
+        collectionView.onBackgroundClick = { [weak self] in
+            // Extra safety-net opportunity for the page-drag machinery (see
+            // `resetDragStateIfNeeded`'s doc comment) — harmless no-op if
+            // no drag is active.
+            self?.resetDragStateIfNeeded()
+            self?.onBackgroundClick()
+        }
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = collectionView
@@ -258,6 +289,278 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private func jumpToAdjacentPage(delta: Int) {
         jumpToPage(currentPage + delta)
+    }
+
+    // MARK: Drag-tracked page paging (real-time finger-following swipe), v2
+    //
+    // First attempt (reverted): hid the live `collectionView` and overlaid
+    // 3 pre-rendered snapshots (prev/current/next). Failed on real hardware
+    // — the overlay engaged on essentially any trackpad touch (no minimum
+    // distance gate) and, if the settle path didn't complete for any
+    // reason, `collectionView.isHidden` never reverted to `false`,
+    // permanently blanking the grid (confirmed via screenshot, required a
+    // force-quit). This version is structurally different, not just
+    // tuned differently:
+    //  1. `GridCollectionView` now requires the cumulative delta to clear
+    //     `minimumEngageDistance` before engaging at all (see that type).
+    //  2. The live `collectionView` is never hidden — its own layer is
+    //     transformed directly, and only the *one* neighbor page actually
+    //     being revealed gets a lazily-created snapshot placed beside it.
+    //     Worst case if something goes wrong: a transform offset or a
+    //     stray image, never a blank grid.
+    //  3. A hard, fixed-duration (1s) fallback timer — independent of
+    //     `CASpringAnimation.settlingDuration`, which is what silently
+    //     misbehaved before — force-resets everything no matter what.
+    //  4. `resetDragStateIfNeeded()` is called every time the launcher
+    //     shows (see `LauncherWindowController.show()`), so even if a prior
+    //     session somehow left this mid-drag, the next open starts clean.
+    // Given the two prior failures in this exact area, this still needs
+    // the user's own hands-on trackpad verification — these safeguards
+    // change what happens if something goes wrong, not whether the gesture
+    // *feels* right, which can't be tested without Accessibility permission.
+
+    /// Fires once a swipe has been confirmed and has cleared the minimum
+    /// engage distance (see `GridCollectionView`). Only arms bookkeeping
+    /// and the hard fallback timer — the actual neighbor snapshot is
+    /// created lazily in `updatePageDrag` once the direction is known.
+    private func beginPageDrag() {
+        guard dragDirection == 0, dragNeighborImageView == nil else { return }
+        guard collectionView.bounds.width > 0 else { return }
+        collectionView.wantsLayer = true
+        dragHasPrev = currentPage > 0
+        dragHasNext = currentPage < model.pages.count - 1
+        dragGeneration += 1
+        let generation = dragGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.dragGeneration == generation else { return }
+                self.forceResetPageDrag()
+            }
+        }
+    }
+
+    /// Called continuously while the gesture is in progress — `deltaX` is
+    /// the *cumulative* horizontal delta since the gesture began, applied
+    /// 1:1 to both the live grid's and (once created) the neighbor
+    /// snapshot's transform, so both track the fingers exactly. Rubber-
+    /// bands (apple-design's resistance formula) when there's no adjacent
+    /// page to reveal in that direction.
+    private func updatePageDrag(deltaX: CGFloat) {
+        let width = max(collectionView.bounds.width, 1)
+
+        if dragDirection == 0 {
+            // Direction is now known from the sign of this first real
+            // delta — matches the existing convention (negative -> next
+            // page, see `GridCollectionView`'s original threshold logic).
+            dragDirection = deltaX < 0 ? 1 : -1
+            let hasNeighbor = dragDirection > 0 ? dragHasNext : dragHasPrev
+            if hasNeighbor, dragNeighborImageView == nil,
+               let image = renderPageSnapshot(forPage: currentPage + dragDirection, size: collectionView.bounds.size) {
+                let xOffset = dragDirection > 0 ? width : -width
+                let imageView = NSImageView(frame: NSRect(
+                    x: scrollView.frame.origin.x + xOffset,
+                    y: scrollView.frame.origin.y,
+                    width: scrollView.frame.width,
+                    height: scrollView.frame.height
+                ))
+                imageView.image = image
+                imageView.imageScaling = .scaleNone
+                imageView.wantsLayer = true
+                view.addSubview(imageView, positioned: .above, relativeTo: scrollView)
+                dragNeighborImageView = imageView
+            }
+        }
+
+        let hasNeighborImage = dragNeighborImageView != nil
+        let effective = hasNeighborImage
+            ? deltaX
+            : (deltaX < 0 ? -Self.rubberBand(-deltaX, dimension: width) : Self.rubberBand(deltaX, dimension: width))
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        collectionView.layer?.setValue(effective, forKeyPath: "transform.translation.x")
+        dragNeighborImageView?.layer?.setValue(effective, forKeyPath: "transform.translation.x")
+        CATransaction.commit()
+    }
+
+    /// Decides the destination page from the final position and estimated
+    /// release velocity (a sufficiently fast flick commits even short of
+    /// the distance threshold — apple-design's momentum projection), then
+    /// springs the rest of the way with the release velocity handed off
+    /// (not hard-cut) before swapping in the real page content. The actual
+    /// cleanup (`finishPageDrag`) is scheduled off the spring's own
+    /// settling duration for visual accuracy, but `beginPageDrag`'s fixed
+    /// 1s fallback is the real safety net if that duration ever misbehaves.
+    private func endPageDrag(deltaX: CGFloat, velocity: CGFloat) {
+        let width = max(collectionView.bounds.width, 1)
+        let hasNeighbor = dragNeighborImageView != nil
+        let distanceThreshold = width * 0.3
+        let flickVelocityThreshold: CGFloat = 400 // points/sec
+
+        var commit = false
+        if hasNeighbor {
+            if dragDirection > 0, deltaX <= -distanceThreshold || velocity <= -flickVelocityThreshold {
+                commit = true
+            } else if dragDirection < 0, deltaX >= distanceThreshold || velocity >= flickVelocityThreshold {
+                commit = true
+            }
+        }
+
+        let targetTranslation: CGFloat = commit ? (dragDirection > 0 ? -width : width) : 0
+        let distanceRemaining = targetTranslation - deltaX
+        let relativeVelocity = abs(distanceRemaining) > 1 ? velocity / distanceRemaining : 0
+
+        let spring = Self.springAnimation(
+            keyPath: "transform.translation.x",
+            from: deltaX,
+            to: targetTranslation,
+            damping: 1.0,
+            response: 0.32,
+            initialVelocity: relativeVelocity
+        )
+        collectionView.layer?.add(spring, forKey: "pageDragSettle")
+        dragNeighborImageView?.layer?.add(spring, forKey: "pageDragSettle")
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        collectionView.layer?.setValue(targetTranslation, forKeyPath: "transform.translation.x")
+        dragNeighborImageView?.layer?.setValue(targetTranslation, forKeyPath: "transform.translation.x")
+        CATransaction.commit()
+
+        let targetPage = commit ? currentPage + dragDirection : currentPage
+        let generation = dragGeneration
+        // Clamped defensively — this is a display-timing nicety, not the
+        // real safety net (that's the fixed 1s fallback armed in
+        // `beginPageDrag`, which fires regardless of this value).
+        let settleDuration = min(max(spring.settlingDuration, 0), 0.6)
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.dragGeneration == generation else { return }
+                self.finishPageDrag(targetPage: targetPage)
+            }
+        }
+    }
+
+    private func finishPageDrag(targetPage: Int) {
+        currentPage = targetPage
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        collectionView.layer?.removeAllAnimations()
+        collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
+        CATransaction.commit()
+        collectionView.reloadData()
+        pageControl.currentPage = currentPage
+        dragNeighborImageView?.removeFromSuperview()
+        dragNeighborImageView = nil
+        dragDirection = 0
+        dragGeneration += 1
+    }
+
+    /// Hard safety net, reachable from three independent places (the fixed
+    /// 1s fallback timer, a background click during a drag, and every time
+    /// the launcher shows) — forces the grid back to a normal, fully-
+    /// visible state no matter what state the drag machinery is in. Safe
+    /// to call even when no drag is active (idempotent no-op beyond a
+    /// harmless transform reset and reload).
+    public func resetDragStateIfNeeded() {
+        guard dragNeighborImageView != nil || dragDirection != 0 else { return }
+        forceResetPageDrag()
+    }
+
+    private func forceResetPageDrag() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        collectionView.layer?.removeAllAnimations()
+        collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
+        CATransaction.commit()
+        dragNeighborImageView?.removeFromSuperview()
+        dragNeighborImageView = nil
+        dragDirection = 0
+        collectionView.reloadData()
+        pageControl.currentPage = currentPage
+        dragGeneration += 1
+    }
+
+    /// Renders `model.pages[page]` into a standalone offscreen
+    /// `NSCollectionView` (its own `PagedGridLayout`, sized to match the
+    /// live grid exactly) and rasterizes it to a static image via
+    /// `cacheDisplay(in:to:)`. Icons use `IconCache.cachedIconIfAvailable`
+    /// (synchronous, best-effort) rather than the live grid's async
+    /// `icon(for:)` fetch — waiting on a disk/system icon load would delay
+    /// the drag's very first frame, and every icon on any page the user has
+    /// already seen is normally already memory-cached by this point. A
+    /// genuinely never-seen page's icons render blank until the real grid
+    /// takes back over at the end of the drag — an accepted, minor
+    /// trade-off, not a bug.
+    private func renderPageSnapshot(forPage page: Int, size: NSSize) -> NSImage? {
+        guard model.pages.indices.contains(page) else { return nil }
+
+        let tempLayout = PagedGridLayout()
+        tempLayout.settings = model.gridSettings
+        let tempCollectionView = NSCollectionView(frame: NSRect(origin: .zero, size: size))
+        tempCollectionView.collectionViewLayout = tempLayout
+        tempCollectionView.register(GridCellItem.self, forItemWithIdentifier: itemIdentifier)
+        tempCollectionView.backgroundColors = [.clear]
+
+        let dataSource = SnapshotDataSource(
+            items: model.pages[page],
+            model: model,
+            iconCache: iconCache,
+            itemIdentifier: itemIdentifier,
+            iconSize: currentIconSize
+        )
+        // `dataSource` is only needed for this synchronous render (no
+        // async work happens between here and the function returning), so
+        // the local `let` staying in scope through `cacheDisplay` is
+        // sufficient — `NSCollectionView.dataSource` itself doesn't retain.
+        tempCollectionView.dataSource = dataSource
+        tempCollectionView.reloadData()
+        tempCollectionView.layoutSubtreeIfNeeded()
+
+        guard let bitmap = tempCollectionView.bitmapImageRepForCachingDisplay(in: tempCollectionView.bounds) else { return nil }
+        tempCollectionView.cacheDisplay(in: tempCollectionView.bounds, to: bitmap)
+        let image = NSImage(size: size)
+        image.addRepresentation(bitmap)
+        return image
+    }
+
+    /// Apple's standard rubber-band resistance formula (see apple-design's
+    /// guidance): resistance increases with overshoot instead of a hard
+    /// stop, so dragging past an end still moves but doesn't go far.
+    private static func rubberBand(_ overshoot: CGFloat, dimension: CGFloat, constant: CGFloat = 0.55) -> CGFloat {
+        (overshoot * dimension * constant) / (dimension + constant * abs(overshoot))
+    }
+
+    /// Debug-only — this session has no Accessibility/GUI-scripting
+    /// permission, so a real trackpad gesture can't be simulated to verify
+    /// `beginPageDrag`/`updatePageDrag`/`endPageDrag` end-to-end. This drives
+    /// the exact same production methods with synthetic input so at least
+    /// the state-machine transition (current page -> next page, no crash)
+    /// can be confirmed via `log stream` — not a substitute for real
+    /// hands-on trackpad verification, which the drag's actual visual feel
+    /// still needs. `commit: true` simulates a fast flick past the commit
+    /// threshold; `commit: false` simulates a short drag that springs back
+    /// to the current page — both paths matter given this feature's history.
+    public func debugSimulatePageDrag(commit: Bool) {
+        guard model.pages.count > 1 else {
+            DiagnosticsLog.launcher.info("debugSimulatePageDrag: only \(self.model.pages.count, privacy: .public) page(s), nothing to drag between")
+            return
+        }
+        let startPage = currentPage
+        DiagnosticsLog.launcher.info("debugSimulatePageDrag: starting at page \(startPage, privacy: .public), commit=\(commit, privacy: .public)")
+        beginPageDrag()
+        let width = max(collectionView.bounds.width, 1)
+        let targetFraction: CGFloat = commit ? 0.5 : 0.05
+        let steps = 10
+        for step in 1...steps {
+            updatePageDrag(deltaX: -width * targetFraction * CGFloat(step) / CGFloat(steps))
+        }
+        endPageDrag(deltaX: -width * targetFraction, velocity: commit ? -900 : 0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                DiagnosticsLog.launcher.info("debugSimulatePageDrag: ended at page \(self.currentPage, privacy: .public) (was \(startPage, privacy: .public))")
+            }
+        }
     }
 
     private func activate(at indexPath: IndexPath) {
@@ -614,5 +917,52 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         for item in collectionView.visibleItems() {
             item.view.layer?.removeAnimation(forKey: "wobble")
         }
+    }
+}
+
+/// A minimal, throwaway `NSCollectionViewDataSource` for rendering one
+/// page's worth of cells into an offscreen snapshot (see
+/// `GridViewController.renderPageSnapshot(forPage:size:)`) — deliberately
+/// independent of `GridViewController`'s own data-source conformance
+/// (which always reads `currentPage`) so building a snapshot of an
+/// *adjacent* page never has to temporarily perturb the live grid's state.
+private final class SnapshotDataSource: NSObject, NSCollectionViewDataSource {
+    private let items: [LayoutItem]
+    private let model: GridModel
+    private let iconCache: IconCache
+    private let itemIdentifier: NSUserInterfaceItemIdentifier
+    private let iconSize: Double
+
+    init(items: [LayoutItem], model: GridModel, iconCache: IconCache, itemIdentifier: NSUserInterfaceItemIdentifier, iconSize: Double) {
+        self.items = items
+        self.model = model
+        self.iconCache = iconCache
+        self.itemIdentifier = itemIdentifier
+        self.iconSize = iconSize
+    }
+
+    func numberOfSections(in collectionView: NSCollectionView) -> Int { 1 }
+
+    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
+        items.count
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
+        guard let cell = collectionView.makeItem(withIdentifier: itemIdentifier, for: indexPath) as? GridCellItem,
+              items.indices.contains(indexPath.item) else {
+            return NSCollectionViewItem()
+        }
+        switch items[indexPath.item] {
+        case .app(let id):
+            guard let record = model.record(for: id) else { return cell }
+            let icon = iconCache.cachedIconIfAvailable(for: record) ?? NSImage()
+            let displayName = model.displayName(for: record)
+            cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: iconSize, displayName: displayName)
+        case .folder(let folderID):
+            let folder = model.folders[folderID]
+            let count = folder?.pages.reduce(0) { $0 + $1.count } ?? 0
+            cell.configureAsFolder(name: folder?.name ?? L10n.defaultFolderName, itemCount: count, isSelected: false, iconSize: iconSize)
+        }
+        return cell
     }
 }

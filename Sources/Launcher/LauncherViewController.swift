@@ -200,6 +200,12 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchField.stringValue = ""
         viewModel.setQuery("")
         setSearchMode(active: false)
+        // Safety net for the page-drag machinery: every time the launcher
+        // shows, force a clean state regardless of how the previous
+        // session ended — see `GridViewController.resetDragStateIfNeeded`'s
+        // doc comment for why this exists (a lesson from a prior version
+        // of this feature that could get stuck).
+        gridViewController.resetDragStateIfNeeded()
     }
 
     /// Debug-only entry point (`LAUNCHPAD_DEBUG_SEARCH_QUERY`, wired in
@@ -215,6 +221,13 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     func reloadGrid() {
         gridViewController.reload()
         applySearchResultsLayoutMetrics()
+    }
+
+    /// Debug-only entry point (`LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG`, wired
+    /// in `AppDelegate`) — see `GridViewController.debugSimulatePageDrag`'s
+    /// doc comment for why this exists.
+    func debugSimulatePageDrag(commit: Bool) {
+        gridViewController.debugSimulatePageDrag(commit: commit)
     }
 
     /// Search results previously used their own hardcoded cell size,

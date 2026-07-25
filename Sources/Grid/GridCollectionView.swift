@@ -9,23 +9,35 @@ import AppKit
 /// gesture, which macOS binds to 3/4-finger swipes by default — a different
 /// finger count, so there's no shared-gesture conflict here.
 ///
-/// A continuous, drag-tracked (iOS-home-screen-like) version of this swipe
-/// was tried and reverted: it fired an overlay takeover on the very first
-/// `.changed` sample that looked more horizontal than vertical, with no
-/// minimum-distance gate, so incidental trackpad motion could trigger it;
-/// combined with a stuck-overlay failure mode in the settle path, this
-/// produced a real, reproduced regression on the user's machine (the grid
-/// going permanently blank and unresponsive, confirmed via screenshot and
-/// requiring a force-quit to recover). This is the second time a
-/// continuous/real-scroll-position approach to paging has failed in this
-/// exact area (see `GridViewController`'s top-level doc comment for the
-/// first, an `NSScrollView`-based attempt) — reverted back to this
-/// threshold-based discrete jump rather than attempting a third approach
-/// this session can't verify interactively.
+/// History: a first continuous, drag-tracked version of this swipe fired
+/// an overlay takeover on the very first `.changed` sample that looked
+/// even slightly more horizontal than vertical, with no minimum-distance
+/// gate — incidental trackpad motion could trigger it, and combined with a
+/// stuck-overlay failure mode this produced a real regression (the grid
+/// going permanently blank, requiring a force-quit). This version keeps
+/// continuous tracking (the user's explicit ask, tried a third time with
+/// the user's informed consent after two prior failures in this exact
+/// area) but requires the cumulative delta to cross `minimumEngageDistance`
+/// before engaging at all — see `GridViewController`'s drag methods for
+/// the other structural fix: the live grid is never hidden, so a stuck
+/// drag state can no longer make content disappear.
 final class GridCollectionView: NSCollectionView {
     var menuProvider: ((IndexPath) -> NSMenu?)?
-    /// Fires with `-1` (previous) or `+1` (next) once per completed swipe.
+    /// Fires with `-1` (previous) or `+1` (next) for a *discrete* mouse-wheel
+    /// page change (see the discrete-wheel branch in `scrollWheel` below) —
+    /// that hardware has no continuous position data, so there's nothing to
+    /// drive a finger-tracked drag with; it just jumps.
     var onSwipePage: ((Int) -> Void)?
+    /// Trackpad 2-finger horizontal swipe, tracked continuously once
+    /// engaged (past `minimumEngageDistance`). `onSwipeChanged` fires with
+    /// the *cumulative* delta since the gesture began (not a per-frame
+    /// delta), so callers can drive an overlay's transform 1:1 with the
+    /// fingers. `onSwipeEnded` additionally passes a simple velocity
+    /// estimate (points per second, from the last few samples) for
+    /// apple-design-style velocity handoff into a settle animation.
+    var onSwipeBegan: (() -> Void)?
+    var onSwipeChanged: ((CGFloat) -> Void)?
+    var onSwipeEnded: ((CGFloat, CGFloat) -> Void)?
     /// Fires when a click lands within a cell's bounding box but outside its
     /// actual icon+label content — see `GridCellItem.contentHitTestFrame`.
     /// Treated the same as clicking the launcher's empty background: dismiss.
@@ -33,7 +45,14 @@ final class GridCollectionView: NSCollectionView {
 
     private var swipeAccumulatedDeltaX: CGFloat = 0
     private var swipeIsHorizontal = false
-    private var swipeFired = false
+    private var swipeEngaged = false
+    private var recentSamples: [(delta: CGFloat, time: CFTimeInterval)] = []
+    /// A single confirmed-horizontal `.changed` sample used to fire
+    /// `onSwipeBegan` unconditionally last time — ambient trackpad jitter
+    /// (resting fingers) could cross that bar trivially. Requiring the
+    /// *cumulative* delta to clear this distance first is what actually
+    /// distinguishes "the user is swiping" from incidental motion.
+    private let minimumEngageDistance: CGFloat = 15
 
     /// A plain scroll-wheel mouse (non-Apple, or any mouse without a
     /// touch-sensitive surface) sends discrete wheel ticks with no
@@ -41,7 +60,7 @@ final class GridCollectionView: NSCollectionView {
     /// guard below, so such mice couldn't page the grid at all. These ticks
     /// carry no phase to key a `.began`/`.changed`/`.ended` state machine
     /// off of, so a wall-clock cooldown replaces the phase-driven
-    /// `swipeFired` latch used for trackpad gestures.
+    /// `swipeEngaged` latch used for trackpad gestures.
     private var lastDiscreteWheelPageChange: CFTimeInterval = 0
     private let discreteWheelCooldown: CFTimeInterval = 0.35
 
@@ -101,25 +120,42 @@ final class GridCollectionView: NSCollectionView {
         switch event.phase {
         case .began:
             swipeAccumulatedDeltaX = 0
-            swipeFired = false
-            swipeIsHorizontal = abs(event.scrollingDeltaX) >= abs(event.scrollingDeltaY)
+            swipeIsHorizontal = false
+            swipeEngaged = false
+            recentSamples.removeAll()
         case .changed:
-            guard swipeIsHorizontal, !swipeFired else { break }
             swipeAccumulatedDeltaX += event.scrollingDeltaX
-            let threshold: CGFloat = 60
-            if swipeAccumulatedDeltaX <= -threshold {
-                swipeFired = true
-                onSwipePage?(1) // content moved left under the fingers -> next page
-            } else if swipeAccumulatedDeltaX >= threshold {
-                swipeFired = true
-                onSwipePage?(-1) // content moved right -> previous page
+            if !swipeEngaged {
+                swipeIsHorizontal = abs(event.scrollingDeltaX) >= abs(event.scrollingDeltaY)
+                guard swipeIsHorizontal, abs(swipeAccumulatedDeltaX) >= minimumEngageDistance else { break }
+                swipeEngaged = true
+                onSwipeBegan?()
             }
+            guard swipeIsHorizontal else { break }
+            let now = CACurrentMediaTime()
+            recentSamples.append((swipeAccumulatedDeltaX, now))
+            if recentSamples.count > 6 {
+                recentSamples.removeFirst(recentSamples.count - 6)
+            }
+            onSwipeChanged?(swipeAccumulatedDeltaX)
         case .ended, .cancelled:
+            if swipeEngaged {
+                onSwipeEnded?(swipeAccumulatedDeltaX, Self.estimateVelocity(recentSamples))
+            }
             swipeAccumulatedDeltaX = 0
             swipeIsHorizontal = false
-            swipeFired = false
+            swipeEngaged = false
+            recentSamples.removeAll()
         default:
             break
         }
+    }
+
+    /// Points-per-second estimate from the oldest and newest of the last
+    /// few `.changed` samples — enough for apple-design-style velocity
+    /// handoff into the settle spring without needing every frame.
+    private static func estimateVelocity(_ samples: [(delta: CGFloat, time: CFTimeInterval)]) -> CGFloat {
+        guard let first = samples.first, let last = samples.last, last.time > first.time else { return 0 }
+        return (last.delta - first.delta) / CGFloat(last.time - first.time)
     }
 }
