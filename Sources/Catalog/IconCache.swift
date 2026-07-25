@@ -73,17 +73,6 @@ public final class IconCache: @unchecked Sendable {
         }
     }
 
-    /// Synchronous best-effort peek at the in-memory cache, for callers that
-    /// need an icon *now* and can tolerate a miss — e.g. rendering an
-    /// offscreen snapshot of a not-currently-displayed page for a live,
-    /// finger-tracked page-drag overlay, where waiting on `icon(for:)`'s
-    /// async fetch would delay the drag's very first frame. Returns `nil`
-    /// on a genuine cache miss (never fetched before) rather than blocking;
-    /// callers should tolerate a blank/placeholder icon in that case.
-    public func cachedIconIfAvailable(for record: ApplicationRecord) -> NSImage? {
-        readMemory(record.iconCacheKey)
-    }
-
     public func evictMemoryCache() {
         memoryLock.lock()
         memory.removeAll()

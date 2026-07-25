@@ -53,21 +53,32 @@ public final class GridModel {
 
     /// Applies immediately (relayout) without losing item order — the grid
     /// only changes how many items fit per page, not which items exist.
-    /// Always reflows, regardless of whether capacity grew or shrank: a
-    /// *smaller* capacity needs it so overflow items don't render off the
-    /// bottom of their page and vanish (see `loadDocument()`'s doc comment
-    /// for the confirmed real-world case), but a *larger* capacity needs it
-    /// too — confirmed via a separate real user report: increasing rows
-    /// from 3 to 4 changed the layout (shorter cells, an extra visible row)
-    /// but left existing pages grouped at the *old*, smaller capacity, so
-    /// the newly-available row just sat empty instead of pulling items up
-    /// from the next page. Reflowing at an unchanged capacity is a no-op in
-    /// effect (already-correct grouping in, same grouping out), so this is
-    /// safe to run unconditionally rather than only on the shrink path.
+    /// Reflows only when the *capacity itself* (`columns * rows`) actually
+    /// changed, in either direction: shrinking needs it so overflow items
+    /// don't render off the bottom of their page and vanish (see
+    /// `loadDocument()`'s doc comment), growing needs it too (a real user
+    /// report: increasing rows from 3 to 4 changed the layout but left
+    /// pages grouped at the old, smaller capacity, so the newly-available
+    /// row just sat empty).
+    ///
+    /// A prior version of this method reflowed *unconditionally*, on the
+    /// mistaken assumption that reflowing at an unchanged capacity is a
+    /// no-op. It isn't: `reflowPagesToCurrentCapacity()` flattens every
+    /// page and repacks tightly to capacity, which silently destroyed any
+    /// *intentionally non-compact* arrangement (pages the user left
+    /// partially empty, gaps from manual drag-and-drop reordering) every
+    /// single time any grid setting was applied — including changes
+    /// completely unrelated to capacity, like icon size — a real regression
+    /// confirmed via user report ("行数の設定やページごとのアプリ数の数が
+    /// おかしい"). Comparing capacity before/after and only reflowing on an
+    /// actual change avoids that.
     public func updateGridSettings(_ settings: GridSettings) {
+        let oldCapacity = capacityPerPage
         gridSettings = settings
         document.gridSettings = settings
-        reflowPagesToCurrentCapacity()
+        if capacityPerPage != oldCapacity {
+            reflowPagesToCurrentCapacity()
+        }
         onChange?()
     }
 

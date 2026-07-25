@@ -71,12 +71,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         viewController?.debugSetSearchQuery(query)
     }
 
-    /// Debug-only — see `GridViewController.debugSimulatePageDrag`'s doc
-    /// comment for why this exists.
-    public func debugSimulatePageDrag() {
-        viewController?.debugSimulatePageDrag()
-    }
-
     /// Exposed so composition-root code (`AppDelegate`, the Settings window)
     /// can read/mutate grid settings, custom sources, hidden apps, and
     /// aliases without this controller growing one pass-through accessor per

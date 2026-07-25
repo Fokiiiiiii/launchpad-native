@@ -270,3 +270,44 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(model.pages.map(\.count) == [24, 16], "pages must be consolidated to the new, larger capacity")
     #expect(model.pages.flatMap { $0 }.count == 40, "reflow must not lose or duplicate items")
 }
+
+/// Real regression, confirmed via user report: an earlier fix made
+/// `updateGridSettings` reflow *unconditionally*, on the mistaken
+/// assumption that reflowing at an unchanged capacity is a no-op. It
+/// isn't — `reflowPagesToCurrentCapacity()` flattens and tightly repacks
+/// every page, which destroys any intentionally non-compact arrangement
+/// (a page the user left partially empty, gaps from manual drag-and-drop
+/// reordering) every time *any* grid setting was applied, even ones
+/// completely unrelated to capacity like icon size. `updateGridSettings`
+/// must only reflow when columns*rows actually changes.
+@Test @MainActor func updatingSettingsWithoutCapacityChangePreservesNonCompactArrangement() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    var settings = GridSettings.default
+    settings.columns = 6
+    settings.rows = 3 // capacity 18
+    var document = LayoutDocument.empty
+    document.gridSettings = settings
+    // Deliberately non-compact: 10 + 8 = 18 items, well under 2 full
+    // pages' worth, split across 2 pages as if the user dragged some
+    // items to a second page on purpose.
+    document.pages = [
+        (0..<10).map { LayoutItem.app(StableAppIdentifier(value: "app\($0)")) },
+        (10..<18).map { LayoutItem.app(StableAppIdentifier(value: "app\($0)")) }
+    ]
+    let store = LayoutStore(directory: dir)
+    try await store.save(document)
+
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    #expect(model.pages.map(\.count) == [10, 8], "sanity check: loaded arrangement is as saved")
+
+    // Change only iconSize — columns/rows (and therefore capacity) stay
+    // the same.
+    var updated = model.gridSettings
+    updated.iconSize = updated.iconSize + 8
+    model.updateGridSettings(updated)
+
+    #expect(model.pages.map(\.count) == [10, 8], "capacity-unchanged settings update must not repack pages")
+}

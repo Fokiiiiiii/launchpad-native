@@ -620,19 +620,63 @@ content swaps back in.
 
 Given the direct precedent of "looked fine in logs, didn't actually
 work," this got an extra verification step beyond build/test/log: a new
-permanent debug hook, `LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG=1`, drives
+debug hook, `LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG=1`, drove
 `beginPageDrag`/`updatePageDrag`/`endPageDrag` with synthetic input (a
 fast flick) through the actual production code paths against this
-machine's real 100-app catalog. `log stream` confirmed the full
-state-machine transition end-to-end with no crash: `debugSimulatePageDrag:
-starting at page 0` → `debugSimulatePageDrag: ended at page 1 (was 0)`.
-This proves the mechanics (snapshot rendering, overlay math, spring
-settle, page swap) execute correctly, but — same disclosed limitation as
-the rest of this round — it cannot substitute for an actual trackpad
-gesture: the *visual feel* (does the overlay track smoothly, does
-rubber-banding feel right, does the settle read as natural) still needs
-the user's own hands-on trackpad test, and given this area's history,
-should be expected to need at least one more adjustment round.
+machine's real 100-app catalog. `log stream` confirmed the state-machine
+transition end-to-end with no crash: `debugSimulatePageDrag: starting at
+page 0` → `debugSimulatePageDrag: ended at page 1 (was 0)`.
+
+**This was not enough. On real hands-on use, this feature failed hard**:
+the user hit a real trackpad interaction that left the grid completely
+blank and unresponsive, requiring a force-quit to recover (confirmed via
+screenshot), plus a related report that changing pages made everything
+disappear. Root cause, found on re-reading the code: `GridCollectionView`
+fired `onSwipeBegan` — which hides the live grid and swaps in the
+snapshot overlay — from the very *first* `.changed` sample that looked
+even slightly more horizontal than vertical, with no minimum-distance
+gate at all. Any incidental trackpad motion (resting fingers, ambient
+jitter) could trigger the full overlay takeover; combined with a settle-
+path edge case that could leave `collectionView.isHidden` stuck `true`
+forever (the only path back to `false` is `finishPageDrag`, scheduled via
+`asyncAfter(deadline: .now() + spring.settlingDuration)`, which never
+recovers if that duration is unexpected for a near-zero-distance spring),
+this produced a real, permanently-stuck blank grid — and since every
+page-change method (dots, arrows, gestures) all operate on the same now-
+hidden `collectionView`, *any* attempt to change pages looked equally
+broken afterward, matching the user's report exactly.
+
+This is the **second** time a continuous/real-scroll-position approach
+to paging has failed in this exact area on real hardware (see the
+`NSScrollView`-based attempt above). Rather than attempt a third,
+increasingly elaborate fix this session still can't verify
+interactively, **the entire feature was reverted**: `GridCollectionView`
+is back to the original threshold-based single-fire `onSwipePage`
+(60pt, one jump per completed swipe), and `GridViewController`'s
+`beginPageDrag`/`updatePageDrag`/`endPageDrag`/`finishPageDrag`/
+`renderPageSnapshot`/`rubberBand`/`SnapshotDataSource`/the debug hook
+were all removed. Page transitions are back to the crossfade+slide from
+the earlier, safe round. If this operation-feel is still wanted in the
+future, it should wait for a way to actually test a real trackpad
+gesture interactively before trying again.
+
+**Related regression found and fixed in the same investigation**: the
+capacity-reflow fix above (`updateGridSettings` reflowing
+unconditionally) turned out to have a real side effect — reflowing at an
+*unchanged* capacity is not a no-op if the existing pages aren't already
+tightly packed (e.g. a page the user intentionally left partially empty,
+or gaps from manual drag-and-drop reordering). Since the fix reflowed on
+*every* `updateGridSettings` call, applying any grid setting — including
+ones with nothing to do with capacity, like icon size — silently
+force-repacked every page tightly, destroying any such intentional
+arrangement. Root-caused via a second user report
+("行数の設定やページごとのアプリ数の数がおかしい"). Fixed by comparing
+`capacityPerPage` before and after the settings change and only
+reflowing when it actually differs — `reducingGridCapacityReflowsOversizedPages`/
+`increasingGridCapacityConsolidatesUnderfilledPages` (capacity changes)
+keep passing, and a new
+`updatingSettingsWithoutCapacityChangePreservesNonCompactArrangement`
+test covers the previously-broken case. Full suite: 84/84 pass.
 
 **Known limitations:**
 - Only English and Japanese are localized so far. macOS's other ~38
