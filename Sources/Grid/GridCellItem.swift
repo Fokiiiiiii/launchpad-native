@@ -15,6 +15,7 @@ final class GridCellItem: NSCollectionViewItem {
     /// no longer matches, the cell's been reused and the stale icon must
     /// be dropped, not applied over whatever now belongs there.
     private(set) var currentRequestKey: String?
+    private let highlightView = NSView()
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let countBadge = NSTextField(labelWithString: "")
@@ -23,6 +24,9 @@ final class GridCellItem: NSCollectionViewItem {
 
     override func loadView() {
         let container = NSView()
+        highlightView.translatesAutoresizingMaskIntoConstraints = false
+        highlightView.wantsLayer = true
+
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
 
@@ -41,6 +45,11 @@ final class GridCellItem: NSCollectionViewItem {
         countBadge.backgroundColor = .clear
         countBadge.isHidden = true
 
+        // highlightView goes in first so it renders *behind* the icon/label
+        // — see `applySelection`'s doc comment for why it's sized to hug
+        // the icon+label instead of filling the whole (grid-settings-sized,
+        // often much larger than any one icon) cell.
+        container.addSubview(highlightView)
         container.addSubview(iconView)
         container.addSubview(label)
         container.addSubview(countBadge)
@@ -64,7 +73,12 @@ final class GridCellItem: NSCollectionViewItem {
             label.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 4),
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 2),
             label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
-            label.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -4)
+            label.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -4),
+
+            highlightView.topAnchor.constraint(equalTo: iconView.topAnchor, constant: -8),
+            highlightView.bottomAnchor.constraint(equalTo: label.bottomAnchor, constant: 8),
+            highlightView.leadingAnchor.constraint(equalTo: iconView.leadingAnchor, constant: -16),
+            highlightView.trailingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 16)
         ])
         view = container
         view.wantsLayer = true
@@ -120,13 +134,22 @@ final class GridCellItem: NSCollectionViewItem {
     /// same glass material lifting slightly, matching how Liquid Glass
     /// surfaces (Control Center's own selection state) highlight rather
     /// than painting a solid color over themselves.
+    ///
+    /// Drawn on `highlightView` — sized to hug the icon+label, not `view`
+    /// (the full collection-view cell). `view` is sized to the grid's
+    /// actual per-slot size, which at low column/row counts (or large
+    /// configured icon sizes) can be far bigger than the icon it holds;
+    /// painting the highlight across the *entire* slot then produces a
+    /// large, mostly-empty colored rectangle around a small icon —
+    /// confirmed by the user as visibly broken-looking ("これどう見ても
+    /// おかしい") via a debug-driven screenshot of a real search result.
     private func applySelection(_ isSelected: Bool) {
-        view.layer?.cornerRadius = 12
-        view.layer?.backgroundColor = isSelected
+        highlightView.layer?.cornerRadius = 12
+        highlightView.layer?.backgroundColor = isSelected
             ? NSColor.white.withAlphaComponent(0.14).cgColor
             : NSColor.clear.cgColor
-        view.layer?.borderWidth = isSelected ? 1 : 0
-        view.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
+        highlightView.layer?.borderWidth = isSelected ? 1 : 0
+        highlightView.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
     }
 
     /// The icon+label's actual rendered bounds, in this cell's own view

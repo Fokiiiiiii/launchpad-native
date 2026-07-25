@@ -64,6 +64,13 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         await gridModel.loadDocument()
     }
 
+    /// Debug-only — see `AppDelegate`'s `LAUNCHPAD_DEBUG_SEARCH_QUERY` doc
+    /// comment for why this exists (driving/screenshotting the search
+    /// results layout without Accessibility/GUI-scripting permission).
+    public func debugSetSearchQuery(_ query: String) {
+        viewController?.debugSetSearchQuery(query)
+    }
+
     /// Exposed so composition-root code (`AppDelegate`, the Settings window)
     /// can read/mutate grid settings, custom sources, hidden apps, and
     /// aliases without this controller growing one pass-through accessor per

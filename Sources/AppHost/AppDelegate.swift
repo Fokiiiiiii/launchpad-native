@@ -78,6 +78,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // discoverable way to know it worked.
             launcherWindowController.show()
 
+            // Debug-only: drives a real search query into the launcher
+            // right after it actually shows, so the search-results layout
+            // can be screenshotted for verification. This session's
+            // Terminal has no Accessibility/GUI-scripting permission, so
+            // typing into the field interactively isn't otherwise
+            // possible. Deliberately placed here (not a fixed delay from
+            // launch) — a flat delay raced the catalog scan and fired
+            // before the window ever existed, silently no-op'ing.
+            if let query = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SEARCH_QUERY"], !query.isEmpty {
+                launcherWindowController.debugSetSearchQuery(query)
+            }
+
             for await update in await scanner.updates() {
                 launcherWindowController.updateRecords(update.records)
             }
@@ -91,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.settingsWindowController.showUninstallTab(for: bundleID)
             }
         }
+
     }
 
     /// Re-applies trigger settings — called at launch and whenever the

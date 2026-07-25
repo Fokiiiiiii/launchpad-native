@@ -199,6 +199,16 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         setSearchMode(active: false)
     }
 
+    /// Debug-only entry point (`LAUNCHPAD_DEBUG_SEARCH_QUERY`, wired in
+    /// `AppDelegate`) so the search-results layout can actually be driven
+    /// and screenshotted without Accessibility/GUI-scripting permission to
+    /// type into the field interactively — see `AppDelegate`'s doc comment
+    /// on the env var for why this exists.
+    func debugSetSearchQuery(_ query: String) {
+        searchField.stringValue = query
+        applyQuery(query)
+    }
+
     func reloadGrid() {
         gridViewController.reload()
         applySearchResultsLayoutMetrics()
@@ -267,7 +277,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     }
 
     func controlTextDidChange(_ obj: Notification) {
-        let query = searchField.stringValue
+        applyQuery(searchField.stringValue)
+    }
+
+    private func applyQuery(_ query: String) {
         viewModel.setQuery(query)
         applySearchResultsLayoutMetrics()
         setSearchMode(active: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

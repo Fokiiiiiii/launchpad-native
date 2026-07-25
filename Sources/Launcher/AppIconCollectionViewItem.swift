@@ -10,6 +10,7 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     /// Search results reload on every keystroke, which recycles cells even
     /// more aggressively than the main grid does.
     private(set) var currentRequestKey: String?
+    private let highlightView = NSView()
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private var iconWidthConstraint: NSLayoutConstraint?
@@ -17,6 +18,9 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
 
     override func loadView() {
         let container = NSView()
+        highlightView.translatesAutoresizingMaskIntoConstraints = false
+        highlightView.wantsLayer = true
+
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
 
@@ -27,6 +31,11 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
         label.lineBreakMode = .byTruncatingTail
         label.maximumNumberOfLines = 2
 
+        // highlightView goes in first so it renders *behind* the icon/label
+        // — see `applySelection`'s doc comment for why it hugs the icon
+        // instead of filling the whole (grid-cell-sized, often much larger
+        // than the icon) cell.
+        container.addSubview(highlightView)
         container.addSubview(iconView)
         container.addSubview(label)
 
@@ -44,7 +53,12 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
             label.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 4),
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 2),
             label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
-            label.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -4)
+            label.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -4),
+
+            highlightView.topAnchor.constraint(equalTo: iconView.topAnchor, constant: -8),
+            highlightView.bottomAnchor.constraint(equalTo: label.bottomAnchor, constant: 8),
+            highlightView.leadingAnchor.constraint(equalTo: iconView.leadingAnchor, constant: -16),
+            highlightView.trailingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 16)
         ])
         view = container
     }
@@ -64,21 +78,19 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
         applySelection(isSelected)
     }
 
-    /// Matches `Grid.GridCellItem.applySelection` exactly — this cell
-    /// previously drew the flat system `selectedContentBackgroundColor`
-    /// instead of the app's soft-glass highlight, a leftover from before the
-    /// grid's own selection style was refined. That mismatch went unnoticed
-    /// while this cell's slot was a modest fixed size, but once search
-    /// results started sizing themselves to the grid's actual (often much
-    /// larger) per-cell size, the flat blue filled a correspondingly large
-    /// rectangle and read as visibly broken/out of place next to the rest
-    /// of the glass UI ("まだ壊れてる").
+    /// Matches `Grid.GridCellItem.applySelection` exactly, including drawing
+    /// on `highlightView` (hugging the icon) rather than the full `view`
+    /// (the whole grid-cell-sized slot). A debug-driven screenshot of a
+    /// real search result ("これどう見てもおかしい") showed this cell's
+    /// selection filling nearly its entire ~290x285pt slot around a much
+    /// smaller icon — a large, mostly-empty highlighted rectangle. Fixed
+    /// the same way as `GridCellItem`: see its `applySelection` doc comment.
     private func applySelection(_ isSelected: Bool) {
-        view.layer?.cornerRadius = 12
-        view.layer?.backgroundColor = isSelected
+        highlightView.layer?.cornerRadius = 12
+        highlightView.layer?.backgroundColor = isSelected
             ? NSColor.white.withAlphaComponent(0.14).cgColor
             : NSColor.clear.cgColor
-        view.layer?.borderWidth = isSelected ? 1 : 0
-        view.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
+        highlightView.layer?.borderWidth = isSelected ? 1 : 0
+        highlightView.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
     }
 }

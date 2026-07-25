@@ -396,6 +396,30 @@ mirroring `GridCellItem`'s exactly. (The page-control dots visible at
 the bottom of the search screenshot were confirmed by the user to be
 an unrelated non-issue, not a bug.)
 
+Interactively verifying any of this had been blocked by the same wall
+each round: no Accessibility/GUI-scripting permission in this session's
+Terminal, so the search field couldn't be typed into and the result
+couldn't be screenshotted first-hand. Two things changed that: (1) a
+debug-only hook, `LAUNCHPAD_DEBUG_SEARCH_QUERY` (env var, wired in
+`AppDelegate`, forwarded through `LauncherWindowController` and
+`LauncherViewController.debugSetSearchQuery`), drives a real query into
+the already-showing launcher without any input simulation — the same
+pattern the codebase already used for `LAUNCHPAD_DEBUG_SHOW_UNINSTALL`;
+(2) the user ran it themselves (`LAUNCHPAD_DEBUG_SEARCH_QUERY=a open -a
+...`) and sent back real screenshots, which is what finally made the
+actual remaining defect visible and confirmable: the selection
+highlight (both `GridCellItem` and `AppIconCollectionViewItem`) painted
+its background on the *entire* collection-view cell — sized to the
+grid's real per-slot size, which at this user's settings (6x3 grid,
+160pt icons) is roughly 290x285pt — not just the icon+label. A selected
+item's highlight was therefore a large, mostly-empty rectangle around a
+much smaller icon, which read as obviously broken regardless of its
+color ("これどう見てもおかしい"). Fixed in both cell types by moving the
+highlight to a dedicated `highlightView` sized to hug the icon (top:
+icon top -8, bottom: label bottom +8, leading/trailing: icon
+leading/trailing ∓16) instead of filling the cell. Full suite: 82/82
+pass.
+
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
   but not actually implemented in `GridViewController`/`PagedGridLayout` yet
