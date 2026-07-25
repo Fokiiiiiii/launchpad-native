@@ -606,6 +606,22 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// (rather than merely `alphaValue = 0` on-screen) keeps this
     /// invisible to the user while still giving AppKit a real window to
     /// render into.
+    ///
+    /// Ordered front exactly once, right here, and never ordered out again
+    /// — a real, confirmed follow-up regression: the first version of this
+    /// fix called `orderFront`/`orderOut` on every single drag gesture (in
+    /// `renderPageSnapshot`, once direction resolves), and a user report of
+    /// a brief flicker on every page move followed shortly after that fix
+    /// shipped. Repeatedly ordering *any* real window in and out of the
+    /// window list — even one permanently parked off-screen — still forces
+    /// a WindowServer-level composite pass each time, which is a plausible
+    /// source of a screen-wide flicker distinct from the earlier "flash of
+    /// the previous page's content" bug (already fixed in `finishPageDrag`).
+    /// Ordering front once, up front, still satisfies `cacheDisplay`'s
+    /// requirement that the view belong to a window that's actually been
+    /// displayed — there's no need to repeat it per gesture, and since the
+    /// window never visually appears anywhere real, there's no downside to
+    /// leaving it ordered front indefinitely.
     private static let snapshotHostWindow: NSWindow = {
         let window = NSWindow(
             contentRect: NSRect(x: -20000, y: -20000, width: 1, height: 1),
@@ -618,6 +634,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         window.hasShadow = false
         window.isOpaque = false
         window.backgroundColor = .clear
+        window.orderFront(nil)
         return window
     }()
 
@@ -658,16 +675,16 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         // See `snapshotHostWindow`'s doc comment: this view must actually
         // belong to a real window before `cacheDisplay` will capture
-        // anything but transparent pixels from its layer-backed cells.
+        // anything but transparent pixels from its layer-backed cells. The
+        // window is already ordered front permanently (once, at creation) —
+        // only the content view is swapped in/out here, per gesture.
         let hostWindow = Self.snapshotHostWindow
         hostWindow.setContentSize(size)
         hostWindow.contentView = tempCollectionView
-        hostWindow.orderFront(nil)
         tempCollectionView.layoutSubtreeIfNeeded()
         tempCollectionView.displayIfNeeded()
 
         defer {
-            hostWindow.orderOut(nil)
             hostWindow.contentView = nil
         }
 

@@ -30,7 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsWindowController = SettingsWindowController(
         model: launcherWindowController.model,
         onTriggerSettingsChanged: { [weak self] in self?.applyCurrentTriggerSettings() ?? false },
-        onDockVisibilityChanged: { [weak self] hideDock in self?.launcherWindowController.updateDockVisibilityPreference(hideDock) }
+        onDockVisibilityChanged: { [weak self] hideDock in self?.launcherWindowController.updateDockVisibilityPreference(hideDock) },
+        onWillClose: { [weak self] in self?.launcherWindowController.reclaimKeyIfVisible() }
     )
     /// Shown instead of the launcher on the very first cold start (see
     /// `OnboardingState`) — the catalog scan/FSEvents watching still run
@@ -162,6 +163,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Debug-only: opens Settings, then closes it, then logs whether the
+        // launcher window regained key status — exercises the fix for a
+        // real, confirmed regression (user report: the search field stopped
+        // accepting clicks/keyboard input after closing Settings).
+        // `LauncherWindow` is a `.nonactivatingPanel`; AppKit's automatic
+        // "hand key status to the next window" behavior doesn't pick those
+        // back up the way it would an ordinary window when the window that
+        // took key status over (Settings) closes, so
+        // `SettingsWindowController.onWillClose` ->
+        // `LauncherWindowController.reclaimKeyIfVisible()` now does it
+        // explicitly. No Accessibility/GUI-scripting permission is needed
+        // for this, since nothing here simulates an actual mouse click.
+        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                self?.settingsWindowController.show()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    self?.settingsWindowController.debugClose()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                        let isKey = self?.launcherWindowController.debugIsWindowKey() ?? false
+                        DiagnosticsLog.launcher.info("debug settings-key-reclaim: launcher isKeyWindow=\(isKey, privacy: .public) after Settings closed")
+                    }
+                }
+            }
+        }
     }
 
     /// Re-applies trigger settings — called at launch and whenever the

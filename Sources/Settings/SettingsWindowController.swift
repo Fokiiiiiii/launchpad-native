@@ -33,15 +33,25 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// `LauncherWindowController` (which owns the actual window) can update
     /// its live `level`.
     private let onDockVisibilityChanged: (Bool) -> Void
+    /// Fired when this window closes — lets the composition root hand key
+    /// status back to the still-visible launcher underneath (see
+    /// `windowWillClose`'s doc comment for why this is needed at all).
+    private let onWillClose: () -> Void
     /// Built once, alongside the window, and kept alive for the controller's
     /// lifetime — `showUninstallTab(for:)` needs to reach it even when the
     /// window already exists and `show()` takes its early-return path.
     private var viewModel: SettingsViewModel?
 
-    public init(model: GridModel, onTriggerSettingsChanged: @escaping () -> Bool, onDockVisibilityChanged: @escaping (Bool) -> Void) {
+    public init(
+        model: GridModel,
+        onTriggerSettingsChanged: @escaping () -> Bool,
+        onDockVisibilityChanged: @escaping (Bool) -> Void,
+        onWillClose: @escaping () -> Void = {}
+    ) {
         self.model = model
         self.onTriggerSettingsChanged = onTriggerSettingsChanged
         self.onDockVisibilityChanged = onDockVisibilityChanged
+        self.onWillClose = onWillClose
         super.init()
     }
 
@@ -84,8 +94,43 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         viewModel?.preselectUninstallCandidate(bundleIdentifier: bundleIdentifier)
     }
 
+    /// Keeps the NSWindow instance around (isReleasedWhenClosed = false) so
+    /// reopening doesn't rebuild the whole SwiftUI tree/view model.
+    ///
+    /// Also notifies `onWillClose` — real, confirmed regression: since
+    /// `LauncherWindowController` stopped calling `hide()` before opening
+    /// Settings (so the grid stays visible underneath, matching reference
+    /// apps), closing Settings left the still-visible `LauncherWindow`
+    /// with no key window at all. `LauncherWindow` is an `NSPanel` with
+    /// `.nonactivatingPanel` style — AppKit's automatic "hand key status to
+    /// the next window" behavior on a window closing does not pick those
+    /// back up the way it would an ordinary window, so nothing reclaims it
+    /// automatically. The visible symptom: the search field (and every
+    /// other control) stops accepting clicks/keyboard input entirely after
+    /// Settings is closed, even though the launcher is still on screen.
+    ///
+    /// `onWillClose` is dispatched to the *next* run-loop turn, not called
+    /// synchronously here — confirmed via the `LAUNCHPAD_DEBUG_SETTINGS_
+    /// KEY_RECLAIM` hook that calling it synchronously doesn't stick:
+    /// `windowWillClose` fires partway through `NSWindow.close()`'s own
+    /// teardown (ordering out, resigning key), which continues running
+    /// *after* this delegate method returns — a `makeKeyAndOrderFront`
+    /// called here gets silently overwritten moments later when that
+    /// teardown finishes resigning key status with nothing to reassign it
+    /// to. Deferring to `DispatchQueue.main.async` lets `close()` finish
+    /// completely first, so the reclaim has the last word.
     public func windowWillClose(_ notification: Notification) {
-        // Keep the NSWindow instance around (isReleasedWhenClosed = false)
-        // so reopening doesn't rebuild the whole SwiftUI tree/view model.
+        DispatchQueue.main.async { [weak self] in
+            self?.onWillClose()
+        }
+    }
+
+    /// Debug-only — see `AppDelegate`'s `LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM`
+    /// doc comment: lets the "launcher regains key status when Settings
+    /// closes" fix be exercised end-to-end via `log stream`, without
+    /// Accessibility/GUI-scripting permission to actually click the close
+    /// button.
+    public func debugClose() {
+        window?.close()
     }
 }

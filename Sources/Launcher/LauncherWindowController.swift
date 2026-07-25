@@ -105,6 +105,38 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         window?.applyDockVisibilityPreference(hideDock: hideDock)
     }
 
+    /// Called when Settings (which floats *above* the launcher without
+    /// hiding it — see `SettingsWindowController`'s doc comment) closes —
+    /// see `SettingsWindowController.windowWillClose`'s doc comment for the
+    /// full explanation of why `LauncherWindow` (a `.nonactivatingPanel`)
+    /// doesn't automatically regain key status on its own. A no-op if the
+    /// launcher isn't currently visible (e.g. the user hid it first, then
+    /// closed Settings separately) — nothing to reclaim in that case, and
+    /// forcing a hidden window key/front would show it unexpectedly.
+    public func reclaimKeyIfVisible() {
+        guard let window, window.isVisible else {
+            DiagnosticsLog.launcher.info("reclaimKeyIfVisible: bailed (window is nil or not visible)")
+            return
+        }
+        // Confirmed via the `LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM` hook:
+        // `makeKeyAndOrderFront` alone didn't stick — closing Settings (an
+        // ordinary, activating window) can take the *application* itself
+        // out of the active/frontmost state, same as `show()`'s own reason
+        // for calling `NSApp.activate` before `makeKeyAndOrderFront` (see
+        // that method's doc comment). Without reactivating the app first,
+        // asking a nonactivating panel to become key while some other app
+        // is frontmost doesn't actually succeed.
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        DiagnosticsLog.launcher.info("reclaimKeyIfVisible: requested key, isKeyWindow now \(window.isKeyWindow, privacy: .public)")
+    }
+
+    /// Debug-only — see `AppDelegate`'s `LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM`
+    /// doc comment.
+    public func debugIsWindowKey() -> Bool {
+        window?.isKeyWindow ?? false
+    }
+
     public func updateRecords(_ records: [ApplicationRecord]) {
         viewModel.setRecords(records)
 
@@ -175,6 +207,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // key (closing itself) within ~50ms of every trigger firing.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        DiagnosticsLog.launcher.info("show(): after makeKeyAndOrderFront, isVisible=\(window.isVisible, privacy: .public), isKeyWindow=\(window.isKeyWindow, privacy: .public)")
 
         if !wasVisible {
             animateIn(window: window)
@@ -384,7 +417,24 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // empty background is handled separately by
         // `BackgroundClickCatcherView`, since that click stays inside this
         // window and never resigns key.
-        DiagnosticsLog.launcher.info("windowDidResignKey fired")
+        //
+        // Real, confirmed regression (found via the
+        // `LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM` hook): `windowDidResignKey`
+        // also fires when a *different window of this same app* — Settings —
+        // becomes key, not just when a different app steals focus. Without
+        // this guard, opening Settings hid the launcher out from under it
+        // immediately, silently undoing the Round 6 design where Settings
+        // floats *above* the still-visible grid instead of replacing it
+        // (see `SettingsWindowController`'s doc comment). `NSApp.isActive`
+        // stays true when key status moves to another window of this same
+        // app, and only goes false when a genuinely different app becomes
+        // frontmost — that's the actual "clicked away" signal this handler
+        // needs, not "this particular window merely isn't key anymore."
+        guard !NSApp.isActive else {
+            DiagnosticsLog.launcher.info("windowDidResignKey fired, but app is still active (key moved to another of this app's windows) — not hiding")
+            return
+        }
+        DiagnosticsLog.launcher.info("windowDidResignKey fired, app resigned active — hiding")
         hide()
     }
 }
