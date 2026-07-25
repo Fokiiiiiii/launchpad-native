@@ -235,6 +235,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         super.viewDidAppear()
         applySearchResultsLayoutMetrics()
         view.window?.makeFirstResponder(searchField)
+        DiagnosticsLog.launcher.info("viewDidAppear layout: root=\(String(describing: self.view.frame), privacy: .public), grid=\(String(describing: self.gridViewController.view.frame), privacy: .public), searchField=\(String(describing: self.searchField.convert(self.searchField.bounds, to: self.view)), privacy: .public)")
     }
 
     func resetSearch() {

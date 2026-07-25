@@ -1,5 +1,27 @@
 import AppKit
 
+/// `NSGlassEffectView` used as a plain sibling (see `GlassBackgroundFactory`'s
+/// doc comment) still didn't guarantee it stays out of hit-testing's way in
+/// practice — a real, confirmed regression: a user's click landed squarely
+/// within the search field's own logged frame (`viewDidAppear`'s diagnostic:
+/// searchField at (683.5, 980, 342.5, 24), click reported at (730, 985)) yet
+/// was intercepted by the *background* click catcher instead of the field,
+/// closing the launcher. Apple's docs already warn `NSGlassEffectView`
+/// doesn't reliably respect z-order for its `contentView`; this suggests the
+/// same unreliability extends to a bare sibling instance's own hit-testing.
+/// Overriding `hitTest` to unconditionally return `nil` is the direct fix:
+/// a purely decorative background must never be a hit-test target at all,
+/// so every click always falls through to whatever real control is drawn
+/// around or in front of it, regardless of any internal z-order quirk.
+@available(macOS 26.0, *)
+private final class NonInteractiveGlassEffectView: NSGlassEffectView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private final class NonInteractiveVisualEffectView: NSVisualEffectView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// Liquid Glass surface for the launcher background. Uses the public
 /// `NSGlassEffectView` (macOS 26+, confirmed present in
 /// `ReverseEngineering/Contracts/public-tier1.md`) and falls back to
@@ -11,9 +33,11 @@ import AppKit
 /// doesn't guarantee subview z-order; hands-on testing confirmed the practical
 /// consequence is worse than a visual quirk — clicks, buttons, and collection
 /// view cells hosted inside `contentView` stopped receiving mouse events
-/// reliably. `LauncherWindowController` now adds this view and the real
+/// reliably. `LauncherWindowController` adds this view and the real
 /// interactive content as *sibling* subviews of a plain `NSView` (background
-/// first, content on top), which guarantees normal AppKit hit-testing.
+/// first, content on top) — and, since that alone still wasn't reliable
+/// enough (see `NonInteractiveGlassEffectView`'s doc comment), both concrete
+/// types here also hard-disable their own hit-testing.
 @MainActor
 enum GlassBackgroundFactory {
     /// Reduce Transparency asks for a frostier/near-solid surface rather than
@@ -26,7 +50,7 @@ enum GlassBackgroundFactory {
 
         let background: NSView
         if #available(macOS 26.0, *), !reduceTransparency {
-            let glass = NSGlassEffectView()
+            let glass = NonInteractiveGlassEffectView()
             glass.cornerRadius = cornerRadius
             // A near-opaque default tint made the launcher read as a heavy
             // black overlay rather than a light glass surface (unfavorably
@@ -37,7 +61,7 @@ enum GlassBackgroundFactory {
             glass.tintColor = NSColor.black.withAlphaComponent(0.08)
             background = glass
         } else {
-            let fallback = NSVisualEffectView()
+            let fallback = NonInteractiveVisualEffectView()
             // `.hudWindow` renders quite dark; `.underWindowBackground`
             // adapts to the desktop behind it and reads much lighter,
             // matching the same intent as the glass tint above. Reduce
