@@ -1325,6 +1325,34 @@ drag whose `mouseUp` was again lost via the normal path but correctly
 recovered by the global-monitor safety net from the prior round —
 confirming that fix holds up under repeated real use. `swift test`: 95/95.
 
+**5th round, root-caused from a live (non-synthetic) `log stream` capture
+of the user's actual trackpad use**: user report — "after one drag's
+movement breaks, dragging a different app afterward makes the *first*
+app move instead — a strange kind of breakage." A passive capture (no
+synthetic events injected, just `log stream` running while the user
+tried it themselves) caught the exact sequence twice: `mouseDown` on
+item A → `beginItemDrag` → **a second `mouseDown` on item B, with no
+`mouseUp` for item A in between** (the same real-world lost-`mouseUp`
+gap the global monitor above exists for) → a long run of `mouseDragged`
+→ eventually one `mouseUp` → `endItemDrag` committing item **A** (not
+B) to B's slot. Root cause: `handleItemMouseDown` never checked whether
+a drag was already active — it only overwrote `pendingItemPress`,
+leaving the stale `activeItemDrag` in place. Since
+`handleItemMouseDragged` checks `activeItemDrag` before
+`pendingItemPress`, every drag update after the second press kept
+driving item A's session instead of starting a fresh one for item B.
+Fixed: `handleItemMouseDown` now commits any still-active session via
+`endItemDrag` (using its own last-tracked position — same treatment as
+a genuinely lost `mouseUp`) before handling the new press, so a fresh
+`mouseDown` always starts clean. Added a purpose-built debug hook
+(`LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG=interrupt`) that reproduces this
+exact interleaving via real `window.sendEvent` dispatch; `log stream`
+confirmed the new "committing the stale session first" log fires and a
+proper `beginItemDrag` follows for the second item. `swift test`:
+95/95. Verified against a backed-up/restored real `layout.json` (the
+debug hook exercises the same real `model.moveItem`/`save()` path as
+production).
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
