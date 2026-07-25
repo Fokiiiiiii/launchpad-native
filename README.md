@@ -379,6 +379,23 @@ screenshotting the result — verification for all three was build +
 test + `log stream` evidence only. If anything still looks off, a
 screenshot or a precise description of the mismatch would help.
 
+The user then provided actual screenshots (empty grid vs. a live "a"
+search), which is what finally made the real remaining defect visible:
+`AppIconCollectionViewItem`'s selected-state highlight still drew the
+flat system `selectedContentBackgroundColor` (plain blue) instead of
+the soft glass highlight (`GridCellItem.applySelection`'s translucent
+white fill + thin border) — a leftover from when the grid's own
+selection style was refined (that round only touched `GridCellItem`,
+never the search cell). This went unnoticed while the search cell's
+slot was a small fixed size; once the layout-matching fix above made
+search cells size to the grid's real (often much larger) per-cell size,
+that same flat blue filled a correspondingly large rectangle and read
+as a jarring, out-of-place block next to the rest of the glass UI.
+Fixed by giving `AppIconCollectionViewItem` its own `applySelection`
+mirroring `GridCellItem`'s exactly. (The page-control dots visible at
+the bottom of the search screenshot were confirmed by the user to be
+an unrelated non-issue, not a bug.)
+
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
   but not actually implemented in `GridViewController`/`PagedGridLayout` yet

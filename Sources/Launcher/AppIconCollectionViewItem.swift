@@ -60,10 +60,25 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
         iconHeightConstraint?.constant = CGFloat(iconSize)
         iconView.image = icon
         label.stringValue = record.displayName
-        view.layer?.cornerRadius = 12
         view.wantsLayer = true
+        applySelection(isSelected)
+    }
+
+    /// Matches `Grid.GridCellItem.applySelection` exactly — this cell
+    /// previously drew the flat system `selectedContentBackgroundColor`
+    /// instead of the app's soft-glass highlight, a leftover from before the
+    /// grid's own selection style was refined. That mismatch went unnoticed
+    /// while this cell's slot was a modest fixed size, but once search
+    /// results started sizing themselves to the grid's actual (often much
+    /// larger) per-cell size, the flat blue filled a correspondingly large
+    /// rectangle and read as visibly broken/out of place next to the rest
+    /// of the glass UI ("まだ壊れてる").
+    private func applySelection(_ isSelected: Bool) {
+        view.layer?.cornerRadius = 12
         view.layer?.backgroundColor = isSelected
-            ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.35).cgColor
+            ? NSColor.white.withAlphaComponent(0.14).cgColor
             : NSColor.clear.cgColor
+        view.layer?.borderWidth = isSelected ? 1 : 0
+        view.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
     }
 }
