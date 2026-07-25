@@ -1251,6 +1251,27 @@ exercises real model mutations.
 `swift test`: 95/95. Still needs the user's own hands-on retest — a
 real click or drag can't be performed from this session.
 
+**Follow-up regression**: "properly dragging, the grabbed app flies off,
+operations don't work." `updateItemDrag` reassigned
+`floatingView.frame.origin` on every drag update, while that view's
+layer also carried the lift's scale transform (set via a raw
+`CATransform3DMakeScale` assignment). `NSView.frame` is computed
+against the view's untransformed geometry — reassigning it while a
+layer transform is active (and, during the lift's spring, still
+mid-animation) fights with that transform instead of composing with
+it, producing erratic drift. Every other continuous drag in this
+codebase (page-drag, reorder preview) avoids this by never touching
+`.frame` after initial placement and driving movement purely through
+`transform.translation.x/y` — this was the one place that broke from
+that pattern. Fixed by making the floating view's `.frame` immutable
+after creation: the lift now sets `transform.scale` via its structured
+keypath (not a raw matrix assignment), and cursor-following/settle/
+revert all drive movement via `transform.translation.x/y` deltas from
+the fixed original frame instead. Verified via
+`LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG=reorder` against a backed-up copy
+of the real `layout.json` (restored immediately after, per the lesson
+above): clean commit, no crash. `swift test`: 95/95.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
