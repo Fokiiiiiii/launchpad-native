@@ -149,6 +149,37 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.reloadData()
         pageControl.numberOfPages = model.pages.count
         pageControl.currentPage = currentPage
+        prefetchAdjacentPageIcons()
+    }
+
+    /// Warms `IconCache` for the pages adjacent to `currentPage`, ahead of
+    /// time. Real user report: icons visibly "popped in" a few seconds
+    /// after switching pages — `itemForRepresentedObjectAt:` only starts
+    /// fetching an icon once its cell is actually about to be displayed,
+    /// so a page nobody has looked at yet starts every cell blank. This
+    /// also matters for the live drag-neighbor snapshot
+    /// (`renderPageSnapshot`), which can only use `cachedIconIfAvailable`
+    /// — a synchronous peek that returns blank for anything not already in
+    /// memory — so keeping the pages a swipe is likely to reveal warmed
+    /// *before* the swipe even starts is what actually makes that snapshot
+    /// show real icons instead of placeholders, matching the user's other
+    /// ask ("right before a swipe reveals it, have it ready").
+    ///
+    /// Called whenever `currentPage` changes (here, `jumpToPage`,
+    /// `finishPageDrag`) and once on initial load (via `reload()`, already
+    /// invoked after the first catalog reconcile). Fire-and-forget: results
+    /// land in `IconCache`'s memory dict as a side effect, nothing here
+    /// needs to consume them directly.
+    private func prefetchAdjacentPageIcons() {
+        for neighborPage in [currentPage - 1, currentPage + 1] where model.pages.indices.contains(neighborPage) {
+            for item in model.pages[neighborPage] {
+                guard case .app(let id) = item, let record = model.record(for: id) else { continue }
+                let cache = iconCache
+                Task {
+                    _ = await cache.icon(for: record)
+                }
+            }
+        }
     }
 
     // MARK: Keyboard navigation (forwarded from LauncherViewController)
@@ -234,6 +265,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 guard let self else { return }
                 self.currentPage = index
                 self.collectionView.reloadData()
+                self.prefetchAdjacentPageIcons()
 
                 // Snap the freshly-reloaded content to the "just off to the
                 // correct side" starting position with no animation, then
@@ -487,6 +519,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         dragNeighborImageView = nil
         dragDirection = 0
         dragGeneration += 1
+        prefetchAdjacentPageIcons()
     }
 
     /// Hard safety net, reachable from three independent places (the fixed
