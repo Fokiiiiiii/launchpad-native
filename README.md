@@ -968,6 +968,24 @@ needs the user's own look — this session's `screencapture` consistently
 captures its own foreground window rather than the launched app, a
 limitation reconfirmed (not worked around) this round.
 
+**Fixed a real page-drag bug: the previous page flashed at the end of a
+swipe transition.** User report: "right at the moment it switches, the
+previous app shows." `finishPageDrag` reset the live `collectionView`'s
+transform to 0 — its on-screen position — *before* calling `reloadData()`,
+so for however long AppKit took to actually lay out and draw the reloaded
+cells, the view sat on-screen still showing the *old* page; removing the
+neighbor snapshot overlay (which had covered it with the correct new-page
+image throughout the drag) right after exposed that stale frame. Fixed by
+doing the reload, plus a forced synchronous `layoutSubtreeIfNeeded()` +
+`displayIfNeeded()`, while the view is still off-screen (at whatever
+transform the settle spring left it at), and only then resetting the
+transform and removing the neighbor — by the time either becomes visible,
+the content is already correct. `swift test`: 91/91. Verified via
+`LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG=commit` through `log stream`: the state
+machine still completes correctly (page 0 → 1, no errors); this proves the
+mechanics survived the reorder, not the absence of the visual flash
+itself, which needs the user's own look.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
