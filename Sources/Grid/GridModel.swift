@@ -30,6 +30,17 @@ public final class GridModel {
         pages = document.pages.isEmpty ? [[]] : document.pages
         folders = document.folders
         gridSettings = document.gridSettings
+        // Self-heal: a page persisted under a larger columns*rows capacity
+        // can have more items than the *current* capacity allows if the
+        // user has since reduced it. PagedGridLayout positions item N at
+        // row = N / columns — an item past the current row count lands
+        // below the visible page bounds and is simply never drawn, which
+        // is exactly the reported "some grid icons disappear" bug. Confirmed
+        // on a real corrupted document: capacity 18 (6x3) with pages of 34
+        // and 35 items (left over from an earlier 7x5 = 35 setting).
+        if pages.contains(where: { $0.count > capacityPerPage }) {
+            reflowPagesToCurrentCapacity()
+        }
     }
 
     public var triggerSettings: TriggerSettings {
@@ -41,11 +52,37 @@ public final class GridModel {
     }
 
     /// Applies immediately (relayout) without losing item order — the grid
-    /// only changes how many items fit per page, not which items exist.
+    /// only changes how many items fit per page, not which items exist. If
+    /// the new capacity is smaller than an existing page's item count
+    /// though, the *distribution* across pages has to change too, or the
+    /// overflow items render off the bottom of their page and vanish (see
+    /// `loadDocument()`'s doc comment for the confirmed real-world case).
     public func updateGridSettings(_ settings: GridSettings) {
         gridSettings = settings
         document.gridSettings = settings
+        if pages.contains(where: { $0.count > capacityPerPage }) {
+            reflowPagesToCurrentCapacity()
+        }
         onChange?()
+    }
+
+    /// Regroups `pages` into chunks of exactly `capacityPerPage` (the last
+    /// chunk may be smaller), preserving overall item order. Only called
+    /// when at least one existing page already exceeds the current
+    /// capacity, so this never reshuffles an arrangement that's already
+    /// valid under the current grid settings.
+    private func reflowPagesToCurrentCapacity() {
+        let capacity = capacityPerPage
+        let flattened = pages.flatMap { $0 }
+        guard !flattened.isEmpty else { return }
+        var newPages: [[LayoutItem]] = []
+        var index = flattened.startIndex
+        while index < flattened.endIndex {
+            let end = min(index + capacity, flattened.endIndex)
+            newPages.append(Array(flattened[index..<end]))
+            index = end
+        }
+        pages = newPages
     }
 
     public var layoutMode: LayoutMode {

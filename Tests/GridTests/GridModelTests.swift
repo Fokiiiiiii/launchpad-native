@@ -178,3 +178,61 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(model2.folders.values.first?.name == "MyFolder")
     #expect(model2.pages[0].count == 1)
 }
+
+/// Real-world bug, confirmed on an actual corrupted document: a page
+/// persisted under a larger columns*rows capacity (e.g. 7x5 = 35) still had
+/// 34-35 items after the user reduced the grid to 6x3 = 18. PagedGridLayout
+/// positions item N at row = N / columns, so anything past the new row
+/// count renders below the visible page and never appears — "some grid
+/// icons disappear." `updateGridSettings` must reflow pages, not just
+/// record the new capacity.
+@Test @MainActor func reducingGridCapacityReflowsOversizedPages() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+
+    let records = (0..<40).map { record("App \($0)", id: "app\($0)") }
+    model.reconcile(with: records)
+    // Default GridSettings is 7x5 = 35 capacity: reconcile should have
+    // packed 35 onto page 0 and overflowed the rest onto page 1.
+    #expect(model.pages[0].count == 35)
+
+    var shrunk = model.gridSettings
+    shrunk.columns = 6
+    shrunk.rows = 3 // capacity 18
+    model.updateGridSettings(shrunk)
+
+    for page in model.pages {
+        #expect(page.count <= 18, "page has \(page.count) items, exceeding capacity 18")
+    }
+    #expect(model.pages.flatMap { $0 }.count == 40, "reflow must not lose or duplicate items")
+}
+
+/// Same bug, but for a document that was *already* corrupted before this
+/// fix existed (i.e. persisted to disk with an oversized page under an
+/// older, larger capacity) — `loadDocument()` must self-heal it, not just
+/// prevent new corruption going forward.
+@Test @MainActor func loadingAnAlreadyCorruptedDocumentSelfHeals() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    var corrupted = LayoutDocument.empty
+    var smallCapacitySettings = GridSettings.default
+    smallCapacitySettings.columns = 6
+    smallCapacitySettings.rows = 3 // capacity 18
+    corrupted.gridSettings = smallCapacitySettings
+    corrupted.pages = [
+        (0..<34).map { LayoutItem.app(StableAppIdentifier(value: "app\($0)")) }
+    ]
+    let store = LayoutStore(directory: dir)
+    try await store.save(corrupted)
+
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+
+    for page in model.pages {
+        #expect(page.count <= 18)
+    }
+    #expect(model.pages.flatMap { $0 }.count == 34)
+}
