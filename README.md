@@ -1119,6 +1119,24 @@ could plausibly make any click-and-drag interaction unreliable
 depending on timing, worth retrying now that it's fixed before
 concluding folder creation itself needs work. `swift test`: 95/95.
 
+Follow-up user report: the search field still didn't work — clicking it
+closed the launcher entirely. Added a one-time frame-logging diagnostic
+to `LauncherViewController.viewDidAppear` and had the user capture
+`log stream` while reproducing: the click landed at (730, 985), squarely
+within the search field's own logged frame (683.5, 980, 342.5, 24), yet
+`BackgroundClickCatcherView.mouseDown` fired instead — the click was
+being swallowed by `searchBarGlass` (`NSGlassEffectView` on macOS 26),
+even though it's already placed as a decorative *sibling* behind
+`searchIcon`/`searchField` specifically to avoid Apple's documented
+z-order quirk for glass views. That sibling-ordering workaround wasn't
+sufficient here — the glass view still won hit-testing for at least
+some points within its bounds. Fixed by making both glass background
+implementations (`NSGlassEffectView` and the `NSVisualEffectView`
+fallback) hard-disable their own `hitTest` (always returns `nil`) — a
+purely decorative layer can now never be a hit target, so clicks always
+fall through to whatever real control is drawn in front of or around
+it, regardless of any internal z-order behavior. `swift test`: 95/95.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
