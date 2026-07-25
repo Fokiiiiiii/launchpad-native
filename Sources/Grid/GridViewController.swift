@@ -586,6 +586,41 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         dragGeneration += 1
     }
 
+    /// A permanently-off-screen, never-ordered-visible host window, reused
+    /// across every snapshot render. `cacheDisplay(in:to:)` re-drives a
+    /// view's normal display path — for a layer-backed hierarchy (every
+    /// `GridCellItem` sets `view.wantsLayer = true`), that path only
+    /// produces real pixel content once the view has actually been asked to
+    /// display by a real window's rendering machinery at least once. A
+    /// view that has never belonged to any `NSWindow` (the original
+    /// implementation here) never gets that: `cacheDisplay` still reports
+    /// success (returns a non-nil bitmap) but every pixel comes back fully
+    /// transparent. Confirmed empirically via `debugSimulatePageDrag` +
+    /// `log stream`: the pixel-sampling diagnostic in
+    /// `logSnapshotContentCheck` read "0/64 sampled points non-transparent"
+    /// before this fix — this is what the user's report ("next page's
+    /// content isn't visible during the drag") was actually seeing; the
+    /// snapshot mechanism itself was working (non-nil, correctly
+    /// positioned/transformed), it just had nothing drawn in it. Parking
+    /// the render host far outside any real display's coordinate space
+    /// (rather than merely `alphaValue = 0` on-screen) keeps this
+    /// invisible to the user while still giving AppKit a real window to
+    /// render into.
+    private static let snapshotHostWindow: NSWindow = {
+        let window = NSWindow(
+            contentRect: NSRect(x: -20000, y: -20000, width: 1, height: 1),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.ignoresMouseEvents = true
+        window.hasShadow = false
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        return window
+    }()
+
     /// Renders `model.pages[page]` into a standalone offscreen
     /// `NSCollectionView` (its own `PagedGridLayout`, sized to match the
     /// live grid exactly) and rasterizes it to a static image via
@@ -620,13 +655,63 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // sufficient — `NSCollectionView.dataSource` itself doesn't retain.
         tempCollectionView.dataSource = dataSource
         tempCollectionView.reloadData()
+
+        // See `snapshotHostWindow`'s doc comment: this view must actually
+        // belong to a real window before `cacheDisplay` will capture
+        // anything but transparent pixels from its layer-backed cells.
+        let hostWindow = Self.snapshotHostWindow
+        hostWindow.setContentSize(size)
+        hostWindow.contentView = tempCollectionView
+        hostWindow.orderFront(nil)
         tempCollectionView.layoutSubtreeIfNeeded()
+        tempCollectionView.displayIfNeeded()
+
+        defer {
+            hostWindow.orderOut(nil)
+            hostWindow.contentView = nil
+        }
 
         guard let bitmap = tempCollectionView.bitmapImageRepForCachingDisplay(in: tempCollectionView.bounds) else { return nil }
         tempCollectionView.cacheDisplay(in: tempCollectionView.bounds, to: bitmap)
+        Self.logSnapshotContentCheck(bitmap, page: page)
         let image = NSImage(size: size)
         image.addRepresentation(bitmap)
         return image
+    }
+
+    /// Temporary diagnostic (see the user report: "next page's content isn't
+    /// visible during the drag" — the neighbor snapshot mechanism itself was
+    /// already confirmed via log evidence to run without error/nil, but
+    /// that only proves an `NSImage` was produced, not that it has visible
+    /// pixels). `cacheDisplay(in:to:)` is documented to work by re-driving
+    /// each view's `-drawRect:`-style display path — a hierarchy that's
+    /// never been inserted into a real `NSWindow` (as `tempCollectionView`
+    /// here never is) is a known way for that to silently produce a blank
+    /// or fully-transparent bitmap despite reporting success. Sampling a
+    /// handful of points and logging the fraction that are non-transparent
+    /// tells us, from a real run via `debugSimulatePageDrag`, whether this
+    /// is actually what's happening — without needing Accessibility
+    /// permission or the user's own hands-on retest.
+    private static func logSnapshotContentCheck(_ bitmap: NSBitmapImageRep, page: Int) {
+        let width = bitmap.pixelsWide
+        let height = bitmap.pixelsHigh
+        guard width > 0, height > 0 else {
+            DiagnosticsLog.grid.notice("renderPageSnapshot: page \(page, privacy: .public) bitmap has zero size (\(width, privacy: .public)x\(height, privacy: .public))")
+            return
+        }
+        var sampled = 0
+        var nonTransparent = 0
+        let steps = 8
+        for xi in 0..<steps {
+            for yi in 0..<steps {
+                let x = min(width - 1, xi * width / steps)
+                let y = min(height - 1, yi * height / steps)
+                guard let color = bitmap.colorAt(x: x, y: y) else { continue }
+                sampled += 1
+                if color.alphaComponent > 0.01 { nonTransparent += 1 }
+            }
+        }
+        DiagnosticsLog.grid.notice("renderPageSnapshot: page \(page, privacy: .public) size=\(width, privacy: .public)x\(height, privacy: .public), \(nonTransparent, privacy: .public)/\(sampled, privacy: .public) sampled points non-transparent")
     }
 
     /// Apple's standard rubber-band resistance formula (see apple-design's
