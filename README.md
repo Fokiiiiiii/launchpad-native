@@ -1050,6 +1050,36 @@ non-transparent (5/64, 12/64 across two pages — low counts are expected,
 since most of a page is empty grid space between icons, not missing
 content). `swift test`: 91/91.
 
+Added two more `Sort By` modes: `Date Added` (newest first) and `Last
+Used` (most recently launched first), alongside the existing `Custom`/
+`Name`. Backed by two new persisted maps on `LayoutDocument`,
+`dateAddedByID` and `lastUsedByID`. `dateAddedByID` is stamped when
+`GridModel.reconcile(with:)` places a genuinely new app; every app
+already in an existing real grid (added before this field existed) gets
+backfilled with synthetic, strictly-increasing timestamps based on its
+current position — apps get appended to the end over time, so existing
+order is the best available proxy for "roughly when added." `lastUsedByID`
+is stamped by `GridModel.recordLaunch(for:)`, called from the single
+funnel every launch path (grid click, search result, folder contents)
+goes through, plus the two "Open New Instance" context-menu actions that
+bypass it. Both new sorts are one-shot, same as `Name` — applying the
+mode reorders once; it isn't continuously re-enforced, so launching an
+app under `Last Used` doesn't yank it to the top mid-click. Folders have
+no timestamp of their own and sort to the end under both modes. New
+tests cover the ordering, the backfill's position-based reversal, and
+Codable round-trip/back-compat for the two new fields — 95/95 passing.
+Verified against the real installed `layout.json`: the backfill populated
+`dateAddedByID` for all ~93 real apps with no errors or data loss.
+
+**Build note**: while adding this, confirmed that plain `swift build`/
+`swift test` in this iCloud-synced checkout can silently read a stale
+build database (the disk-I/O-error issue mentioned in Build & Run below)
+and skip recompiling changed files without surfacing an error — a bare
+`swift test` run reported the old test count with none of a set of
+already-edited new tests included. Always use the `--scratch-path`
+invocation from Build & Run when verifying changes, not just when running
+`Scripts/build-app.sh`.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
