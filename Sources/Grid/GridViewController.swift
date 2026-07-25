@@ -1083,6 +1083,13 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let sourceOriginalIndex: Int
         let draggedItem: LayoutItem
         let originalFrame: NSRect
+        /// The floating view's frame, in root-view coordinates, set exactly
+        /// once at creation and never reassigned — see `updateItemDrag`'s
+        /// doc comment for why: all *movement* after that happens purely
+        /// via `transform.translation.x/y`, matching every other continuous
+        /// drag in this codebase (page-drag, reorder preview). Needed here
+        /// as the fixed baseline those translation deltas are computed from.
+        var floatingViewOriginalFrameInRoot: NSRect = .zero
         /// Offset from the cell's origin to where the user actually grabbed
         /// it — respected while following the cursor so the icon doesn't
         /// jump to be centered under the pointer (apple-design's direct-
@@ -1094,6 +1101,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         var folderCandidateOriginalIndex: Int?
         var pendingRawFolderCandidateIndex: Int?
         var edgeDirection: Int = 0
+        /// Last raw drag point (collectionView-local), refreshed on every
+        /// `updateItemDrag` call — reused by `commitPageTurnDuringDrag` to
+        /// re-evaluate candidates on the new page without needing to derive
+        /// a point back out of the floating view's (now `.frame`-immutable)
+        /// position.
+        var lastPoint: NSPoint = .zero
         var reorderTimer: Timer?
         var folderTimer: Timer?
         var edgeTimer: Timer?
@@ -1241,30 +1254,53 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         imageView.layer?.shadowOffset = CGSize(width: 0, height: -6)
         view.addSubview(imageView, positioned: .above, relativeTo: nil)
         session.floatingView = imageView
+        session.floatingViewOriginalFrameInRoot = frameInRoot
         cell.view.isHidden = true
 
         // Spec 5.2: a short lift (scale 1.00 -> 1.06), a touch of bounce
         // since a real grab is what triggered it (apple-design: reserve
         // bounce for gesture-driven motion). Reduce Motion keeps the
         // functional feedback (the icon still visibly separates and gets a
-        // shadow) without the scale animation itself.
+        // shadow) without the scale animation itself. Uses the
+        // `"transform.scale"` structured keypath (not a raw
+        // `CATransform3DMakeScale` assignment to `layer.transform`) so it
+        // composes cleanly with the `"transform.translation.x/y"` keypath
+        // `updateItemDrag` uses for movement — see that method's doc
+        // comment for why mixing `.frame` and `.transform` on the same
+        // view was a real, confirmed bug.
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard let layer = imageView.layer else { return }
-        if reduceMotion {
-            layer.transform = CATransform3DIdentity
-        } else {
-            layer.transform = CATransform3DMakeScale(1.06, 1.06, 1)
+        if !reduceMotion {
+            layer.setValue(1.06, forKeyPath: "transform.scale")
             layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.0, to: 1.06, damping: 0.82, response: 0.20), forKey: "lift")
         }
     }
 
+    /// Real, confirmed bug (user report: "the grabbed app flies off
+    /// erratically"): the first version of this method repeatedly
+    /// reassigned `floatingView.frame.origin` on every drag update, while
+    /// the *same* view's layer also carried the lift's scale transform.
+    /// `NSView.frame` is computed against the view's untransformed
+    /// geometry — reassigning it while a layer transform is simultaneously
+    /// active (and, during the lift's spring, still mid-animation) fights
+    /// with that transform instead of composing with it, producing
+    /// compounding/erratic positional drift. Every other continuous drag in
+    /// this codebase (page-drag, reorder preview) avoids this by never
+    /// touching `.frame` after initial placement and driving all movement
+    /// through the `transform.translation.x/y` keypaths instead, which
+    /// compose independently of `transform.scale` — this now does the same.
     private func updateItemDrag(session: ItemDragSession, point: NSPoint) {
-        guard let floatingView = session.floatingView else { return }
+        session.lastPoint = point
+        guard let floatingView = session.floatingView, let layer = floatingView.layer else { return }
         let targetOriginInCollectionView = NSPoint(x: point.x - session.grabOffset.x, y: point.y - session.grabOffset.y)
         let targetOriginInRoot = collectionView.convert(targetOriginInCollectionView, to: view)
+        let dx = targetOriginInRoot.x - session.floatingViewOriginalFrameInRoot.minX
+        let dy = targetOriginInRoot.y - session.floatingViewOriginalFrameInRoot.minY
+
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        floatingView.frame.origin = targetOriginInRoot
+        layer.setValue(dx, forKeyPath: "transform.translation.x")
+        layer.setValue(dy, forKeyPath: "transform.translation.y")
         CATransaction.commit()
 
         evaluateReorderCandidate(session: session, point: point)
@@ -1494,7 +1530,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 session.pendingRawSlot = -1
                 session.candidateSlot = self.model.pages.indices.contains(targetPage) ? self.model.pages[targetPage].count : 0
                 session.edgeDirection = 0
-                self.updateItemDrag(session: session, point: session.floatingView.map { self.collectionView.convert($0.frame.origin, from: self.view) } ?? .zero)
+                self.updateItemDrag(session: session, point: session.lastPoint)
             }
         }
     }
@@ -1533,8 +1569,13 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     /// Spec 13.1: the floating icon springs to its final cell before being
     /// cleaned up, so the drop reads as "landing," not an abrupt swap.
+    /// Spec 13.1: springs to the final cell — like `updateItemDrag`, this
+    /// drives the move purely via `transform.translation.x/y` relative to
+    /// the floating view's never-reassigned `.frame`, not by touching
+    /// `.frame` itself (see that method's doc comment for why mixing the
+    /// two was a real, confirmed bug).
     private func settleFloatingView(session: ItemDragSession) {
-        guard let floatingView = session.floatingView else {
+        guard let floatingView = session.floatingView, let layer = floatingView.layer else {
             collectionView.reloadData()
             return
         }
@@ -1544,25 +1585,25 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let targetOriginalIndex = min(session.candidateSlot, model.pages.indices.contains(currentPage) ? max(model.pages[currentPage].count - 1, 0) : 0)
         let targetFrame = layout.layoutAttributesForItem(at: IndexPath(item: targetOriginalIndex, section: 0))?.frame ?? session.originalFrame
         let targetFrameInRoot = collectionView.convert(targetFrame, to: view)
+        let dx = targetFrameInRoot.minX - session.floatingViewOriginalFrameInRoot.minX
+        let dy = targetFrameInRoot.minY - session.floatingViewOriginalFrameInRoot.minY
 
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.18
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            floatingView.animator().frame = targetFrameInRoot
-            if let layer = floatingView.layer {
-                layer.transform = CATransform3DIdentity
-            }
-        }, completionHandler: { [weak self] in
+        animateLayerTranslation(layer, toX: dx, toY: dy)
+        layer.setValue(1.0, forKeyPath: "transform.scale")
+        layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.06, to: 1.0, damping: 1.0, response: 0.18), forKey: "settleScale")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             Task { @MainActor in
                 floatingView.removeFromSuperview()
                 self?.collectionView.item(at: IndexPath(item: targetOriginalIndex, section: 0))?.view.isHidden = false
                 self?.collectionView.reloadData()
             }
-        })
+        }
     }
 
     /// Spec 13.2/13.3: invalid drop or cancel — spring back to the original
-    /// cell, undo any reorder preview, no model mutation.
+    /// cell (same transform-only approach as `settleFloatingView`), undo
+    /// any reorder preview, no model mutation.
     private func revertItemDrag(session: ItemDragSession) {
         session.invalidateTimers()
         activeItemDrag = nil
@@ -1570,18 +1611,16 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         clearFolderCandidateHighlight(session: session)
         for item in collectionView.visibleItems() { resetItemTransform(item.view) }
 
-        guard let floatingView = session.floatingView else { return }
-        let targetFrameInRoot = collectionView.convert(session.originalFrame, to: view)
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.2
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            floatingView.animator().frame = targetFrameInRoot
-            floatingView.layer?.transform = CATransform3DIdentity
-        }, completionHandler: {
+        guard let floatingView = session.floatingView, let layer = floatingView.layer else { return }
+        animateLayerTranslation(layer, toX: 0, toY: 0)
+        layer.setValue(1.0, forKeyPath: "transform.scale")
+        layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.06, to: 1.0, damping: 1.0, response: 0.2), forKey: "revertScale")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
             Task { @MainActor in
                 floatingView.removeFromSuperview()
             }
-        })
+        }
         collectionView.item(at: IndexPath(item: session.sourceOriginalIndex, section: 0))?.view.isHidden = false
     }
 
