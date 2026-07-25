@@ -420,7 +420,55 @@ icon top -8, bottom: label bottom +8, leading/trailing: icon
 leading/trailing ∓16) instead of filling the cell. Full suite: 82/82
 pass.
 
+**Localization infrastructure (English + Japanese)** — user requested
+support for the ~40 languages macOS ships with; scoped down to building
+the infrastructure plus English/Japanese now, with the remaining
+languages to follow. Added a new `Localization` SPM target
+(`Sources/Localization/`) exposing an `L10n` namespace of static
+accessors (`L10n.searchPlaceholder`, `L10n.columnsLabel(_:)`, etc.) that
+every other target (`Grid`, `Launcher`, `Settings`) now calls instead of
+hardcoding English string literals — roughly 70 user-facing strings
+across menus, Settings tabs, alerts, and accessibility labels were
+converted. **A real SwiftPM gap surfaced during this work and is worth
+recording**: a `.xcstrings` String Catalog declared via
+`resources: [.process("Resources")]` builds and copies fine under
+`swift build`, but the command-line SwiftPM build system does **not**
+compile it into per-language lookup tables the way Xcode's IDE build
+system does — the raw JSON file just gets copied into the resource
+bundle as-is, so every lookup silently fell through to the English
+default regardless of the system language, confirmed by directly
+inspecting the built bundle's contents (no `en.lproj`/`ja.lproj`
+anywhere) and by a temporary diagnostic log showing `apply=Apply` even
+under `-AppleLanguages '(ja)'`. Since this project has no Xcode project
+and is only ever built via `swift build`, switched from `.xcstrings` to
+classic `en.lproj/Localizable.strings` + `ja.lproj/Localizable.strings`
+files, which SwiftPM's command-line build has always compiled/copied
+correctly. `L10n` reads them via `Bundle.localizedString(forKey:value:table:)`
+with explicit keys (not the newer string-interpolation-based key
+auto-generation, which would have made hand-authoring the catalog's
+keys error-prone). Also required adding `defaultLocalization: "en"` to
+`Package.swift` (missing before; SwiftPM needs it to treat `.lproj`
+resources as localized at all) and `CFBundleDevelopmentRegion`/
+`CFBundleLocalizations` in `Resources/Info.plist`. Because
+`Bundle.module`'s generated accessor checks `Bundle.main.bundleURL`
+(the `.app` root) before falling back to an absolute build-directory
+path — neither of which is `Contents/Resources/`, where a hand-assembled
+`.app` actually needs it — added `LocalizationBundle.swift`, which
+checks `Bundle.main.resourceURL` first; `Scripts/build-app.sh` copies
+`LaunchpadNative_Localization.bundle` into `Contents/Resources/` the
+same way it already does for `AppIcon.icns`. Verified end-to-end: built
+release, launched the installed `.app`'s binary directly with
+`-AppleLanguages '(ja)'` and `-AppleLanguages '(en)'` in turn while a
+temporary diagnostic log line (removed once confirmed) printed resolved
+`L10n` strings — Japanese launch showed `apply=適用 search=検索`,
+English showed `apply=Apply search=Search`, both with
+`Bundle.main.preferredLocalizations` matching. Full suite: 82/82 pass.
+
 **Known limitations:**
+- Only English and Japanese are localized so far. macOS's other ~38
+  supported languages are intentionally deferred to a later round —
+  `Sources/Localization/Resources/{en,ja}.lproj/Localizable.strings` is
+  where additional `<lang>.lproj` directories would go.
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
   but not actually implemented in `GridViewController`/`PagedGridLayout` yet
   — selecting it changes a setting with no visual effect. Paged mode is the

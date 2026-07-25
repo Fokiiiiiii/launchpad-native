@@ -1,4 +1,5 @@
 import AppKit
+import Localization
 
 /// Page-dot indicator plus explicit prev/next chevron buttons. The dots
 /// alone (6x6pt, 8pt apart) turned out to be too small a hit target for
@@ -67,8 +68,8 @@ final class PageControlView: NSView {
         dotStack.orientation = .horizontal
         dotStack.spacing = 8
 
-        configureChevron(previousButton, symbol: "chevron.left", label: "Previous Page", action: #selector(previousTapped))
-        configureChevron(nextButton, symbol: "chevron.right", label: "Next Page", action: #selector(nextTapped))
+        configureChevron(previousButton, symbol: "chevron.left", label: L10n.previousPageAccessibilityLabel, action: #selector(previousTapped))
+        configureChevron(nextButton, symbol: "chevron.right", label: L10n.nextPageAccessibilityLabel, action: #selector(nextTapped))
 
         let glassPill = Self.makeGlassPill(cornerRadius: 18)
         glassPill.translatesAutoresizingMaskIntoConstraints = false
@@ -124,7 +125,7 @@ final class PageControlView: NSView {
             button.wantsLayer = true
             button.layer?.cornerRadius = 3
             button.setContentHuggingPriority(.required, for: .horizontal)
-            button.setAccessibilityLabel("Page \(index + 1)")
+            button.setAccessibilityLabel(L10n.pageNumberAccessibilityLabel(index + 1))
             NSLayoutConstraint.activate([
                 button.widthAnchor.constraint(equalToConstant: 6),
                 button.heightAnchor.constraint(equalToConstant: 6)

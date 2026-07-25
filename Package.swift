@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "LaunchpadNative",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v15)
     ],
@@ -17,6 +18,11 @@ let package = Package(
             path: "Sources/Diagnostics"
         ),
         .target(
+            name: "Localization",
+            path: "Sources/Localization",
+            resources: [.process("Resources")]
+        ),
+        .target(
             name: "Catalog",
             dependencies: ["Diagnostics"],
             path: "Sources/Catalog"
@@ -28,12 +34,12 @@ let package = Package(
         ),
         .target(
             name: "Launcher",
-            dependencies: ["Diagnostics", "Catalog", "Grid"],
+            dependencies: ["Diagnostics", "Catalog", "Grid", "Localization"],
             path: "Sources/Launcher"
         ),
         .target(
             name: "Grid",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "WindowBrowser"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "WindowBrowser", "Localization"],
             path: "Sources/Grid",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
@@ -44,7 +50,7 @@ let package = Package(
         ),
         .target(
             name: "Settings",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Uninstall"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Uninstall", "Localization"],
             path: "Sources/Settings"
         ),
         .target(

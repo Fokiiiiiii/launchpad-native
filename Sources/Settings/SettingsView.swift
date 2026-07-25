@@ -1,4 +1,5 @@
 import AppKit
+import Localization
 import Persistence
 import SwiftUI
 import Uninstall
@@ -12,11 +13,11 @@ public struct SettingsView: View {
 
     public var body: some View {
         TabView(selection: $viewModel.selectedTab) {
-            gridTab.tabItem { Label("Grid", systemImage: "square.grid.3x3") }.tag(SettingsTab.grid)
-            triggersTab.tabItem { Label("Triggers", systemImage: "hand.tap") }.tag(SettingsTab.triggers)
-            sourcesTab.tabItem { Label("Sources", systemImage: "folder") }.tag(SettingsTab.sources)
-            hiddenTab.tabItem { Label("Hidden Apps", systemImage: "eye.slash") }.tag(SettingsTab.hidden)
-            uninstallTab.tabItem { Label("Uninstall", systemImage: "trash") }.tag(SettingsTab.uninstall)
+            gridTab.tabItem { Label(L10n.tabGrid, systemImage: "square.grid.3x3") }.tag(SettingsTab.grid)
+            triggersTab.tabItem { Label(L10n.tabTriggers, systemImage: "hand.tap") }.tag(SettingsTab.triggers)
+            sourcesTab.tabItem { Label(L10n.tabSources, systemImage: "folder") }.tag(SettingsTab.sources)
+            hiddenTab.tabItem { Label(L10n.tabHidden, systemImage: "eye.slash") }.tag(SettingsTab.hidden)
+            uninstallTab.tabItem { Label(L10n.tabUninstall, systemImage: "trash") }.tag(SettingsTab.uninstall)
         }
         .padding()
         .frame(width: 480, height: 420)
@@ -24,19 +25,19 @@ public struct SettingsView: View {
 
     private var gridTab: some View {
         Form {
-            Stepper("Columns: \(viewModel.columns)", value: $viewModel.columns, in: 3...12)
-            Stepper("Rows: \(viewModel.rows)", value: $viewModel.rows, in: 2...8)
+            Stepper(L10n.columnsLabel(viewModel.columns), value: $viewModel.columns, in: 3...12)
+            Stepper(L10n.rowsLabel(viewModel.rows), value: $viewModel.rows, in: 2...8)
             VStack(alignment: .leading) {
-                Text("Icon size: \(Int(viewModel.iconSize))pt")
+                Text(L10n.iconSizeLabel(Int(viewModel.iconSize)))
                 Slider(value: $viewModel.iconSize, in: 48...160)
-                    .accessibilityLabel("Icon size")
+                    .accessibilityLabel(L10n.iconSizeAccessibilityLabel)
             }
-            Picker("Layout", selection: $viewModel.layoutMode) {
-                Text("Paged").tag(LayoutMode.paged)
-                Text("Vertical Scroll").tag(LayoutMode.verticalScroll)
+            Picker(L10n.layoutPickerLabel, selection: $viewModel.layoutMode) {
+                Text(L10n.layoutModePaged).tag(LayoutMode.paged)
+                Text(L10n.layoutModeVerticalScroll).tag(LayoutMode.verticalScroll)
             }
             .pickerStyle(.segmented)
-            Button("Apply") { viewModel.saveGridSettings() }
+            Button(L10n.applyButton) { viewModel.saveGridSettings() }
                 .keyboardShortcut(.defaultAction)
         }
         .padding()
@@ -44,37 +45,37 @@ public struct SettingsView: View {
 
     private var triggersTab: some View {
         Form {
-            Toggle("F4 / Spotlight key", isOn: $viewModel.f4Enabled)
+            Toggle(L10n.f4ToggleLabel, isOn: $viewModel.f4Enabled)
             if viewModel.f4Enabled && !viewModel.f4Active {
                 f4PermissionHint
             }
 
-            Toggle("Global hotkey", isOn: $viewModel.hotkeyEnabled)
+            Toggle(L10n.globalHotkeyToggleLabel, isOn: $viewModel.hotkeyEnabled)
             if viewModel.hotkeyEnabled {
                 HotkeyRecorderView(keyCode: $viewModel.hotkeyKeyCode, carbonModifiers: $viewModel.hotkeyCarbonModifiers)
                     .frame(width: 160, height: 24)
             }
 
-            GroupBox("Hot Corners") {
-                Toggle("Top Left", isOn: $viewModel.hotCornerTopLeft)
-                Toggle("Top Right", isOn: $viewModel.hotCornerTopRight)
-                Toggle("Bottom Left", isOn: $viewModel.hotCornerBottomLeft)
-                Toggle("Bottom Right", isOn: $viewModel.hotCornerBottomRight)
+            GroupBox(L10n.hotCornersGroupTitle) {
+                Toggle(L10n.hotCornerTopLeft, isOn: $viewModel.hotCornerTopLeft)
+                Toggle(L10n.hotCornerTopRight, isOn: $viewModel.hotCornerTopRight)
+                Toggle(L10n.hotCornerBottomLeft, isOn: $viewModel.hotCornerBottomLeft)
+                Toggle(L10n.hotCornerBottomRight, isOn: $viewModel.hotCornerBottomRight)
             }
 
-            GroupBox("Trackpad Gesture") {
-                Toggle("4-finger pinch to open, spread to close", isOn: $viewModel.multitouchEnabled)
+            GroupBox(L10n.trackpadGestureGroupTitle) {
+                Toggle(L10n.multitouchToggleLabel, isOn: $viewModel.multitouchEnabled)
                 VStack(alignment: .leading) {
-                    Text("Sensitivity")
+                    Text(L10n.sensitivityLabel)
                     Slider(value: $viewModel.multitouchSensitivity, in: 0.3...0.8)
-                        .accessibilityLabel("Gesture sensitivity")
+                        .accessibilityLabel(L10n.gestureSensitivityAccessibilityLabel)
                 }
                 if viewModel.multitouchEnabled {
                     gestureConflictHint
                 }
             }
 
-            Button("Apply") { viewModel.saveTriggerSettings() }
+            Button(L10n.applyButton) { viewModel.saveTriggerSettings() }
                 .keyboardShortcut(.defaultAction)
         }
         .padding()
@@ -89,9 +90,9 @@ public struct SettingsView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 4) {
-                Text("F4 needs Input Monitoring permission")
+                Text(L10n.f4PermissionHint)
                     .font(.caption)
-                Button("Open Privacy Settings…") {
+                Button(L10n.openPrivacySettingsButton) {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
                         NSWorkspace.shared.open(url)
                     }
@@ -113,10 +114,10 @@ public struct SettingsView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 4) {
-                Text("This gesture may conflict with macOS's own Launchpad/Mission Control trackpad gestures. If it feels unreliable, open Trackpad settings and disable the matching system gesture.")
+                Text(L10n.gestureConflictHint)
                     .font(.caption)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("Open Trackpad Settings…") {
+                Button(L10n.openTrackpadSettingsButton) {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.trackpad") {
                         NSWorkspace.shared.open(url)
                     }
@@ -136,11 +137,11 @@ public struct SettingsView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Spacer()
-                        Button("Remove") { viewModel.removeCustomSource(id: source.id) }
+                        Button(L10n.removeButton) { viewModel.removeCustomSource(id: source.id) }
                     }
                 }
             }
-            Button("Add Folder…") { addFolder() }
+            Button(L10n.addFolderButton) { addFolder() }
         }
         .padding()
     }
@@ -148,7 +149,7 @@ public struct SettingsView: View {
     private var hiddenTab: some View {
         VStack(alignment: .leading) {
             if viewModel.hiddenApps.isEmpty {
-                Text("No hidden apps.")
+                Text(L10n.noHiddenAppsMessage)
                     .foregroundStyle(.secondary)
                     .padding()
             } else {
@@ -157,7 +158,7 @@ public struct SettingsView: View {
                         HStack {
                             Text(entry.name)
                             Spacer()
-                            Button("Unhide") { viewModel.unhide(entry.identifier) }
+                            Button(L10n.unhideButton) { viewModel.unhide(entry.identifier) }
                         }
                     }
                 }
@@ -183,15 +184,15 @@ public struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 if viewModel.selectedUninstallRecordID == nil {
-                    Text("Select an app to see what would be removed.")
+                    Text(L10n.uninstallSelectPrompt)
                         .foregroundStyle(.secondary)
                         .padding()
                 } else if viewModel.uninstallPlan.isEmpty {
-                    Text("No related files or registrations were found for this app.")
+                    Text(L10n.uninstallNoItemsFound)
                         .foregroundStyle(.secondary)
                         .padding()
                 } else {
-                    Text("This is a preview only — nothing is deleted or stopped yet.")
+                    Text(L10n.uninstallPreviewNotice)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     List(Array(viewModel.uninstallPlan.enumerated()), id: \.offset) { _, item in
@@ -202,19 +203,19 @@ public struct SettingsView: View {
                                 .truncationMode(.middle)
                             Spacer()
                             if item.requiresPrivilegedHelper {
-                                Text("needs helper")
+                                Text(L10n.needsHelperLabel)
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
                         }
                     }
                     HStack {
-                        Button("Save Dry-Run Report") { viewModel.saveUninstallDryRunReport() }
+                        Button(L10n.saveDryRunReportButton) { viewModel.saveUninstallDryRunReport() }
                         Spacer()
-                        Button("Move Owned Items to Trash…") { confirmAndExecuteRemoval() }
+                        Button(L10n.moveToTrashButton) { confirmAndExecuteRemoval() }
                             .disabled(viewModel.itemsEligibleForRemoval.isEmpty)
                     }
-                    Text("Only \"owned\" items are ever removed, and always to the Trash — never a permanent delete. Shared-risk, unknown, and helper-required items are shown for visibility only and are never touched.")
+                    Text(L10n.uninstallSafetyNotice)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -233,11 +234,11 @@ public struct SettingsView: View {
         guard !items.isEmpty else { return }
 
         let alert = NSAlert()
-        alert.messageText = "Move \(items.count) item(s) to Trash?"
+        alert.messageText = L10n.moveToTrashAlertTitle(items.count)
         alert.informativeText = items.map(\.path.path).joined(separator: "\n")
         alert.alertStyle = .critical
-        alert.addButton(withTitle: "Move to Trash")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.moveToTrashConfirmButton)
+        alert.addButton(withTitle: L10n.cancelButton)
 
         if alert.runModal() == .alertFirstButtonReturn {
             viewModel.executeOwnedRemoval()
@@ -246,9 +247,9 @@ public struct SettingsView: View {
 
     private func classificationBadge(_ classification: OwnershipClassification) -> some View {
         let (label, color): (String, Color) = switch classification {
-        case .owned: ("owned", .green)
-        case .sharedRisk: ("shared risk", .yellow)
-        case .unknown: ("unknown", .red)
+        case .owned: (L10n.classificationOwned, .green)
+        case .sharedRisk: (L10n.classificationSharedRisk, .yellow)
+        case .unknown: (L10n.classificationUnknown, .red)
         }
         return Text(label)
             .font(.caption2)
@@ -263,7 +264,7 @@ public struct SettingsView: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.message = "Choose a folder to scan for applications"
+        panel.message = L10n.chooseFolderPanelMessage
         if panel.runModal() == .OK, let url = panel.url {
             viewModel.addCustomSource(path: url.path)
         }

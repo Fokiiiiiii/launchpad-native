@@ -2,6 +2,7 @@ import AppKit
 import Catalog
 import Diagnostics
 import Grid
+import Localization
 import UniformTypeIdentifiers
 
 /// Two display modes sharing one search field: an empty query shows
@@ -75,7 +76,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.placeholderAttributedString = NSAttributedString(
-            string: "Search",
+            string: L10n.searchPlaceholder,
             attributes: [.kern: -0.4, .foregroundColor: NSColor.placeholderTextColor]
         )
         searchField.font = .systemFont(ofSize: 20, weight: .regular)
@@ -83,7 +84,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchField.drawsBackground = false
         searchField.focusRingType = .none
         searchField.delegate = self
-        searchField.setAccessibilityLabel("Search applications")
+        searchField.setAccessibilityLabel(L10n.searchAccessibilityLabel)
 
         // A small circular glass chip, same reasoning as the search
         // capsule above — decorative sibling, button drawn on top of it.
@@ -93,7 +94,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         settingsButton.translatesAutoresizingMaskIntoConstraints = false
         settingsButton.bezelStyle = .circular
         settingsButton.isBordered = false
-        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")?
+        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: L10n.settingsButtonAccessibilityLabel)?
             .withSymbolConfiguration(.init(pointSize: 18, weight: .regular))
         settingsButton.contentTintColor = .secondaryLabelColor
         settingsButton.target = self

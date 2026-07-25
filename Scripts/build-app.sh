@@ -33,6 +33,14 @@ cp "$BIN" "$APP/Contents/MacOS/AppHost"
 if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
     cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
+# SwiftPM's default Bundle.module resolution checks Bundle.main.bundleURL
+# (the .app's root) before falling back to an absolute build-dir path —
+# neither matches Contents/Resources/, which is where a real .app actually
+# needs this bundle. Localization/LocalizationBundle.swift checks
+# Bundle.main.resourceURL first specifically so this copy is sufficient.
+if [ -d "$SCRATCH/$CONFIG/LaunchpadNative_Localization.bundle" ]; then
+    cp -R "$SCRATCH/$CONFIG/LaunchpadNative_Localization.bundle" "$APP/Contents/Resources/"
+fi
 
 echo "Built $APP"
 

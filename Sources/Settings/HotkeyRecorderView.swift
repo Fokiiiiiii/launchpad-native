@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import Localization
 import SwiftUI
 
 /// A standard macOS shortcut-recorder control: click it, press a key combo,
@@ -18,7 +19,7 @@ final class HotkeyRecorderNSView: NSView {
     private(set) var isRecording = false {
         didSet { needsDisplay = true }
     }
-    var displayText: String = "Click to record" {
+    var displayText: String = L10n.hotkeyClickToRecord {
         didSet { needsDisplay = true }
     }
 
@@ -32,7 +33,7 @@ final class HotkeyRecorderNSView: NSView {
         NSColor.separatorColor.setStroke()
         path.stroke()
 
-        let text = isRecording ? "Press a key combo…" : displayText
+        let text = isRecording ? L10n.hotkeyPressCombo : displayText
         let color: NSColor = isRecording ? .selectedControlTextColor : .labelColor
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
@@ -76,7 +77,7 @@ final class HotkeyRecorderNSView: NSView {
     /// covers the common keys a global launcher shortcut would realistically
     /// use; anything else falls back to "Key <code>" rather than guessing.
     static func displayString(keyCode: UInt16?, carbonModifiers: UInt) -> String {
-        guard let keyCode else { return "Click to record" }
+        guard let keyCode else { return L10n.hotkeyClickToRecord }
         var symbols = ""
         if carbonModifiers & UInt(controlKey) != 0 { symbols += "⌃" }
         if carbonModifiers & UInt(optionKey) != 0 { symbols += "⌥" }
@@ -96,7 +97,7 @@ final class HotkeyRecorderNSView: NSView {
             122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",
             98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12"
         ]
-        return names[keyCode] ?? "Key \(keyCode)"
+        return names[keyCode] ?? L10n.hotkeyUnknownKey(Int(keyCode))
     }
 }
 

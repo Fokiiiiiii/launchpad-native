@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import Localization
 
 /// Builds the per-app context menu (2.7) purely from the record's actual
 /// capabilities — never by matching on app name/bundle identifier.
@@ -20,46 +21,46 @@ public enum ContextMenuBuilder {
     public static func menu(for record: ApplicationRecord, isInFolder: Bool, actions: Actions) -> NSMenu {
         let menu = NSMenu()
 
-        menu.addItem(makeItem("Open", action: actions.open))
+        menu.addItem(makeItem(L10n.menuOpen, action: actions.open))
 
         if record.canOpenNewInstance, let openNewInstance = actions.openNewInstance {
-            menu.addItem(makeItem("Open New Instance", action: openNewInstance))
+            menu.addItem(makeItem(L10n.menuOpenNewInstance, action: openNewInstance))
         }
 
         menu.addItem(.separator())
-        menu.addItem(makeItem("Show in Finder", action: actions.showInFinder))
-        menu.addItem(makeItem("Add to Dock", action: actions.addToDock))
+        menu.addItem(makeItem(L10n.menuShowInFinder, action: actions.showInFinder))
+        menu.addItem(makeItem(L10n.menuAddToDock, action: actions.addToDock))
 
         menu.addItem(.separator())
-        menu.addItem(makeItem("Rename", action: actions.rename))
-        menu.addItem(makeItem("Hide", action: actions.hide))
+        menu.addItem(makeItem(L10n.menuRename, action: actions.rename))
+        menu.addItem(makeItem(L10n.menuHide, action: actions.hide))
         if isInFolder, let removeFromFolder = actions.removeFromFolder {
-            menu.addItem(makeItem("Remove from Folder", action: removeFromFolder))
+            menu.addItem(makeItem(L10n.menuRemoveFromFolder, action: removeFromFolder))
         }
 
         menu.addItem(.separator())
         if let showWindows = actions.showWindows {
-            menu.addItem(makeItem("Show Windows", action: showWindows))
+            menu.addItem(makeItem(L10n.menuShowWindows, action: showWindows))
         }
 
         // System-protected apps (bundled with the OS) never get an Uninstall
         // item at all — `RemovalPlanner` would reject them outright, so
         // there's nothing useful the item could do for one.
         if !record.isSystemProtected, let uninstall = actions.uninstall {
-            let item = makeItem("Uninstall\u{2026}", action: uninstall)
-            item.toolTip = "Preview what would be removed (Settings ▸ Uninstall). No files are deleted yet."
+            let item = makeItem(L10n.menuUninstall, action: uninstall)
+            item.toolTip = L10n.menuUninstallTooltip
             menu.addItem(item)
         }
 
         menu.addItem(.separator())
-        menu.addItem(makeItem("Get Info", action: actions.getInfo))
+        menu.addItem(makeItem(L10n.menuGetInfo, action: actions.getInfo))
 
         return menu
     }
 
     public static func folderMenu(rename: @escaping () -> Void) -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(makeItem("Rename Folder", action: rename))
+        menu.addItem(makeItem(L10n.menuRenameFolder, action: rename))
         return menu
     }
 

@@ -1,6 +1,7 @@
 import AppKit
 import Catalog
 import Diagnostics
+import Localization
 import Persistence
 import WindowBrowser
 
@@ -306,12 +307,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private func presentRenameAlert(currentName: String, completion: @escaping (String) -> Void) {
         let alert = NSAlert()
-        alert.messageText = "Rename"
+        alert.messageText = L10n.renameAlertTitle
         let field = NSTextField(string: currentName)
         field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
         alert.accessoryView = field
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: L10n.renameConfirmButton)
+        alert.addButton(withTitle: L10n.cancelButton)
         if alert.runModal() == .alertFirstButtonReturn {
             completion(field.stringValue)
         }
@@ -389,7 +390,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         case .folder(let folderID):
             let folder = model.folders[folderID]
             let count = folder?.pages.reduce(0) { $0 + $1.count } ?? 0
-            cell.configureAsFolder(name: folder?.name ?? "Folder", itemCount: count, isSelected: isSelected, iconSize: iconSize)
+            cell.configureAsFolder(name: folder?.name ?? L10n.defaultFolderName, itemCount: count, isSelected: isSelected, iconSize: iconSize)
         }
         return cell
     }
