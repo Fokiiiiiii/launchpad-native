@@ -1005,6 +1005,34 @@ fresh with zero interaction, and confirmed ~80 icons got cached (roughly
 two pages' worth, not just the ~35 actually visible) — proving the
 adjacent page was warmed proactively rather than on first view.
 
+**Diagnosed and tuned the page-drag commit "looks like a fade, not a
+slide" report using real captured swipe data.** User report matched
+exactly what the drag-tracked design is supposed to do (page follows the
+finger, slides continuously, commits past a distance/velocity threshold)
+— but said what actually happened read as a fade instead. Rather than
+guess at another change in an area with two prior real-hardware failures,
+added `DiagnosticsLog.grid` logging at every decision point in
+`GridCollectionView.scrollWheel` and `GridViewController.beginPageDrag`/
+`updatePageDrag`/`endPageDrag`, then asked the user to reproduce and share
+`log stream` output. The captured log proved the mechanism itself works —
+both real swipes correctly engaged the continuous path, created a
+neighbor snapshot, and committed — but revealed why it still looked wrong:
+both commits resolved from short, fast flicks (76-211pt dragged,
+1000-2300pt/s release velocity), so the settle spring had to visibly
+travel nearly the *entire* remaining page width using a spring
+(damping 1.0, response 0.32) tuned for a short correction — completing
+with no overshoot in well under half a second, reading as an abrupt snap.
+Commit now uses its own spring (damping 0.86, response 0.45 — a touch of
+momentum-appropriate bounce per apple-design's guidance for flick/release-
+driven motion) with more time for the eye to follow the slide; abort keeps
+the original fast spring since it only ever travels the short distance
+actually dragged. Also raised the settle-duration clamp from 0.6s to
+1.0s so the longer commit spring can't get cut off mid-flight by the
+scheduled data-swap. `swift test`: 91/91. Verified via
+`LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG=commit`: correct commit, no errors.
+This tunes feel, which still needs the user's own confirmation — the log
+evidence proves the mechanics, not that the new timing feels right.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
