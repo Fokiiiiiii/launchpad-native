@@ -334,6 +334,20 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         return proportionalSize > 0 ? min(proportionalSize, model.gridSettings.iconSize * 1.5) : model.gridSettings.iconSize
     }
 
+    /// The grid's actual per-cell size right now (`PagedGridLayout`'s
+    /// computed `columns x rows` slot, not a fixed constant). Exposed for
+    /// the same reason as `currentIconSize`: search results previously used
+    /// their own hardcoded cell size/spacing/margins, which meant flipping
+    /// between the grid and search changed not just icon size but the whole
+    /// arrangement (column count, gaps, edge margins) — a second, related
+    /// user report ("レイアウトも合わない") after the icon-size-only fix.
+    /// Reusing the grid's real cell size (plus its actual spacing/margins,
+    /// read directly from `GridSettings` by the caller) makes the two views
+    /// share one visual grid, not two independently-tuned ones.
+    public var currentCellSize: NSSize {
+        layout.currentCellSize
+    }
+
     // MARK: NSCollectionViewDataSource
     //
     // Always exactly one section: `model.pages[currentPage]`. See the type's

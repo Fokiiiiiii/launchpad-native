@@ -353,7 +353,31 @@ properly by extracting that formula into a public
 `AppIconCollectionViewItem` sizing and `searchResultsLayout.itemSize` —
 search results now always match whatever the grid is actually rendering,
 by construction, regardless of how that formula changes in the future.
-Full suite: 82/82 pass.
+
+A third report followed ("レイアウトも合わない" — the layout doesn't
+match either): fixing icon size alone wasn't enough, because
+`searchResultsLayout` also used its own hardcoded cell size (before the
+icon-size fix) and always-constant spacing/margins (24pt gaps, 48pt
+edges) independent of `GridSettings`, so typing a query swapped in a
+visibly different grid — different column count, gaps, and edges — not
+just smaller icons. Fixed by adding `GridViewController.currentCellSize`
+(the grid's real per-slot size) and having `LauncherViewController`
+apply that as `searchResultsLayout.itemSize`, plus reading
+`GridSettings.horizontalSpacing`/`verticalSpacing`/`pageMargins`
+directly for `minimumInteritemSpacing`/`minimumLineSpacing`/
+`sectionInset`, recomputed whenever the grid reloads or a query changes.
+Both views share one full-width surface with matching left/right
+margins and the identical top offset from the search bar, so the same
+cell size + spacing + margins naturally produces the same column count
+— the flat search list now reads as *the same grid, filtered*, not a
+separate one. Full suite: 82/82 pass.
+
+Note: this session's Terminal has no Accessibility/GUI-scripting
+permission, so none of these three search-related fixes could be
+interactively verified by typing into the search field and
+screenshotting the result — verification for all three was build +
+test + `log stream` evidence only. If anything still looks off, a
+screenshot or a precise description of the mismatch would help.
 
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted

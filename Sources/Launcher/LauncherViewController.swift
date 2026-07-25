@@ -99,10 +99,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         settingsButton.target = self
         settingsButton.action = #selector(settingsButtonTapped)
 
-        searchResultsLayout.itemSize = searchResultItemSize()
-        searchResultsLayout.minimumInteritemSpacing = 24
-        searchResultsLayout.minimumLineSpacing = 24
-        searchResultsLayout.sectionInset = NSEdgeInsets(top: 24, left: 48, bottom: 24, right: 48)
+        applySearchResultsLayoutMetrics()
 
         searchResultsCollectionView.collectionViewLayout = searchResultsLayout
         searchResultsCollectionView.dataSource = self
@@ -192,7 +189,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        applySearchResultsItemSize()
+        applySearchResultsLayoutMetrics()
         view.window?.makeFirstResponder(searchField)
     }
 
@@ -204,30 +201,41 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     func reloadGrid() {
         gridViewController.reload()
-        applySearchResultsItemSize()
+        applySearchResultsLayoutMetrics()
     }
 
-    /// Search results previously rendered app icons at a hardcoded 64pt
-    /// regardless of `GridSettings.iconSize`, so the icons visibly changed
-    /// size the moment a query was typed and the view switched from the
-    /// main grid to this flat list — confirmed as a real user-reported bug
-    /// ("検索欄に文字を入れるとアプリのサイズが壊れる"). A first fix used
-    /// `gridSettings.iconSize` directly, but that's only a *ceiling* the
-    /// grid applies to a proportional, cell-size-derived value
-    /// (`GridViewController.currentIconSize`) — on the user's actual grid
-    /// (6x3) the rendered icons are larger than the raw 160pt setting, so
-    /// search still didn't match. Reading `gridViewController.currentIconSize`
-    /// instead mirrors exactly what the grid is rendering right now, however
-    /// it computes that.
-    private func searchResultItemSize() -> NSSize {
-        let iconSize = CGFloat(gridViewController.currentIconSize)
-        return NSSize(width: max(96, iconSize + 32), height: iconSize + 46)
-    }
+    /// Search results previously used their own hardcoded cell size,
+    /// spacing, and margins entirely independent of the persistent grid —
+    /// two related user reports ("検索欄に文字を入れるとアプリのサイズが
+    /// 壊れる", then "レイアウトも合わない" once icon size alone was fixed):
+    /// typing a query didn't just change icon size, it swapped in a
+    /// visually different grid (different column count, gaps, edges). Both
+    /// views share one full-width surface, so reusing the grid's actual
+    /// per-cell size (`GridViewController.currentCellSize`) and its real
+    /// spacing/margins from `GridSettings` — instead of independently-tuned
+    /// constants — makes the flat search list line up as the *same* grid,
+    /// just filtered, rather than a different one.
+    private func applySearchResultsLayoutMetrics() {
+        let cellSize = gridViewController.currentCellSize
+        let settings = gridModel.gridSettings
+        let itemSize = cellSize.width > 0 && cellSize.height > 0
+            ? cellSize
+            : NSSize(width: 96, height: 110) // before the grid's first layout pass
+        let margin = CGFloat(settings.pageMargins)
+        let insets = NSEdgeInsets(top: margin, left: margin, bottom: margin, right: margin)
 
-    private func applySearchResultsItemSize() {
-        let size = searchResultItemSize()
-        guard searchResultsLayout.itemSize != size else { return }
-        searchResultsLayout.itemSize = size
+        let currentInset = searchResultsLayout.sectionInset
+        let insetsUnchanged = currentInset.top == insets.top && currentInset.left == insets.left
+            && currentInset.bottom == insets.bottom && currentInset.right == insets.right
+        guard searchResultsLayout.itemSize != itemSize
+            || searchResultsLayout.minimumInteritemSpacing != CGFloat(settings.horizontalSpacing)
+            || searchResultsLayout.minimumLineSpacing != CGFloat(settings.verticalSpacing)
+            || !insetsUnchanged else { return }
+
+        searchResultsLayout.itemSize = itemSize
+        searchResultsLayout.minimumInteritemSpacing = CGFloat(settings.horizontalSpacing)
+        searchResultsLayout.minimumLineSpacing = CGFloat(settings.verticalSpacing)
+        searchResultsLayout.sectionInset = insets
         searchResultsLayout.invalidateLayout()
     }
 
@@ -261,7 +269,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     func controlTextDidChange(_ obj: Notification) {
         let query = searchField.stringValue
         viewModel.setQuery(query)
-        applySearchResultsItemSize()
+        applySearchResultsLayoutMetrics()
         setSearchMode(active: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
