@@ -488,6 +488,45 @@ hit-test guard active) — visual confirmation of the exact pixel
 alignment still needs the user's own screenshot, same constraint as
 every other search-view visual fix this round.
 
+**Jiggle mode, smoother page transitions, and mouse-wheel paging** —
+the remaining three items from the same user request. (1) Dragging any
+grid item now makes every visible icon wobble, matching real iOS/macOS
+Launchpad's rearrange-mode convention: `GridViewController` implements
+`NSCollectionViewDelegate`'s `draggingSession(_:willBeginAt:forItemsAt:)`/
+`draggingSession(_:endedAt:dragOperation:)` (the latter fires on both a
+completed drop and a cancelled drag, so one method covers both), adding/
+removing a `CAKeyframeAnimation` on `transform.rotation.z` for every
+`collectionView.visibleItems()`, with a randomized `beginTime` per cell
+so they wobble slightly out of phase with each other rather than in
+lockstep. Scoped to just the duration of one drag — this project has no
+"done editing" affordance (no delete badges, no exit button) for a
+persistent post-drag edit mode the way real Launchpad has, so the
+wobble doesn't outlive the drag it started with. (2) Page transitions
+(`jumpToPage`) now add a small directional slide (`transform.translation.x`,
+via a `CASpringAnimation`, damping 1.0/no bounce since this is still a
+discrete jump, not a continuously-tracked gesture) alongside the
+existing crossfade — a jump to a later page slides content out left and
+the new page in from the right, mirrored going back, instead of the
+fade alone just cutting in place. The spring conversion math is a small
+local duplicate of `LauncherWindowController`'s (`Grid` sits below
+`Launcher` in the dependency graph, so that helper can't be imported
+here). (3) `GridCollectionView.scrollWheel` now also recognizes a plain,
+non-Apple mouse's discrete wheel tick (no `NSEvent.Phase` at all,
+`hasPreciseScrollingDeltas == false` — previously swallowed entirely
+alongside genuine non-events) and turns it into a page change, falling
+back from `scrollingDeltaX` to `scrollingDeltaY` since most non-Apple
+mice only have a vertical wheel; a 0.35s wall-clock cooldown replaces
+the phase-driven latch the trackpad path uses, since discrete ticks
+carry no phase to key a state machine off of. Full suite: 82/82 pass;
+release build launches clean under `log stream`. **Disclosed
+limitation, same as prior rounds**: this session has no Accessibility/
+GUI-scripting permission, so none of drag-triggered wobble, the page
+slide's actual feel, or physical-mouse-wheel paging could be tested
+interactively here — verification was build/test/log only. These three
+specifically need the user's own hands-on check (the mouse-wheel
+direction mapping in particular is a judgment call that may need
+flipping once tried with a real mouse).
+
 **Known limitations:**
 - Only English and Japanese are localized so far. macOS's other ~38
   supported languages are intentionally deferred to a later round —

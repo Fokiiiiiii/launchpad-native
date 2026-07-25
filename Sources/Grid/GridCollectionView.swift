@@ -21,6 +21,16 @@ final class GridCollectionView: NSCollectionView {
     private var swipeIsHorizontal = false
     private var swipeFired = false
 
+    /// A plain scroll-wheel mouse (non-Apple, or any mouse without a
+    /// touch-sensitive surface) sends discrete wheel ticks with no
+    /// `NSEvent.Phase` at all — previously swallowed by the trackpad-only
+    /// guard below, so such mice couldn't page the grid at all. These ticks
+    /// carry no phase to key a `.began`/`.changed`/`.ended` state machine
+    /// off of, so a wall-clock cooldown replaces the phase-driven
+    /// `swipeFired` latch used for trackpad gestures.
+    private var lastDiscreteWheelPageChange: CFTimeInterval = 0
+    private let discreteWheelCooldown: CFTimeInterval = 0.35
+
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
         guard let indexPath = indexPathForItem(at: point) else { return nil }
@@ -54,8 +64,23 @@ final class GridCollectionView: NSCollectionView {
     /// into a page change, not to move any content.
     override func scrollWheel(with event: NSEvent) {
         guard event.phase != [] || event.momentumPhase != [] else {
-            // Not a trackpad gesture (e.g. a plain mouse wheel tick) — this
-            // view has nothing to scroll, so just swallow it quietly.
+            // Not a trackpad gesture. Could still be a plain mouse's
+            // discrete wheel tick (no phase info either way) — handle that
+            // case explicitly instead of swallowing everything without a
+            // phase. `hasPreciseScrollingDeltas` is false for legacy
+            // notch-wheel mice and true for trackpads/Magic Mouse's
+            // continuous surface, so this is a defensive second check
+            // alongside the phase test above, not the primary discriminator.
+            guard !event.hasPreciseScrollingDeltas else { return }
+            // Most non-Apple mice only have a vertical wheel, so fall back
+            // to scrollingDeltaY when there's no horizontal component —
+            // this is what actually makes a plain mouse usable for paging.
+            let delta = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.scrollingDeltaY
+            guard delta != 0 else { return }
+            let now = CACurrentMediaTime()
+            guard now - lastDiscreteWheelPageChange > discreteWheelCooldown else { return }
+            lastDiscreteWheelPageChange = now
+            onSwipePage?(delta < 0 ? 1 : -1)
             return
         }
 

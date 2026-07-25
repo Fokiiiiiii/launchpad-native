@@ -158,11 +158,33 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// quick crossfade, so a page change reads as a transition instead of a
     /// hard cut, without touching the reload logic that's already proven
     /// reliable.
+    /// Adds a small directional slide alongside the existing crossfade —
+    /// apple-design's "spatial consistency"/"hint in the direction of the
+    /// gesture" guidance: a jump to a *later* page slides content out to
+    /// the left and the new page in from the right (mirrored for a jump
+    /// backward), instead of the fade alone just cutting in place. Still a
+    /// discrete jump (not a continuously finger-tracked scroll — that
+    /// approach was already tried and abandoned, see this type's top-level
+    /// doc comment), so damping stays at 1.0/no bounce per apple-design:
+    /// bounce is reserved for motion that actually carried gesture momentum.
+    private static let pageSlideOffset: CGFloat = 28
+
     private func jumpToPage(_ index: Int) {
         guard model.pages.indices.contains(index), index != currentPage || collectionView.numberOfSections == 0 else { return }
         let start = DispatchTime.now()
         pageControl.currentPage = index
+        collectionView.wantsLayer = true
 
+        let direction: CGFloat = index >= currentPage ? 1 : -1
+        let offset = Self.pageSlideOffset
+
+        if let layer = collectionView.layer {
+            layer.setValue(-direction * offset, forKeyPath: "transform.translation.x")
+            layer.add(
+                Self.springAnimation(keyPath: "transform.translation.x", from: 0, to: -direction * offset, damping: 1.0, response: 0.22),
+                forKey: "pageSlideOut"
+            )
+        }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.14
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -177,6 +199,22 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 guard let self else { return }
                 self.currentPage = index
                 self.collectionView.reloadData()
+
+                // Snap the freshly-reloaded content to the "just off to the
+                // correct side" starting position with no animation, then
+                // spring it into place — the mirror image of the slide-out.
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                self.collectionView.layer?.setValue(direction * offset, forKeyPath: "transform.translation.x")
+                CATransaction.commit()
+
+                if let layer = self.collectionView.layer {
+                    layer.setValue(0, forKeyPath: "transform.translation.x")
+                    layer.add(
+                        Self.springAnimation(keyPath: "transform.translation.x", from: direction * offset, to: 0, damping: 1.0, response: 0.3),
+                        forKey: "pageSlideIn"
+                    )
+                }
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.20
                     context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -187,6 +225,28 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.launcher.info("page transition: reloadData took \(ms, privacy: .public)ms")
+    }
+
+    /// Local copy of `LauncherWindowController`'s damping-ratio/response ->
+    /// `CASpringAnimation` conversion (see apple-design's spring guidance):
+    /// `Grid` sits *below* `Launcher` in the dependency graph (`Launcher`
+    /// depends on `Grid`, not the reverse), so that helper can't be reused
+    /// from here — duplicating this small formula locally is simpler than
+    /// introducing a cross-module dependency inversion or a new shared
+    /// target just for ~10 lines of math.
+    private static func springAnimation(keyPath: String, from: CGFloat, to: CGFloat, damping dampingRatio: CGFloat, response: CGFloat) -> CASpringAnimation {
+        let animation = CASpringAnimation(keyPath: keyPath)
+        let angularFrequency = 2 * .pi / response
+        let stiffness = angularFrequency * angularFrequency
+        animation.mass = 1
+        animation.stiffness = stiffness
+        animation.damping = 2 * dampingRatio * sqrt(stiffness)
+        animation.initialVelocity = 0
+        animation.fromValue = from
+        animation.toValue = to
+        animation.duration = animation.settlingDuration
+        animation.isRemovedOnCompletion = true
+        return animation
     }
 
     private func jumpToAdjacentPage(delta: Int) {
@@ -459,5 +519,62 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
         Task { await model.save() }
         return true
+    }
+
+    // MARK: Jiggle mode
+    //
+    // Real Launchpad/iOS home-screen convention: starting to drag any icon
+    // makes every icon on screen wobble, signaling "you're rearranging now."
+    // Scoped to just the duration of one native drag session (starts when
+    // AppKit's own drag machinery actually begins, stops when it ends,
+    // dropped or cancelled) — this project has no "done editing" affordance
+    // (no delete badges, no explicit exit button) for a persistent post-drag
+    // edit mode the way real Launchpad has, so extending the wobble beyond
+    // one drag's lifetime wouldn't have anything meaningful to attach to.
+
+    public func collectionView(
+        _ collectionView: NSCollectionView,
+        draggingSession session: NSDraggingSession,
+        willBeginAt screenPoint: NSPoint,
+        forItemsAt indexPaths: Set<IndexPath>
+    ) {
+        startWobble()
+    }
+
+    public func collectionView(
+        _ collectionView: NSCollectionView,
+        draggingSession session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        dragOperation operation: NSDragOperation
+    ) {
+        // Fires on both a completed drop and a cancelled drag, so this one
+        // method covers both — no separate cancel handler needed.
+        stopWobble()
+    }
+
+    private func startWobble() {
+        for item in collectionView.visibleItems() {
+            guard let layer = item.view.layer else { continue }
+            let angle: CGFloat = 0.035 // ~2°, subtle
+            let anim = CAKeyframeAnimation(keyPath: "transform.rotation.z")
+            anim.values = [-angle, angle, -angle]
+            anim.duration = 0.12 + Double.random(in: -0.01...0.01)
+            anim.repeatCount = .infinity
+            anim.isRemovedOnCompletion = false
+            // A random per-cell begin time (rather than a fixed offset) is
+            // what desyncs the wobble across cells — repeatCount == .infinity
+            // makes the animation strictly periodic, so a different start
+            // phase persists as a different phase forever, matching real
+            // Launchpad's slightly-uncoordinated wobble instead of every
+            // icon shaking in perfect unison.
+            anim.beginTime = CACurrentMediaTime() + Double.random(in: 0..<anim.duration)
+            layer.add(anim, forKey: "wobble")
+        }
+    }
+
+    private func stopWobble() {
+        for item in collectionView.visibleItems() {
+            item.view.layer?.removeAnimation(forKey: "wobble")
+        }
     }
 }
