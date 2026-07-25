@@ -1137,6 +1137,39 @@ purely decorative layer can now never be a hit target, so clicks always
 fall through to whatever real control is drawn in front of or around
 it, regardless of any internal z-order behavior. `swift test`: 95/95.
 
+That glass-hitTest fix turned out not to be the actual cause — the user
+confirmed it was still broken. Root-caused properly this time with a
+new debug hook (`LAUNCHPAD_DEBUG_CLICK_SEARCH_FIELD`) that dispatches a
+real synthetic `NSEvent` mouse down/up pair at the search field's exact
+location via `window.sendEvent`, alongside direct `hitTest` probes.
+The probes showed `hitTest` was never the problem — it always correctly
+resolved to the search field. But dispatching the click for real (even
+calling `searchField.mouseDown(with:)` directly, bypassing
+`window.sendEvent` entirely) still ended up in
+`BackgroundClickCatcherView.mouseDown`. That only makes sense as an
+`NSResponder`-chain fallback: `searchField.cell` is replaced with a
+fresh `SearchFieldCell()`, but a bare `NSTextFieldCell()` defaults to
+*not* editable/selectable (unlike `NSTextField`'s own convenience
+initializers, which configure that for you). With `isEditable`/
+`isSelectable` never set, the cell declined to track the click,
+`NSControl.mouseDown` fell back to `super.mouseDown(event)`, and that
+walked the responder chain up through the field's superviews until it
+reached `BackgroundClickCatcherView.mouseDown` — indistinguishable from
+a real background click, closing the launcher every time. Fixed by
+setting both properties right after assigning the custom cell.
+Re-verified with the same hook: `hitTest` now resolves to the field
+editor's `NSTextView` after the click, and the background catcher no
+longer fires at all.
+
+Also, while investigating a still-open "app grouping via drag" report:
+added an explicit `setDraggingSourceOperationMask(.every, forLocal:
+true)` (local in-collection-view drags are tracked as a separate mask
+from drags to another app/the Dock, which already had `forLocal:
+false` set), plus diagnostic logging across the drag/drop delegate
+methods. Not independently verified — a real native
+`NSCollectionView` drag session can't be synthesized as directly as a
+single click — still needs the user's own retest. `swift test`: 95/95.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
