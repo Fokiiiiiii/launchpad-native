@@ -587,6 +587,53 @@ Release build reinstalled to `~/Applications`; `log stream` confirmed
 `Catalog ready: ...` on this machine's real app count (previously
 gated behind it), and the launch is otherwise error-free.
 
+**Continuous, drag-tracked page paging** — the largest and riskiest item
+from the same follow-up round: real-time, reversible-mid-drag page
+swiping (iOS home-screen-like), explicitly requested by the user despite
+an earlier documented failure in this exact area (a prior
+"one continuous strip, scroll to the page's x-offset" attempt using
+`NSScrollView`'s own scroll position "kept executing correctly per logs
+while visibly never changing the displayed page"). Deliberately did
+*not* reattempt that approach. Instead: `GridCollectionView`'s trackpad
+2-finger swipe handling now tracks continuously (new
+`onSwipeBegan`/`onSwipeChanged`/`onSwipeEnded` callbacks, replacing the
+old single-fire-past-a-threshold behavior for the trackpad path only —
+the discrete mouse-wheel path from the prior round is unchanged, since
+that hardware has no continuous position data to track).
+`GridViewController` renders up to three static snapshots (previous/
+current/next page) via a new throwaway offscreen `NSCollectionView` +
+`PagedGridLayout` + a minimal standalone `SnapshotDataSource` (icons
+sourced from `IconCache.cachedIconIfAvailable`, a new synchronous
+best-effort peek added alongside the existing async `icon(for:)`, since
+waiting on a disk/system icon fetch would delay the drag's very first
+frame), overlays them in front of the live grid (hidden for the
+duration), and slides the overlay via a direct `CALayer` transform —
+the same technique this round's wobble and page-jump-slide animations
+already use successfully, never touching `NSScrollView`'s scroll state
+at all. Dragging past either end rubber-bands (apple-design's standard
+resistance formula) instead of stopping hard or going arbitrarily far.
+On release, distance *or* a fast-enough flick velocity commits to the
+adjacent page (apple-design's momentum projection); a `CASpringAnimation`
+(damping 1.0, velocity handed off per apple-design's relative-velocity
+formula rather than hard-cut) settles the overlay before the real page
+content swaps back in.
+
+Given the direct precedent of "looked fine in logs, didn't actually
+work," this got an extra verification step beyond build/test/log: a new
+permanent debug hook, `LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG=1`, drives
+`beginPageDrag`/`updatePageDrag`/`endPageDrag` with synthetic input (a
+fast flick) through the actual production code paths against this
+machine's real 100-app catalog. `log stream` confirmed the full
+state-machine transition end-to-end with no crash: `debugSimulatePageDrag:
+starting at page 0` → `debugSimulatePageDrag: ended at page 1 (was 0)`.
+This proves the mechanics (snapshot rendering, overlay math, spring
+settle, page swap) execute correctly, but — same disclosed limitation as
+the rest of this round — it cannot substitute for an actual trackpad
+gesture: the *visual feel* (does the overlay track smoothly, does
+rubber-banding feel right, does the settle read as natural) still needs
+the user's own hands-on trackpad test, and given this area's history,
+should be expected to need at least one more adjustment round.
+
 **Known limitations:**
 - Only English and Japanese are localized so far. macOS's other ~38
   supported languages are intentionally deferred to a later round —

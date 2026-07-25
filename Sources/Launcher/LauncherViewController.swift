@@ -212,6 +212,13 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         applyQuery(query)
     }
 
+    /// Debug-only entry point (`LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG`, wired
+    /// in `AppDelegate`) — see `GridViewController.debugSimulatePageDrag`'s
+    /// doc comment for why this exists.
+    func debugSimulatePageDrag() {
+        gridViewController.debugSimulatePageDrag()
+    }
+
     func reloadGrid() {
         gridViewController.reload()
         applySearchResultsLayoutMetrics()

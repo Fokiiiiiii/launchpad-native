@@ -101,6 +101,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             launcherWindowController.updateRecords(snapshot.records)
             await scanner.startWatching()
 
+            // Debug-only: drives beginPageDrag/updatePageDrag/endPageDrag
+            // with synthetic input (a fast flick) so the state-machine
+            // transition can be confirmed via log stream without
+            // Accessibility/GUI-scripting permission to perform a real
+            // trackpad gesture. Needs the real catalog loaded first (more
+            // than one page to drag between), unlike the search-query hook.
+            if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG"] == "1" {
+                launcherWindowController.debugSimulatePageDrag()
+            }
+
             for await update in await scanner.updates() {
                 launcherWindowController.updateRecords(update.records)
             }
