@@ -1170,6 +1170,61 @@ methods. Not independently verified — a real native
 `NSCollectionView` drag session can't be synthesized as directly as a
 single click — still needs the user's own retest. `swift test`: 95/95.
 
+## Item drag: lift, live reorder, folder creation, page-turn
+
+The user provided a detailed specification (iOS-home-screen-style icon
+dragging, translated from its SwiftUI-flavored pseudocode to this
+project's AppKit/CALayer idioms) and asked for a full implementation.
+This replaces NSCollectionView's built-in click/selection/drag
+machinery for grid cells entirely — that machinery fires selection
+synchronously on mouseDown before it's known whether the gesture
+continues into a drag, and has no notion of live neighbor displacement,
+folder-candidate hover zones, or drag-triggered page turning.
+
+`GridCollectionView` now exposes `onItemMouseDown`/`onItemMouseDragged`/
+`onItemMouseUp` instead of forwarding content clicks to `super`.
+`GridViewController` drives a custom state machine from these:
+
+- **Press feedback**: scale 1.00→0.96 on mouseDown, distinct from drag lift.
+- **Click-vs-drag**: a 6pt distance threshold; short of that, mouseUp
+  launches/opens the item exactly as before.
+- **Lift**: the pressed cell's real live view is snapshotted (`cacheDisplay`
+  — safe here since the cell has genuinely been displayed by the real
+  window already, unlike the offscreen-snapshot pitfall from the earlier
+  page-drag bug) into a floating `NSImageView` that tracks the cursor 1:1
+  (respecting grab offset), scales to 1.06 with a touch of bounce, gets a
+  shadow. The original cell hides.
+- **Live reorder preview**: nearest-remaining-cell + a short debounce timer
+  (a simplified stand-in for the spec's precise hysteresis band) determines
+  an insertion slot; every other item's real live view springs to its
+  preview position via layer transform. `model.pages` itself is untouched
+  until the drop actually commits.
+- **Folder candidate**: hovering the center ~60% of another *app* for a
+  dwell delay (500ms) highlights it as a folder target — only apps can be
+  a folder-creation source, matching `GridModel.createOrJoinFolder`'s
+  existing semantics.
+- **Page-edge turning**: holding near an edge for a dwell delay (450ms)
+  turns the page. The dragged icon is a floating overlay on the root view,
+  independent of the collection view being transformed, so it stays fixed
+  under the pointer while only the grid/page indicator slide — the spec's
+  explicit "don't carry the grabbed icon along with the page" requirement.
+- **Settle/cancel**: spring to the final cell on drop; revert-to-origin on
+  cancel (wired to the existing background-click safety net).
+
+**Deferred, explicitly**: the spec's exact geometric hysteresis margins,
+Cmd+Arrow/Option+Arrow keyboard reorder/page-move shortcuts, dragging an
+icon out to the real Dock (previously free via NSCollectionView's native
+drag session + `.fileURL` pasteboard — removed along with that machinery),
+and giving `FolderContentsViewController`'s own grid the same rich system.
+
+Verified via a new `LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG=reorder|folder`
+debug hook (synthetic points through the real `handleItemMouseDown/
+Dragged/Up` methods): folder creation confirmed end-to-end (folder count
+increased, no crash), reorder confirmed end-to-end (clean commit, no
+folder created), and cancellation via a background click confirmed to
+revert cleanly with no crash. `swift test`: 95/95. The drag's actual feel
+still needs the user's own hands-on retest.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
