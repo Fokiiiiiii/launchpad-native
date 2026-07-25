@@ -464,6 +464,30 @@ temporary diagnostic log line (removed once confirmed) printed resolved
 English showed `apply=Apply search=Search`, both with
 `Bundle.main.preferredLocalizations` matching. Full suite: 82/82 pass.
 
+**Search results now use the same click hit-test guard as the grid, and
+the search field's text position is explicit.** The layout-matching
+round sized search-result cells to the grid's real (often much larger)
+per-cell size, but `AppIconCollectionViewItem` had no equivalent to
+`GridCellItem.contentHitTestFrame` and `searchResultsCollectionView` was
+a plain `NSCollectionView` with no `GridCollectionView`-style
+background-click guard — meaning clicking the empty margin around a
+search result icon could still select/launch it. Added
+`AppIconCollectionViewItem.contentHitTestFrame` and a new
+`SearchResultsCollectionView` (mirroring `GridCollectionView`'s
+`mouseDown` guard, 10pt margin around the content frame, background
+clicks routed to `onDidCancel` — same dismiss behavior as the grid's
+own background click). Separately, `SearchFieldCell` (a small
+`NSTextFieldCell` override of `drawingRect(forBounds:)`) now explicitly
+centers the search field's text — both the placeholder and any typed
+text go through this one code path, replacing implicit Auto-Layout-
+frame-only centering that showed a small vertical offset in a
+screenshot the user sent ("検索欄の文字が少しズレてる"). Full suite:
+82/82 pass; verified via build/test/log evidence and the existing
+`LAUNCHPAD_DEBUG_SEARCH_QUERY` hook (still error-free with the new
+hit-test guard active) — visual confirmation of the exact pixel
+alignment still needs the user's own screenshot, same constraint as
+every other search-view visual fix this round.
+
 **Known limitations:**
 - Only English and Japanese are localized so far. macOS's other ~38
   supported languages are intentionally deferred to a later round —

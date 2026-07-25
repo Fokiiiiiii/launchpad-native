@@ -93,4 +93,15 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
         highlightView.layer?.borderWidth = isSelected ? 1 : 0
         highlightView.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
     }
+
+    /// Same reasoning as `Grid.GridCellItem.contentHitTestFrame`: a search
+    /// result's cell slot is sized to the grid's real per-cell size (often
+    /// far larger than the icon it holds — see `LauncherViewController`'s
+    /// `applySearchResultsLayoutMetrics`), so treating the whole cell as
+    /// clickable would let clicks in the visibly-empty margin around the
+    /// icon still select/launch something. `SearchResultsCollectionView`
+    /// uses this the same way `GridCollectionView` uses `GridCellItem`'s.
+    var contentHitTestFrame: NSRect {
+        iconView.frame.union(label.frame)
+    }
 }

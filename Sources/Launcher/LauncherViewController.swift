@@ -22,7 +22,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private let searchField = NSTextField()
     private let searchIcon = NSImageView()
     private let settingsButton = NSButton()
-    private let searchResultsCollectionView = NSCollectionView()
+    private let searchResultsCollectionView = SearchResultsCollectionView()
     private let searchResultsScrollView = NSScrollView()
     private let searchResultsLayout = NSCollectionViewFlowLayout()
     private let itemIdentifier = NSUserInterfaceItemIdentifier("AppIconItem")
@@ -75,6 +75,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchIcon.contentTintColor = .secondaryLabelColor
 
         searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchField.cell = SearchFieldCell()
         searchField.placeholderAttributedString = NSAttributedString(
             string: L10n.searchPlaceholder,
             attributes: [.kern: -0.4, .foregroundColor: NSColor.placeholderTextColor]
@@ -108,6 +109,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchResultsCollectionView.register(AppIconCollectionViewItem.self, forItemWithIdentifier: itemIdentifier)
         searchResultsCollectionView.isSelectable = true
         searchResultsCollectionView.backgroundColors = [.clear]
+        searchResultsCollectionView.onBackgroundClick = { [weak self] in self?.onDidCancel() }
 
         searchResultsScrollView.translatesAutoresizingMaskIntoConstraints = false
         searchResultsScrollView.documentView = searchResultsCollectionView
