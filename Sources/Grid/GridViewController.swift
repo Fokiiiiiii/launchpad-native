@@ -64,6 +64,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// or settle callback from a previous gesture can recognize it's stale
     /// and no-op instead of undoing a newer gesture's state.
     private var dragGeneration = 0
+    /// Last-resort recovery bound for `beginPageDrag`'s fallback timer —
+    /// see the doc comment there for why this must be far longer than any
+    /// real gesture, not a tight "feels responsive" value.
+    private static let dragSafetyNetTimeout: TimeInterval = 30.0
 
     public init(
         model: GridModel,
@@ -308,9 +312,18 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     //     being revealed gets a lazily-created snapshot placed beside it.
     //     Worst case if something goes wrong: a transform offset or a
     //     stray image, never a blank grid.
-    //  3. A hard, fixed-duration (1s) fallback timer — independent of
-    //     `CASpringAnimation.settlingDuration`, which is what silently
-    //     misbehaved before — force-resets everything no matter what.
+    //  3. A hard, fixed-duration (`dragSafetyNetTimeout`) fallback timer —
+    //     independent of `CASpringAnimation.settlingDuration`, which is what
+    //     silently misbehaved before — force-resets everything no matter
+    //     what. This is armed from the *start* of the drag, not from its
+    //     end, so it must be far longer than any real gesture takes: a
+    //     confirmed real bug (not hypothetical) had this at a flat 1s,
+    //     which fired *while the user was still mid-drag* on anything
+    //     slower than a quick flick — exactly the "look at the next page
+    //     before committing" use this feature exists for — silently
+    //     force-resetting the neighbor snapshot and transform out from
+    //     under still-active fingers. 30s keeps the same last-resort
+    //     recovery guarantee without ever tripping during real use.
     //  4. `resetDragStateIfNeeded()` is called every time the launcher
     //     shows (see `LauncherWindowController.show()`), so even if a prior
     //     session somehow left this mid-drag, the next open starts clean.
@@ -331,7 +344,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         dragHasNext = currentPage < model.pages.count - 1
         dragGeneration += 1
         let generation = dragGeneration
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.dragSafetyNetTimeout) { [weak self] in
             Task { @MainActor in
                 guard let self, self.dragGeneration == generation else { return }
                 self.forceResetPageDrag()
@@ -390,7 +403,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// (not hard-cut) before swapping in the real page content. The actual
     /// cleanup (`finishPageDrag`) is scheduled off the spring's own
     /// settling duration for visual accuracy, but `beginPageDrag`'s fixed
-    /// 1s fallback is the real safety net if that duration ever misbehaves.
+    /// `dragSafetyNetTimeout` fallback is the real safety net if that
+    /// duration ever misbehaves.
     private func endPageDrag(deltaX: CGFloat, velocity: CGFloat) {
         let width = max(collectionView.bounds.width, 1)
         let hasNeighbor = dragNeighborImageView != nil
@@ -429,8 +443,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let targetPage = commit ? currentPage + dragDirection : currentPage
         let generation = dragGeneration
         // Clamped defensively — this is a display-timing nicety, not the
-        // real safety net (that's the fixed 1s fallback armed in
-        // `beginPageDrag`, which fires regardless of this value).
+        // real safety net (that's the fixed `dragSafetyNetTimeout` fallback
+        // armed in `beginPageDrag`, which fires regardless of this value).
         let settleDuration = min(max(spring.settlingDuration, 0), 0.6)
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) { [weak self] in
             Task { @MainActor in

@@ -43,8 +43,22 @@ final class GridCollectionView: NSCollectionView {
     /// Treated the same as clicking the launcher's empty background: dismiss.
     var onBackgroundClick: (() -> Void)?
 
+    /// Which axis a 2-finger swipe engaged on — horizontal was the only
+    /// supported axis originally; vertical was added so up/down swipes page
+    /// too (a real user ask: the grid has no vertical scroll content of its
+    /// own to preserve, so this axis was free to repurpose). Both axes
+    /// share one cumulative-delta pipeline: whichever axis's cumulative
+    /// distance first clears `minimumEngageDistance` wins for the rest of
+    /// the gesture, and its raw accumulated delta (not a converted/flipped
+    /// value) feeds the same `onSwipeChanged`/`onSwipeEnded` callbacks
+    /// `GridViewController` already treats as axis-agnostic. Direction
+    /// mapping (which way is "next page") is an unverified judgment call
+    /// for the vertical axis specifically — see the README disclosure.
+    private enum SwipeAxis { case horizontal, vertical }
+
     private var swipeAccumulatedDeltaX: CGFloat = 0
-    private var swipeIsHorizontal = false
+    private var swipeAccumulatedDeltaY: CGFloat = 0
+    private var swipeAxis: SwipeAxis?
     private var swipeEngaged = false
     private var recentSamples: [(delta: CGFloat, time: CFTimeInterval)] = []
     /// A single confirmed-horizontal `.changed` sample used to fire
@@ -120,30 +134,41 @@ final class GridCollectionView: NSCollectionView {
         switch event.phase {
         case .began:
             swipeAccumulatedDeltaX = 0
-            swipeIsHorizontal = false
+            swipeAccumulatedDeltaY = 0
+            swipeAxis = nil
             swipeEngaged = false
             recentSamples.removeAll()
         case .changed:
             swipeAccumulatedDeltaX += event.scrollingDeltaX
+            swipeAccumulatedDeltaY += event.scrollingDeltaY
             if !swipeEngaged {
-                swipeIsHorizontal = abs(event.scrollingDeltaX) >= abs(event.scrollingDeltaY)
-                guard swipeIsHorizontal, abs(swipeAccumulatedDeltaX) >= minimumEngageDistance else { break }
+                // Whichever axis's *cumulative* magnitude is currently
+                // larger is the candidate — re-evaluated every sample until
+                // engagement, so a gesture that starts diagonal but
+                // straightens out still resolves to the axis it settles on.
+                let candidateAxis: SwipeAxis = abs(swipeAccumulatedDeltaX) >= abs(swipeAccumulatedDeltaY) ? .horizontal : .vertical
+                let candidateMagnitude = candidateAxis == .horizontal ? abs(swipeAccumulatedDeltaX) : abs(swipeAccumulatedDeltaY)
+                guard candidateMagnitude >= minimumEngageDistance else { break }
+                swipeAxis = candidateAxis
                 swipeEngaged = true
                 onSwipeBegan?()
             }
-            guard swipeIsHorizontal else { break }
+            guard let axis = swipeAxis else { break }
+            let effectiveDelta = axis == .horizontal ? swipeAccumulatedDeltaX : swipeAccumulatedDeltaY
             let now = CACurrentMediaTime()
-            recentSamples.append((swipeAccumulatedDeltaX, now))
+            recentSamples.append((effectiveDelta, now))
             if recentSamples.count > 6 {
                 recentSamples.removeFirst(recentSamples.count - 6)
             }
-            onSwipeChanged?(swipeAccumulatedDeltaX)
+            onSwipeChanged?(effectiveDelta)
         case .ended, .cancelled:
-            if swipeEngaged {
-                onSwipeEnded?(swipeAccumulatedDeltaX, Self.estimateVelocity(recentSamples))
+            if swipeEngaged, let axis = swipeAxis {
+                let effectiveDelta = axis == .horizontal ? swipeAccumulatedDeltaX : swipeAccumulatedDeltaY
+                onSwipeEnded?(effectiveDelta, Self.estimateVelocity(recentSamples))
             }
             swipeAccumulatedDeltaX = 0
-            swipeIsHorizontal = false
+            swipeAccumulatedDeltaY = 0
+            swipeAxis = nil
             swipeEngaged = false
             recentSamples.removeAll()
         default:
