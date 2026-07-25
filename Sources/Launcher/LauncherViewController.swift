@@ -23,6 +23,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private let settingsButton = NSButton()
     private let searchResultsCollectionView = NSCollectionView()
     private let searchResultsScrollView = NSScrollView()
+    private let searchResultsLayout = NSCollectionViewFlowLayout()
     private let itemIdentifier = NSUserInterfaceItemIdentifier("AppIconItem")
     private lazy var gridViewController = GridViewController(
         model: gridModel,
@@ -98,13 +99,12 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         settingsButton.target = self
         settingsButton.action = #selector(settingsButtonTapped)
 
-        let layout = NSCollectionViewFlowLayout()
-        layout.itemSize = NSSize(width: 96, height: 110)
-        layout.minimumInteritemSpacing = 24
-        layout.minimumLineSpacing = 24
-        layout.sectionInset = NSEdgeInsets(top: 24, left: 48, bottom: 24, right: 48)
+        searchResultsLayout.itemSize = searchResultItemSize()
+        searchResultsLayout.minimumInteritemSpacing = 24
+        searchResultsLayout.minimumLineSpacing = 24
+        searchResultsLayout.sectionInset = NSEdgeInsets(top: 24, left: 48, bottom: 24, right: 48)
 
-        searchResultsCollectionView.collectionViewLayout = layout
+        searchResultsCollectionView.collectionViewLayout = searchResultsLayout
         searchResultsCollectionView.dataSource = self
         searchResultsCollectionView.delegate = self
         searchResultsCollectionView.register(AppIconCollectionViewItem.self, forItemWithIdentifier: itemIdentifier)
@@ -192,6 +192,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     override func viewDidAppear() {
         super.viewDidAppear()
+        applySearchResultsItemSize()
         view.window?.makeFirstResponder(searchField)
     }
 
@@ -203,6 +204,25 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     func reloadGrid() {
         gridViewController.reload()
+        applySearchResultsItemSize()
+    }
+
+    /// Search results previously rendered app icons at a hardcoded 64pt
+    /// regardless of `GridSettings.iconSize`, so the icons visibly changed
+    /// size the moment a query was typed and the view switched from the
+    /// main grid to this flat list — confirmed as a real user-reported bug
+    /// ("検索欄に文字を入れるとアプリのサイズが壊れる"). The cell now sizes
+    /// itself to the same setting the grid uses.
+    private func searchResultItemSize() -> NSSize {
+        let iconSize = CGFloat(gridModel.gridSettings.iconSize)
+        return NSSize(width: max(96, iconSize + 32), height: iconSize + 46)
+    }
+
+    private func applySearchResultsItemSize() {
+        let size = searchResultItemSize()
+        guard searchResultsLayout.itemSize != size else { return }
+        searchResultsLayout.itemSize = size
+        searchResultsLayout.invalidateLayout()
     }
 
     @objc private func settingsButtonTapped() {
@@ -235,6 +255,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     func controlTextDidChange(_ obj: Notification) {
         let query = searchField.stringValue
         viewModel.setQuery(query)
+        applySearchResultsItemSize()
         setSearchMode(active: !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
@@ -303,7 +324,8 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         }
         let record = viewModel.filteredRecords[indexPath.item]
         let isSelected = viewModel.selectedIndex == indexPath.item
-        item.configure(record: record, icon: NSWorkspace.shared.icon(for: .applicationBundle), isSelected: isSelected)
+        let iconSize = gridModel.gridSettings.iconSize
+        item.configure(record: record, icon: NSWorkspace.shared.icon(for: .applicationBundle), isSelected: isSelected, iconSize: iconSize)
 
         let cache = iconCache
         let expectedKey = record.iconCacheKey
@@ -312,7 +334,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             // Search results reload on every keystroke, recycling cells —
             // same cell-reuse guard as Grid.GridCellItem, see its comment.
             guard item.currentRequestKey == expectedKey else { return }
-            item.configure(record: record, icon: icon, isSelected: isSelected)
+            item.configure(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize)
         }
         return item
     }

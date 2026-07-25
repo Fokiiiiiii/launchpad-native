@@ -12,6 +12,8 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     private(set) var currentRequestKey: String?
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
+    private var iconWidthConstraint: NSLayoutConstraint?
+    private var iconHeightConstraint: NSLayoutConstraint?
 
     override func loadView() {
         let container = NSView()
@@ -27,11 +29,17 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
 
         container.addSubview(iconView)
         container.addSubview(label)
+
+        let widthConstraint = iconView.widthAnchor.constraint(equalToConstant: 64)
+        let heightConstraint = iconView.heightAnchor.constraint(equalToConstant: 64)
+        iconWidthConstraint = widthConstraint
+        iconHeightConstraint = heightConstraint
+
         NSLayoutConstraint.activate([
             iconView.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
             iconView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: 64),
-            iconView.heightAnchor.constraint(equalToConstant: 64),
+            widthConstraint,
+            heightConstraint,
 
             label.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 4),
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 2),
@@ -41,8 +49,15 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
         view = container
     }
 
-    func configure(record: ApplicationRecord, icon: NSImage, isSelected: Bool) {
+    /// Matches `Grid.GridCellItem`'s handling of `GridSettings.iconSize` —
+    /// this item was previously hardcoded to 64pt regardless of the user's
+    /// configured grid icon size, so search results rendered at a visibly
+    /// different (and, at large configured sizes, jarringly smaller) size
+    /// than the main grid the moment a query was typed.
+    func configure(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double) {
         currentRequestKey = record.iconCacheKey
+        iconWidthConstraint?.constant = CGFloat(iconSize)
+        iconHeightConstraint?.constant = CGFloat(iconSize)
         iconView.image = icon
         label.stringValue = record.displayName
         view.layer?.cornerRadius = 12

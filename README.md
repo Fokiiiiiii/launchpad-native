@@ -314,6 +314,41 @@ hotkey are enough of a discoverable default without it), and the Settings
 Triggers tab now shows a standing warning with a button to open Trackpad
 system settings whenever the gesture is turned on.
 
+**Grid icon disappearance — actual root cause found and fixed.** The
+cell-reuse guard above did not resolve the user's repeated report that
+some grid icons still vanished. Direct inspection of the user's real
+`~/Library/Application Support/com.launchpadnative.app/layout.json`
+found the actual cause: `GridModel.capacityPerPage` (`columns * rows`)
+was only consulted when *appending* new items in `reconcile()`, never
+used to rebalance already-persisted `pages` when `gridSettings` shrank.
+The user's document had `gridSettings` at 6x3 (capacity 18) but pages
+of 34/35/11 items, left over from an earlier 7x5 (capacity 35) setting.
+`PagedGridLayout` places item N at `row = N / columns`, so anything
+past the new row count renders below the visible page bounds and is
+simply never drawn. Fixed with `GridModel.reflowPagesToCurrentCapacity()`,
+which regroups all items into chunks of exactly `capacityPerPage`
+(preserving order), wired into both `updateGridSettings(_:)` (future
+changes) and `loadDocument()` (self-heals documents already corrupted
+before this fix existed). Live-verified against the user's real
+corrupted document: pages went from [34, 35, 11] to [18, 18, 18, 18, 8]
+(80 items preserved throughout, none lost or duplicated) after running
+the fixed build once. Two new `GridModelTests` cover this; full suite
+is 82 tests with 1 pre-existing unrelated flaky perf-timing failure.
+
+**Search results ignored the configured icon size.** User report: typing
+in the search field made "the app's size break." Root cause:
+`AppIconCollectionViewItem` (the search-results cell) hardcoded a 64pt
+icon and `NSCollectionViewFlowLayout.itemSize` was a fixed `96x110`,
+regardless of `GridSettings.iconSize` — the persistent grid honors that
+setting (confirmed on the user's real document: `iconSize` is 160), but
+switching into search mode snapped every icon down to 64pt, a visibly
+jarring size change. Fixed by giving `AppIconCollectionViewItem` the
+same dynamic width/height constraint pattern `GridCellItem` already
+uses, and computing `searchResultsLayout.itemSize` from
+`gridModel.gridSettings.iconSize` (recomputed on each keystroke and
+whenever the grid reloads) instead of a constant. Full suite: 82/82
+pass (including the previously-flaky perf test, which passed this run).
+
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted
   but not actually implemented in `GridViewController`/`PagedGridLayout` yet
