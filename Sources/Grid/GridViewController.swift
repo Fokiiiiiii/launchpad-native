@@ -802,6 +802,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             DiagnosticsLog.grid.notice("debugSimulateItemDrag: not enough items on the current page to drag")
             return
         }
+        if mode == "interrupt" {
+            debugSimulateInterruptedItemDrag()
+            return
+        }
         let targetIndex = mode == "folder" ? 1 : model.pages[currentPage].count - 1
         guard let targetFrame = layout.layoutAttributesForItem(at: IndexPath(item: targetIndex, section: 0))?.frame else { return }
         // "folder" aims dead center (within the ~60% folder-candidate
@@ -848,6 +852,57 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                         let pageCounts = self.model.pages.map(\.count)
                         let folderCount = self.model.folders.count
                         DiagnosticsLog.grid.notice("debugSimulateItemDrag: settled — page counts=\(pageCounts, privacy: .public), folder count=\(folderCount, privacy: .public), activeDrag=\(self.activeItemDrag != nil, privacy: .public)")
+                    }
+                }
+            }
+        }
+    }
+
+    /// Reproduces the exact interleaving caught live via `log stream`
+    /// during real user testing: a fresh mouseDown on item 2 arrives while
+    /// item 0's drag is still active, with NO mouseUp for item 0 in
+    /// between. Before the `handleItemMouseDown` fix, every subsequent
+    /// mouseDragged kept updating item 0's stale session (checked first in
+    /// `handleItemMouseDragged`) instead of starting a fresh one for item
+    /// 2 — matching the report "after one drag breaks, dragging a
+    /// different app moves the first app instead."
+    private func debugSimulateInterruptedItemDrag() {
+        guard model.pages.indices.contains(currentPage), model.pages[currentPage].count > 2,
+              let firstFrame = layout.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+              let secondFrame = layout.layoutAttributesForItem(at: IndexPath(item: 2, section: 0))?.frame,
+              let window = collectionView.window else {
+            DiagnosticsLog.grid.notice("debugSimulateInterruptedItemDrag: not enough items on the current page, or no window")
+            return
+        }
+        let firstStart = NSPoint(x: firstFrame.midX, y: firstFrame.midY)
+        let firstMidDrag = NSPoint(x: firstFrame.midX + 20, y: firstFrame.midY)
+        let secondStart = NSPoint(x: secondFrame.midX, y: secondFrame.midY)
+        let secondEnd = NSPoint(x: secondFrame.midX + 40, y: secondFrame.midY)
+
+        DiagnosticsLog.grid.notice("debugSimulateInterruptedItemDrag: starting — item 0 drag begins, then item 2 mouseDown interrupts before item 0's mouseUp")
+
+        window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDown, at: firstStart, in: collectionView))
+        window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDragged, at: firstMidDrag, in: collectionView))
+        window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDragged, at: NSPoint(x: firstMidDrag.x + 10, y: firstMidDrag.y), in: collectionView))
+
+        // No mouseUp here — this is the interruption under test.
+        window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDown, at: secondStart, in: collectionView))
+
+        let steps = 6
+        for step in 1...steps {
+            let t = CGFloat(step) / CGFloat(steps)
+            let point = NSPoint(x: secondStart.x + (secondEnd.x - secondStart.x) * t, y: secondStart.y + (secondEnd.y - secondStart.y) * t)
+            window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDragged, at: point, in: collectionView))
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.itemDragFolderHoverDelay + 0.15) { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseUp, at: secondEnd, in: self.collectionView))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    Task { @MainActor in
+                        let pageCounts = self.model.pages.map(\.count)
+                        DiagnosticsLog.grid.notice("debugSimulateInterruptedItemDrag: settled — page counts=\(pageCounts, privacy: .public), activeDrag=\(self.activeItemDrag != nil, privacy: .public)")
                     }
                 }
             }
@@ -1171,6 +1226,25 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private func handleItemMouseDown(indexPath: IndexPath, event: NSEvent) {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(indexPath.item) else { return }
+        // Real, confirmed bug caught live via log stream during actual user
+        // testing: a fresh mouseDown on a DIFFERENT item can arrive while
+        // `activeItemDrag` is still set from a previous gesture whose own
+        // mouseUp never reached us (the same real-world AppKit routing gap
+        // the global mouseUp monitor below exists for — a single pointer
+        // can't genuinely have two concurrent presses). Left unhandled, this
+        // method only overwrote `pendingItemPress`, leaving the stale session
+        // active — and `handleItemMouseDragged` checks `activeItemDrag`
+        // before `pendingItemPress`, so every subsequent drag update kept
+        // moving the FIRST (stale) item while the user believed they'd
+        // grabbed the new one. Matches the reported symptom exactly:
+        // "after one drag breaks, dragging a different app moves the first
+        // app instead." Commit the stale session now, using its own
+        // last-tracked position, before handling this new press — the same
+        // treatment the global monitor gives a genuinely lost mouseUp.
+        if let staleSession = activeItemDrag {
+            DiagnosticsLog.grid.notice("handleItemMouseDown: new press on item \(indexPath.item, privacy: .public) arrived while item \(staleSession.sourceOriginalIndex, privacy: .public)'s drag was still active — committing the stale session first")
+            endItemDrag(session: staleSession)
+        }
         // Real, confirmed regression: this used to call
         // `collectionView.reloadItems(at: [indexPath])` right here to make
         // the selection highlight visible. Reloading the very cell that's
