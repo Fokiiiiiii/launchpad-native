@@ -78,6 +78,26 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.cell = SearchFieldCell()
+        // Real, confirmed root cause of "clicking the search field closes
+        // the launcher": a bare `NSTextFieldCell()` (what `SearchFieldCell()`
+        // constructs) defaults to *not* editable/selectable — unlike
+        // `NSTextField`'s own convenience initializers, which configure
+        // their default cell that way for you. Assigning a fresh custom
+        // cell via `.cell = ...` does not inherit that configuration, so
+        // without these two lines the cell silently declined every mouse
+        // click (not editable → nothing to track), and `NSControl.mouseDown`
+        // fell back to `super.mouseDown(event)`, which walks the responder
+        // chain up through this field's superviews and ultimately reached
+        // `BackgroundClickCatcherView.mouseDown` — indistinguishable from a
+        // real background click, so it closed the launcher. Confirmed via a
+        // debug hook that called `mouseDown(with:)` directly on the exact
+        // view `hitTest` had already identified as the search field: even
+        // that direct call still propagated to the background catcher,
+        // which only makes sense as a responder-chain fallback, not a
+        // hit-testing problem — hitTest was correctly resolving to this
+        // field the entire time.
+        searchField.isEditable = true
+        searchField.isSelectable = true
         searchField.placeholderAttributedString = NSAttributedString(
             string: L10n.searchPlaceholder,
             attributes: [.kern: -0.4, .foregroundColor: NSColor.placeholderTextColor]
@@ -258,6 +278,63 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     func debugSetSearchQuery(_ query: String) {
         searchField.stringValue = query
         applyQuery(query)
+    }
+
+    /// Debug-only entry point (`LAUNCHPAD_DEBUG_CLICK_SEARCH_FIELD`, wired
+    /// in `AppDelegate`) — synthesizes a *real* `NSEvent` mouse down/up pair
+    /// at the search field's actual on-screen location and dispatches it
+    /// through `window.sendEvent(_:)`, so the exact hit-testing/responder
+    /// path a real trackpad click takes can be exercised and logged without
+    /// Accessibility/GUI-scripting permission to perform one. Exists
+    /// specifically because a prior fix (making the decorative glass
+    /// background's `hitTest` always return `nil`) didn't resolve a real
+    /// user report that clicking the search field still closes the
+    /// launcher — this lets that exact path be re-examined via `log
+    /// stream` without needing the user's own hands-on retest for every
+    /// iteration.
+    func debugSimulateSearchFieldClick() {
+        guard let window = view.window else {
+            DiagnosticsLog.launcher.info("debugSimulateSearchFieldClick: no window")
+            return
+        }
+        let frameInWindow = searchField.convert(searchField.bounds, to: nil)
+        let point = NSPoint(x: frameInWindow.midX, y: frameInWindow.midY)
+        DiagnosticsLog.launcher.info("debugSimulateSearchFieldClick: dispatching at \(String(describing: point), privacy: .public), frameInWindow=\(String(describing: frameInWindow), privacy: .public)")
+
+        // Direct hitTest probes (bypassing sendEvent entirely) to pin down
+        // exactly which level of the hierarchy actually claims this point.
+        let contentViewHit = window.contentView?.hitTest(point)
+        let selfViewHit = view.hitTest(view.convert(point, from: nil))
+        DiagnosticsLog.launcher.info("debugSimulateSearchFieldClick: window.contentView.hitTest -> \(String(describing: contentViewHit), privacy: .public), self.view.hitTest -> \(String(describing: selfViewHit), privacy: .public), searchField itself is \(String(describing: self.searchField), privacy: .public)")
+
+        guard let mouseDown = NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: point,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1.0
+        ), let mouseUp = NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: point,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 0.0
+        ) else {
+            DiagnosticsLog.launcher.info("debugSimulateSearchFieldClick: failed to construct synthetic events")
+            return
+        }
+
+        window.sendEvent(mouseDown)
+        window.sendEvent(mouseUp)
+        DiagnosticsLog.launcher.info("debugSimulateSearchFieldClick: after sendEvent, firstResponder=\(String(describing: window.firstResponder), privacy: .public), windowIsVisible=\(window.isVisible, privacy: .public), windowIsKey=\(window.isKeyWindow, privacy: .public)")
     }
 
     func reloadGrid() {

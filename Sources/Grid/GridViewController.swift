@@ -97,6 +97,13 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.register(GridCellItem.self, forItemWithIdentifier: itemIdentifier)
         collectionView.isSelectable = true
         collectionView.backgroundColors = [.clear]
+        // Reordering/folder-creation drags land back on this same
+        // collection view — a *local* drag session, distinct from the
+        // "drag onto the real Dock" case (`forLocal: false`, already set
+        // below). Both masks are tracked independently by AppKit; setting
+        // only one leaves the other at its own framework default, which
+        // this makes explicit rather than relying on to be permissive.
+        collectionView.setDraggingSourceOperationMask(.every, forLocal: true)
         collectionView.setDraggingSourceOperationMask(.every, forLocal: false)
         collectionView.registerForDraggedTypes([Self.internalDragType])
         collectionView.menuProvider = { [weak self] indexPath in self?.contextMenu(for: indexPath) }
@@ -1004,7 +1011,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         guard let indexPath = indexPaths.first else { return }
         dragSessionStartedDuringCurrentGesture = false
         DispatchQueue.main.async { [weak self] in
-            guard let self, !self.dragSessionStartedDuringCurrentGesture else { return }
+            guard let self else { return }
+            DiagnosticsLog.grid.notice("didSelectItemsAt: deferred check, dragSessionStarted=\(self.dragSessionStartedDuringCurrentGesture, privacy: .public)")
+            guard !self.dragSessionStartedDuringCurrentGesture else { return }
             self.activate(at: indexPath)
         }
     }
@@ -1022,7 +1031,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     public func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
         guard model.pages.indices.contains(currentPage),
-              model.pages[currentPage].indices.contains(indexPath.item) else { return nil }
+              model.pages[currentPage].indices.contains(indexPath.item) else {
+            DiagnosticsLog.grid.notice("pasteboardWriterForItemAt: nil (index out of range for page \(self.currentPage, privacy: .public))")
+            return nil
+        }
+        DiagnosticsLog.grid.notice("pasteboardWriterForItemAt: item \(indexPath.item, privacy: .public) on page \(self.currentPage, privacy: .public)")
         let pbItem = NSPasteboardItem()
         pbItem.setString("\(indexPath.item)", forType: Self.internalDragType)
         if case .app(let id) = model.pages[currentPage][indexPath.item], let record = model.record(for: id) {
@@ -1037,7 +1050,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>,
         dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>
     ) -> NSDragOperation {
-        guard draggingInfo.draggingPasteboard.string(forType: Self.internalDragType) != nil else { return [] }
+        guard draggingInfo.draggingPasteboard.string(forType: Self.internalDragType) != nil else {
+            DiagnosticsLog.grid.notice("validateDrop: rejected (no internal drag type on pasteboard)")
+            return []
+        }
+        DiagnosticsLog.grid.notice("validateDrop: accepted, proposedIndexPath=\(String(describing: proposedDropIndexPath.pointee), privacy: .public), operation=\(String(describing: proposedDropOperation.pointee), privacy: .public)")
         return .move
     }
 
@@ -1048,8 +1065,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         dropOperation: NSCollectionView.DropOperation
     ) -> Bool {
         guard let sourceIndexString = draggingInfo.draggingPasteboard.string(forType: Self.internalDragType),
-              let sourceIndex = Int(sourceIndexString) else { return false }
+              let sourceIndex = Int(sourceIndexString) else {
+            DiagnosticsLog.grid.notice("acceptDrop: rejected (no internal drag type / index on pasteboard)")
+            return false
+        }
 
+        DiagnosticsLog.grid.notice("acceptDrop: sourceIndex=\(sourceIndex, privacy: .public), destinationIndex=\(indexPath.item, privacy: .public), dropOperation=\(String(describing: dropOperation), privacy: .public)")
         if dropOperation == .on {
             model.createOrJoinFolder(
                 sourcePage: currentPage,
@@ -1086,6 +1107,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         willBeginAt screenPoint: NSPoint,
         forItemsAt indexPaths: Set<IndexPath>
     ) {
+        DiagnosticsLog.grid.notice("draggingSession willBeginAt: a real drag session started for \(indexPaths.count, privacy: .public) item(s)")
         dragSessionStartedDuringCurrentGesture = true
         startWobble()
     }
@@ -1096,6 +1118,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         endedAt screenPoint: NSPoint,
         dragOperation operation: NSDragOperation
     ) {
+        DiagnosticsLog.grid.notice("draggingSession endedAt: operation=\(String(describing: operation), privacy: .public)")
         // Fires on both a completed drop and a cancelled drag, so this one
         // method covers both — no separate cancel handler needed.
         stopWobble()

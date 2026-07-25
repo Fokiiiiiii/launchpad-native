@@ -71,6 +71,12 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         viewController?.debugSetSearchQuery(query)
     }
 
+    /// Debug-only — see `AppDelegate`'s `LAUNCHPAD_DEBUG_CLICK_SEARCH_FIELD`
+    /// doc comment.
+    public func debugSimulateSearchFieldClick() {
+        viewController?.debugSimulateSearchFieldClick()
+    }
+
     /// Debug-only — see `GridViewController.debugSimulatePageDrag`'s doc
     /// comment for why this exists.
     public func debugSimulatePageDrag(commit: Bool) {

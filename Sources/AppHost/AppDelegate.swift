@@ -115,6 +115,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 launcherWindowController.debugSetSearchQuery(query)
             }
 
+            // Debug-only: dispatches a *real* synthetic NSEvent mouse down/up
+            // at the search field's actual on-screen location, so the exact
+            // hit-testing/responder path a real click takes can be examined
+            // via log stream. Added because a prior fix (glass background
+            // hitTest -> nil) didn't resolve a real user report that
+            // clicking the search field still closes the launcher.
+            if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_CLICK_SEARCH_FIELD"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    self?.launcherWindowController.debugSimulateSearchFieldClick()
+                }
+            }
+
             // Custom sources (2.13) are only known once the document has
             // loaded, so the scanner is created here rather than at
             // declaration time.
