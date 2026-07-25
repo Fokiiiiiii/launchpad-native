@@ -88,6 +88,20 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     public override func loadView() {
         let root = NSView()
+        // The floating item-drag preview (`createFloatingDragView`) is added
+        // directly as this view's child. Every other place in this file that
+        // continuously mutates a CALayer transform either sets `wantsLayer`
+        // on that exact view first or pairs the write with an active
+        // `CAAnimation` — `updateItemDrag`'s per-frame position update does
+        // neither, relying instead on the floating view's ancestor chain
+        // being part of one coherent, layer-backed compositing tree from the
+        // root down. Without this, the floating view's one-shot "lift"
+        // animation (added once, auto-removed after ~0.2s) was the only
+        // thing keeping it under active compositing — once that settled,
+        // later bare `transform.translation` writes stopped reliably
+        // recompositing to screen (real, confirmed regression: "the grabbed
+        // icon doesn't move from its spot").
+        root.wantsLayer = true
 
         layout.settings = model.gridSettings
         collectionView.collectionViewLayout = layout
@@ -1593,12 +1607,22 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func endItemDrag(session: ItemDragSession) {
         session.invalidateTimers()
         activeItemDrag = nil
-        stopWobble()
 
         let hasFolderTarget = session.folderCandidateOriginalIndex != nil
         DiagnosticsLog.grid.notice("endItemDrag: committing reorder to slot \(session.candidateSlot, privacy: .public), folderTarget=\(hasFolderTarget, privacy: .public)")
 
+        // Real, confirmed bug: resetting cells' transforms *after*
+        // stopWobble() removed their one active, continuous animation left
+        // the reset's own bare (animation-disabled) transform write with
+        // nothing to piggyback a repaint on — cells could stay visually
+        // stuck at their last reorder-preview offset even though their
+        // model transform (and therefore hit-testing, which AppKit always
+        // computes from untransformed layout) was already back to identity.
+        // That mismatch is what made clicks resolve to the wrong item
+        // ("なぜか上のだけ開く"). Resetting first, while wobble is still
+        // active, ensures the reset itself gets composited.
         for item in collectionView.visibleItems() { resetItemTransform(item.view) }
+        stopWobble()
 
         if let folderTargetIndex = session.folderCandidateOriginalIndex {
             model.createOrJoinFolder(
@@ -1660,9 +1684,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func revertItemDrag(session: ItemDragSession) {
         session.invalidateTimers()
         activeItemDrag = nil
-        stopWobble()
+        // See endItemDrag's doc comment: reset before stopWobble(), not
+        // after, so the reset's own transform write still has an active
+        // animation on these layers to piggyback its repaint on.
         clearFolderCandidateHighlight(session: session)
         for item in collectionView.visibleItems() { resetItemTransform(item.view) }
+        stopWobble()
 
         guard let floatingView = session.floatingView, let layer = floatingView.layer else { return }
         animateLayerTranslation(layer, toX: 0, toY: 0)

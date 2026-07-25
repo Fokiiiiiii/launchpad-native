@@ -84,6 +84,22 @@ final class GridCellItem: NSCollectionViewItem {
         view.wantsLayer = true
     }
 
+    /// Defense-in-depth against stale visual state surviving `NSCollectionView`'s
+    /// cell-reuse recycling: `reloadData()`/`makeItem(withIdentifier:for:)`
+    /// reuse view instances without resetting any `CALayer` state on their
+    /// own, and neither `configureAsApp`/`configureAsFolder` below touch
+    /// `transform`/animations/`isHidden`. The item-drag machinery in
+    /// `GridViewController` already resets these explicitly on every known
+    /// exit path, but this closes the gap structurally — a recycled cell
+    /// can never inherit a leftover offset, animation, or hidden state from
+    /// whatever index path it previously represented.
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        view.layer?.removeAllAnimations()
+        view.layer?.transform = CATransform3DIdentity
+        view.isHidden = false
+    }
+
     /// Applies `GridSettings.iconSize` — previously hardcoded to 64pt
     /// regardless of the setting, which is why icons rendered noticeably
     /// smaller than intended.
