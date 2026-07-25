@@ -977,7 +977,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         popover.contentViewController = folderVC
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = NSSize(width: 320, height: 320)
+        // Real, confirmed bug: `contentSize` here had no effect —
+        // `FolderContentsViewController.preferredContentSize` (which
+        // Auto-Layout-based view controllers must use instead) is what
+        // actually sizes the popover now. See that class's doc comment.
         popover.delegate = folderVC
         openFolderPopover = popover
         _ = folder // silence unused-in-release warnings if folder gains more fields later

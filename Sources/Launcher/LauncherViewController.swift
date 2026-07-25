@@ -22,7 +22,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     private let searchField = NSTextField()
     private let searchIcon = NSImageView()
-    private let settingsButton = NSButton()
     private let quickMenuButton = NSButton()
     private let searchResultsCollectionView = SearchResultsCollectionView()
     private let searchResultsScrollView = NSScrollView()
@@ -98,6 +97,18 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // field the entire time.
         searchField.isEditable = true
         searchField.isSelectable = true
+        // Same bug family as isEditable/isSelectable above: a bare
+        // `NSTextFieldCell()` also doesn't inherit `NSTextField`'s
+        // convenience-init defaults for single-line layout. Without these,
+        // the cell treated its content as multi-line-capable, which — even
+        // for a short single-line placeholder — top-anchors the text within
+        // the cell's bounds instead of true single-line vertical centering,
+        // explaining why the placeholder/typed text sat visibly higher than
+        // the search icon next to it (both are centerY-anchored to the same
+        // pill, so the icon's correct centering exposed the text's offset).
+        searchField.cell?.usesSingleLineMode = true
+        searchField.cell?.wraps = false
+        searchField.lineBreakMode = .byTruncatingTail
         searchField.placeholderAttributedString = NSAttributedString(
             string: L10n.searchPlaceholder,
             attributes: [.kern: -0.4, .foregroundColor: NSColor.placeholderTextColor]
@@ -109,26 +120,21 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchField.delegate = self
         searchField.setAccessibilityLabel(L10n.searchAccessibilityLabel)
 
-        // A small circular glass chip, same reasoning as the search
-        // capsule above — decorative sibling, button drawn on top of it.
-        let settingsGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 14)
-        settingsGlass.translatesAutoresizingMaskIntoConstraints = false
-
-        settingsButton.translatesAutoresizingMaskIntoConstraints = false
-        settingsButton.bezelStyle = .circular
-        settingsButton.isBordered = false
-        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: L10n.settingsButtonAccessibilityLabel)?
-            .withSymbolConfiguration(.init(pointSize: 18, weight: .regular))
-        settingsButton.contentTintColor = .secondaryLabelColor
-        settingsButton.target = self
-        settingsButton.action = #selector(settingsButtonTapped)
-
-        // A second glass chip alongside the settings gear — a quick-access
-        // menu (browsing mode + a Settings shortcut) without requiring a
-        // full trip into Settings for a toggle already surfaced there.
-        // Explicitly does NOT include a "sort by" entry: this app has no
-        // automatic sort feature (manual drag order only), so a menu item
-        // for it would be decorative, not functional.
+        // Real, confirmed duplication the user called out ("設定ボタンへの
+        // 経路は二つある"): this used to be a second, permanently-visible
+        // glass chip with its own gearshape button living right next to
+        // the quick-menu chip below — both routes opened the exact same
+        // Settings window. Removed in favor of a single entry point (the
+        // quick menu's "Open Settings…" item, wired up below), matching
+        // the reference design's search bar (one "•••" chip, no separate
+        // persistent gear icon).
+        //
+        // A single glass chip for a quick-access menu (browsing mode + a
+        // Settings shortcut) without requiring a full trip into Settings
+        // for a toggle already surfaced there. Explicitly does NOT include
+        // a "sort by" entry: this app has no automatic sort feature
+        // (manual drag order only), so a menu item for it would be
+        // decorative, not functional.
         let quickMenuGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 14)
         quickMenuGlass.translatesAutoresizingMaskIntoConstraints = false
 
@@ -171,11 +177,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchBar.addSubview(searchIcon)
         searchBar.addSubview(searchField)
 
-        let settingsChip = NSView()
-        settingsChip.translatesAutoresizingMaskIntoConstraints = false
-        settingsChip.addSubview(settingsGlass)
-        settingsChip.addSubview(settingsButton)
-
         let quickMenuChip = NSView()
         quickMenuChip.translatesAutoresizingMaskIntoConstraints = false
         quickMenuChip.addSubview(quickMenuGlass)
@@ -183,7 +184,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
         root.addSubview(searchBar)
         root.addSubview(quickMenuChip)
-        root.addSubview(settingsChip)
         root.addSubview(gridViewController.view)
         root.addSubview(searchResultsScrollView)
         NSLayoutConstraint.activate([
@@ -204,23 +204,8 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             searchField.trailingAnchor.constraint(equalTo: searchBar.trailingAnchor, constant: -16),
             searchField.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
 
-            settingsChip.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
-            settingsChip.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
-            settingsChip.widthAnchor.constraint(equalToConstant: 32),
-            settingsChip.heightAnchor.constraint(equalToConstant: 32),
-
-            settingsGlass.leadingAnchor.constraint(equalTo: settingsChip.leadingAnchor),
-            settingsGlass.trailingAnchor.constraint(equalTo: settingsChip.trailingAnchor),
-            settingsGlass.topAnchor.constraint(equalTo: settingsChip.topAnchor),
-            settingsGlass.bottomAnchor.constraint(equalTo: settingsChip.bottomAnchor),
-
-            settingsButton.centerXAnchor.constraint(equalTo: settingsChip.centerXAnchor),
-            settingsButton.centerYAnchor.constraint(equalTo: settingsChip.centerYAnchor),
-            settingsButton.widthAnchor.constraint(equalToConstant: 28),
-            settingsButton.heightAnchor.constraint(equalToConstant: 28),
-
             quickMenuChip.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
-            quickMenuChip.trailingAnchor.constraint(equalTo: settingsChip.leadingAnchor, constant: -12),
+            quickMenuChip.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
             quickMenuChip.widthAnchor.constraint(equalToConstant: 32),
             quickMenuChip.heightAnchor.constraint(equalToConstant: 32),
 

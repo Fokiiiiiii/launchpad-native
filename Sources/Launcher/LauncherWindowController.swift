@@ -218,6 +218,16 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // showed up live as the launcher opening and immediately resigning
         // key (closing itself) within ~50ms of every trigger firing.
         NSApp.activate(ignoringOtherApps: true)
+        // Real Launchpad/Mission Control convention: the real macOS menu
+        // bar shouldn't sit visibly over a fullscreen-style launcher.
+        // `.autoHideMenuBar` slides it away and only reveals it again on a
+        // deliberate mouse-to-top-edge gesture, matching how every other
+        // fullscreen-presenting app on macOS behaves. Left independent of
+        // the existing `hideDockWhileLauncherOpen` window-level toggle —
+        // that one is a user preference for whether the Dock icon strip
+        // itself should show through; the menu bar isn't part of that
+        // choice.
+        NSApp.presentationOptions.insert(.autoHideMenuBar)
         window.makeKeyAndOrderFront(nil)
         DiagnosticsLog.launcher.info("show(): after makeKeyAndOrderFront, isVisible=\(window.isVisible, privacy: .public), isKeyWindow=\(window.isKeyWindow, privacy: .public)")
 
@@ -231,6 +241,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
 
     public func hide() {
         guard let window, window.isVisible else { return }
+        NSApp.presentationOptions.remove(.autoHideMenuBar)
         animationGeneration += 1
         let generation = animationGeneration
 

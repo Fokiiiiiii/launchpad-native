@@ -17,6 +17,8 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
 
     private let titleField = NSTextField(labelWithString: "")
     private let collectionView = GridCollectionView()
+    private var pendingClickIndexPath: IndexPath?
+    private static let contentSize = NSSize(width: 320, height: 320)
 
     /// Flattened (folderPage, folderIndex, item) so context-menu "Remove from
     /// Folder" can address the exact underlying position.
@@ -60,6 +62,23 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         collectionView.isSelectable = true
         collectionView.backgroundColors = [.clear]
         collectionView.menuProvider = { [weak self] indexPath in self?.contextMenu(for: indexPath) }
+        // Real, confirmed bug: `GridCollectionView`'s `mouseDown` override
+        // never calls `super.mouseDown(with:)` for a content hit (see that
+        // class's doc comment) — it only calls `onItemMouseDown`, which this
+        // controller never wired up. That silently broke clicking an app
+        // inside an opened folder (no click ever reached
+        // `didSelectItemsAt`), on top of `didSelectItemsAt` itself never
+        // firing for the same reason. Wired here with the simplest
+        // click-only handling this view needs — no drag/reorder/folder-
+        // creation machinery, since a folder's contents are a flat list.
+        collectionView.onItemMouseDown = { [weak self] indexPath, _ in
+            self?.pendingClickIndexPath = indexPath
+        }
+        collectionView.onItemMouseUp = { [weak self] _ in
+            guard let self, let indexPath = self.pendingClickIndexPath else { return }
+            self.pendingClickIndexPath = nil
+            self.collectionView(self.collectionView, didSelectItemsAt: [indexPath])
+        }
 
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -70,6 +89,9 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         root.addSubview(titleField)
         root.addSubview(scrollView)
         NSLayoutConstraint.activate([
+            root.widthAnchor.constraint(equalToConstant: Self.contentSize.width),
+            root.heightAnchor.constraint(equalToConstant: Self.contentSize.height),
+
             titleField.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
             titleField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             titleField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
@@ -80,6 +102,18 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
             scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
         ])
         view = root
+        // Real, confirmed bug: `NSPopover.contentSize` (set by the caller in
+        // `GridViewController.openFolder`) has no effect once the content
+        // view controller's view uses Auto Layout (documented Apple
+        // behavior) — this view has no explicit size constraints of its own
+        // otherwise, so Auto Layout collapsed it to whatever minimum size
+        // its children could shrink to, which is why the popover appeared
+        // stuck at roughly the size of the folder icon itself instead of
+        // actually opening. `preferredContentSize` is the mechanism that
+        // *does* work for an Auto Layout view controller; the explicit
+        // width/height constraints above back it so the layout is
+        // unambiguous either way.
+        preferredContentSize = Self.contentSize
         refresh()
     }
 
