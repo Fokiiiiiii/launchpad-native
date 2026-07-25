@@ -1,4 +1,5 @@
 import AppKit
+import Diagnostics
 
 /// Routes right-clicks to a per-item context menu, and trackpad 2-finger
 /// horizontal swipes to page navigation.
@@ -140,6 +141,12 @@ final class GridCollectionView: NSCollectionView {
             let now = CACurrentMediaTime()
             guard now - lastDiscreteWheelPageChange > discreteWheelCooldown else { return }
             lastDiscreteWheelPageChange = now
+            // Temporary diagnostic (see this type's doc comment on the
+            // "looks like a fade" user report): if a real trackpad swipe
+            // ever ends up here instead of the .began/.changed/.ended
+            // switch below, that alone would explain it — this branch is
+            // meant only for hardware with no phase info at all.
+            DiagnosticsLog.grid.notice("scrollWheel: discrete branch fired (phase=\(String(describing: event.phase), privacy: .public), momentumPhase=\(String(describing: event.momentumPhase), privacy: .public), hasPreciseScrollingDeltas=\(event.hasPreciseScrollingDeltas, privacy: .public))")
             onSwipePage?(delta < 0 ? 1 : -1)
             return
         }
@@ -151,6 +158,7 @@ final class GridCollectionView: NSCollectionView {
             swipeAxis = nil
             swipeEngaged = false
             recentSamples.removeAll()
+            DiagnosticsLog.grid.notice("scrollWheel: .began")
         case .changed:
             swipeAccumulatedDeltaX += event.scrollingDeltaX
             swipeAccumulatedDeltaY += event.scrollingDeltaY
@@ -164,11 +172,13 @@ final class GridCollectionView: NSCollectionView {
                     swipeAxis = .horizontal
                     swipeEngaged = true
                     onSwipeBegan?()
+                    DiagnosticsLog.grid.notice("scrollWheel: engaged horizontal at cumulative dx=\(self.swipeAccumulatedDeltaX, privacy: .public)")
                 } else if abs(swipeAccumulatedDeltaY) >= minimumEngageDistance
                     && abs(swipeAccumulatedDeltaY) > abs(swipeAccumulatedDeltaX) * 2 {
                     swipeAxis = .vertical
                     swipeEngaged = true
                     onSwipeBegan?()
+                    DiagnosticsLog.grid.notice("scrollWheel: engaged vertical at cumulative dy=\(self.swipeAccumulatedDeltaY, privacy: .public)")
                 }
             }
             guard let axis = swipeAxis else { break }
@@ -180,6 +190,7 @@ final class GridCollectionView: NSCollectionView {
             }
             onSwipeChanged?(effectiveDelta)
         case .ended, .cancelled:
+            DiagnosticsLog.grid.notice("scrollWheel: .ended/.cancelled, engaged=\(self.swipeEngaged, privacy: .public), dx=\(self.swipeAccumulatedDeltaX, privacy: .public), dy=\(self.swipeAccumulatedDeltaY, privacy: .public)")
             if swipeEngaged, let axis = swipeAxis {
                 let effectiveDelta = axis == .horizontal ? swipeAccumulatedDeltaX : swipeAccumulatedDeltaY
                 onSwipeEnded?(effectiveDelta, Self.estimateVelocity(recentSamples))
@@ -190,7 +201,13 @@ final class GridCollectionView: NSCollectionView {
             swipeEngaged = false
             recentSamples.removeAll()
         default:
-            break
+            // Temporary diagnostic: this is where a momentum-only event
+            // (real fingers already lifted, phase == [], momentumPhase
+            // carrying .began/.changed/.ended) would land, since the
+            // switch above keys on `event.phase`, not `momentumPhase`.
+            // If this fires a lot during a real swipe, that's a strong
+            // candidate for why the drag path silently does nothing.
+            DiagnosticsLog.grid.notice("scrollWheel: unhandled phase=\(String(describing: event.phase), privacy: .public) momentumPhase=\(String(describing: event.momentumPhase), privacy: .public)")
         }
     }
 

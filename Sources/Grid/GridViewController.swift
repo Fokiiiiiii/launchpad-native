@@ -369,11 +369,18 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// and the hard fallback timer — the actual neighbor snapshot is
     /// created lazily in `updatePageDrag` once the direction is known.
     private func beginPageDrag() {
-        guard dragDirection == 0, dragNeighborImageView == nil else { return }
-        guard collectionView.bounds.width > 0 else { return }
+        guard dragDirection == 0, dragNeighborImageView == nil else {
+            DiagnosticsLog.grid.notice("beginPageDrag: bailed early (dragDirection=\(self.dragDirection, privacy: .public), neighborAlreadyExists=\(self.dragNeighborImageView != nil, privacy: .public))")
+            return
+        }
+        guard collectionView.bounds.width > 0 else {
+            DiagnosticsLog.grid.notice("beginPageDrag: bailed, collectionView.bounds.width <= 0")
+            return
+        }
         collectionView.wantsLayer = true
         dragHasPrev = currentPage > 0
         dragHasNext = currentPage < model.pages.count - 1
+        DiagnosticsLog.grid.notice("beginPageDrag: armed at page \(self.currentPage, privacy: .public), hasPrev=\(self.dragHasPrev, privacy: .public), hasNext=\(self.dragHasNext, privacy: .public)")
         dragGeneration += 1
         let generation = dragGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.dragSafetyNetTimeout) { [weak self] in
@@ -399,20 +406,25 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             // page, see `GridCollectionView`'s original threshold logic).
             dragDirection = deltaX < 0 ? 1 : -1
             let hasNeighbor = dragDirection > 0 ? dragHasNext : dragHasPrev
-            if hasNeighbor, dragNeighborImageView == nil,
-               let image = renderPageSnapshot(forPage: currentPage + dragDirection, size: collectionView.bounds.size) {
-                let xOffset = dragDirection > 0 ? width : -width
-                let imageView = NSImageView(frame: NSRect(
-                    x: scrollView.frame.origin.x + xOffset,
-                    y: scrollView.frame.origin.y,
-                    width: scrollView.frame.width,
-                    height: scrollView.frame.height
-                ))
-                imageView.image = image
-                imageView.imageScaling = .scaleNone
-                imageView.wantsLayer = true
-                view.addSubview(imageView, positioned: .above, relativeTo: scrollView)
-                dragNeighborImageView = imageView
+            DiagnosticsLog.grid.notice("updatePageDrag: direction resolved to \(self.dragDirection, privacy: .public), hasNeighbor=\(hasNeighbor, privacy: .public)")
+            if hasNeighbor, dragNeighborImageView == nil {
+                if let image = renderPageSnapshot(forPage: currentPage + dragDirection, size: collectionView.bounds.size) {
+                    let xOffset = dragDirection > 0 ? width : -width
+                    let imageView = NSImageView(frame: NSRect(
+                        x: scrollView.frame.origin.x + xOffset,
+                        y: scrollView.frame.origin.y,
+                        width: scrollView.frame.width,
+                        height: scrollView.frame.height
+                    ))
+                    imageView.image = image
+                    imageView.imageScaling = .scaleNone
+                    imageView.wantsLayer = true
+                    view.addSubview(imageView, positioned: .above, relativeTo: scrollView)
+                    dragNeighborImageView = imageView
+                    DiagnosticsLog.grid.notice("updatePageDrag: neighbor snapshot created for page \(self.currentPage + self.dragDirection, privacy: .public)")
+                } else {
+                    DiagnosticsLog.grid.notice("updatePageDrag: renderPageSnapshot returned nil for page \(self.currentPage + self.dragDirection, privacy: .public)")
+                }
             }
         }
 
@@ -451,6 +463,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 commit = true
             }
         }
+
+        DiagnosticsLog.grid.notice("endPageDrag: hasNeighbor=\(hasNeighbor, privacy: .public), deltaX=\(deltaX, privacy: .public), velocity=\(velocity, privacy: .public), commit=\(commit, privacy: .public)")
 
         let targetTranslation: CGFloat = commit ? (dragDirection > 0 ? -width : width) : 0
         let distanceRemaining = targetTranslation - deltaX
