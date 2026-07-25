@@ -98,6 +98,7 @@ final class GridCellItem: NSCollectionViewItem {
         view.layer?.removeAllAnimations()
         view.layer?.transform = CATransform3DIdentity
         view.isHidden = false
+        view.layer?.opacity = 1
     }
 
     /// Applies `GridSettings.iconSize` — previously hardcoded to 64pt

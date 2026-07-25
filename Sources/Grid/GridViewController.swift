@@ -5,6 +5,23 @@ import Localization
 import Persistence
 import WindowBrowser
 
+/// Tried as the first hypothesis while root-causing "the grabbed icon
+/// doesn't move" via genuine CGEvent-driven drag testing (not synthetic
+/// `window.sendEvent` — the first time this codebase could exercise a
+/// real, continuous OS-level drag): a plain `NSImageView` is a perfectly
+/// normal hit-testable view, and `createFloatingDragView` adds it *on top
+/// of* `collectionView` (`positioned: .above`), directly under the
+/// cursor. Making it hit-test-transparent turned out NOT to fix the bug on
+/// its own (measured: `mouseDragged` still stopped after the first event
+/// with this alone) — the real cause was `cell.view.isHidden = true`, see
+/// that call site's doc comment. Kept anyway as cheap, correct defense in
+/// depth: a purely decorative/passthrough overlay still shouldn't be
+/// hit-testable, on the same principle as `NonInteractiveGlassEffectView`
+/// in `GlassBackgroundView.swift`, even though it wasn't this bug's cause.
+private final class NonInteractiveImageView: NSImageView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// The persistent, folder-aware paged grid (2.2/2.4/2.7): backed by
 /// `GridModel`+`PagedGridLayout`, with in-page reorder, folder
 /// creation/join/dissolve via drag, and a per-item context menu. This is
@@ -1385,7 +1402,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         guard let cell = collectionView.item(at: IndexPath(item: session.sourceOriginalIndex, section: 0)) as? GridCellItem else { return }
         let image = snapshotImage(of: cell.view)
         let frameInRoot = collectionView.convert(session.originalFrame, to: view)
-        let imageView = NSImageView(frame: frameInRoot)
+        let imageView = NonInteractiveImageView(frame: frameInRoot)
         imageView.image = image
         imageView.imageScaling = .scaleNone
         imageView.wantsLayer = true
@@ -1396,7 +1413,25 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         view.addSubview(imageView, positioned: .above, relativeTo: nil)
         session.floatingView = imageView
         session.floatingViewOriginalFrameInRoot = frameInRoot
-        cell.view.isHidden = true
+        // Real, confirmed bug found via genuine CGEvent-driven drag testing:
+        // setting `cell.view.isHidden = true` here — even though `cell.view`
+        // is a descendant of `collectionView`, not `collectionView` itself —
+        // silently broke AppKit's mouse-tracking continuity for the rest of
+        // the gesture. A live drag would fire `mouseDown` -> the first
+        // `mouseDragged` -> `beginItemDrag`, then never receive another
+        // `mouseDragged`/`mouseUp` at all, exactly matching "the grabbed
+        // icon doesn't move" and "surrounding icons shift oddly" (the
+        // reorder-preview path is driven separately and kept animating).
+        // Confirmed by toggling only this one line: removing it let 6/6
+        // synthetic `mouseDragged` events through and `endItemDrag` commit
+        // correctly; restoring it reproduced the 1-event cutoff every time.
+        // Same family as the `reloadItems`-mid-mouseDown regression
+        // documented above `handleItemMouseDown` — mutating view-hierarchy/
+        // visibility state on the actively-tracked view's subtree mid-
+        // gesture is unsafe. Fixed by hiding the cell via its `CALayer`
+        // opacity instead, which doesn't touch AppKit's view-visibility
+        // machinery at all.
+        cell.view.layer?.opacity = 0
 
         // Spec 5.2: a short lift (scale 1.00 -> 1.06), a touch of bounce
         // since a real grab is what triggered it (apple-design: reserve
@@ -1433,10 +1468,28 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func updateItemDrag(session: ItemDragSession, point: NSPoint) {
         session.lastPoint = point
         guard let floatingView = session.floatingView, let layer = floatingView.layer else { return }
+        // Real, confirmed bug found via genuine CGEvent-driven drag testing
+        // with diagnostic logging: converting `targetOriginInCollectionView`
+        // as a *point* here, while `floatingViewOriginalFrameInRoot` (below,
+        // in `createFloatingDragView`) is computed by converting the cell's
+        // *rect* — `NSView.convert(_ rect:to:)` automatically corrects for a
+        // flipped/non-flipped mismatch between `collectionView` (flipped)
+        // and `view` (non-flipped) so `minY` always means "the visual
+        // bottom edge" in the destination coordinate space, but
+        // `convert(_ point:to:)` does not perform that same correction — it
+        // just remaps the raw value. Mixing the two meant `dy` was always
+        // off by exactly one cell's height (confirmed via logging: a purely
+        // horizontal drag produced `dy == cell height` on every frame,
+        // never 0), which is why the floating icon visually jumped to a
+        // wildly wrong vertical position while still technically tracking
+        // the cursor horizontally. Fixed by building a full rect here too,
+        // so both sides of the subtraction go through the same rect-convert
+        // path and agree on what `minY` means.
         let targetOriginInCollectionView = NSPoint(x: point.x - session.grabOffset.x, y: point.y - session.grabOffset.y)
-        let targetOriginInRoot = collectionView.convert(targetOriginInCollectionView, to: view)
-        let dx = targetOriginInRoot.x - session.floatingViewOriginalFrameInRoot.minX
-        let dy = targetOriginInRoot.y - session.floatingViewOriginalFrameInRoot.minY
+        let targetRectInCollectionView = NSRect(origin: targetOriginInCollectionView, size: session.originalFrame.size)
+        let targetRectInRoot = collectionView.convert(targetRectInCollectionView, to: view)
+        let dx = targetRectInRoot.minX - session.floatingViewOriginalFrameInRoot.minX
+        let dy = targetRectInRoot.minY - session.floatingViewOriginalFrameInRoot.minY
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -1746,7 +1799,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             Task { @MainActor in
                 floatingView.removeFromSuperview()
-                self?.collectionView.item(at: IndexPath(item: targetOriginalIndex, section: 0))?.view.isHidden = false
+                self?.collectionView.item(at: IndexPath(item: targetOriginalIndex, section: 0))?.view.layer?.opacity = 1
                 self?.collectionView.reloadData()
             }
         }
@@ -1775,7 +1828,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 floatingView.removeFromSuperview()
             }
         }
-        collectionView.item(at: IndexPath(item: session.sourceOriginalIndex, section: 0))?.view.isHidden = false
+        collectionView.item(at: IndexPath(item: session.sourceOriginalIndex, section: 0))?.view.layer?.opacity = 1
     }
 
     // MARK: Jiggle mode
