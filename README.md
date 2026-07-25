@@ -339,15 +339,21 @@ is 82 tests with 1 pre-existing unrelated flaky perf-timing failure.
 in the search field made "the app's size break." Root cause:
 `AppIconCollectionViewItem` (the search-results cell) hardcoded a 64pt
 icon and `NSCollectionViewFlowLayout.itemSize` was a fixed `96x110`,
-regardless of `GridSettings.iconSize` — the persistent grid honors that
-setting (confirmed on the user's real document: `iconSize` is 160), but
-switching into search mode snapped every icon down to 64pt, a visibly
-jarring size change. Fixed by giving `AppIconCollectionViewItem` the
-same dynamic width/height constraint pattern `GridCellItem` already
-uses, and computing `searchResultsLayout.itemSize` from
-`gridModel.gridSettings.iconSize` (recomputed on each keystroke and
-whenever the grid reloads) instead of a constant. Full suite: 82/82
-pass (including the previously-flaky perf test, which passed this run).
+regardless of `GridSettings.iconSize`. First fix pass used
+`gridSettings.iconSize` directly, but that's incomplete: the persistent
+grid (`GridViewController`) doesn't render icons at that raw setting
+either — it treats it only as a *ceiling* on a proportional,
+cell-size-derived value, so the grid's actual on-screen icon size can be
+noticeably larger than the setting (confirmed on the user's real 6x3
+grid with `iconSize` 160 — the rendered size exceeds that). Search still
+didn't visually match after the first fix for exactly this reason. Fixed
+properly by extracting that formula into a public
+`GridViewController.currentIconSize`, and having
+`LauncherViewController` read that instead of the raw setting for both
+`AppIconCollectionViewItem` sizing and `searchResultsLayout.itemSize` —
+search results now always match whatever the grid is actually rendering,
+by construction, regardless of how that formula changes in the future.
+Full suite: 82/82 pass.
 
 **Known limitations:**
 - The Settings window's "Vertical Scroll" layout mode is stored/persisted

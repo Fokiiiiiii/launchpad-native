@@ -211,10 +211,16 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     /// regardless of `GridSettings.iconSize`, so the icons visibly changed
     /// size the moment a query was typed and the view switched from the
     /// main grid to this flat list — confirmed as a real user-reported bug
-    /// ("検索欄に文字を入れるとアプリのサイズが壊れる"). The cell now sizes
-    /// itself to the same setting the grid uses.
+    /// ("検索欄に文字を入れるとアプリのサイズが壊れる"). A first fix used
+    /// `gridSettings.iconSize` directly, but that's only a *ceiling* the
+    /// grid applies to a proportional, cell-size-derived value
+    /// (`GridViewController.currentIconSize`) — on the user's actual grid
+    /// (6x3) the rendered icons are larger than the raw 160pt setting, so
+    /// search still didn't match. Reading `gridViewController.currentIconSize`
+    /// instead mirrors exactly what the grid is rendering right now, however
+    /// it computes that.
     private func searchResultItemSize() -> NSSize {
-        let iconSize = CGFloat(gridModel.gridSettings.iconSize)
+        let iconSize = CGFloat(gridViewController.currentIconSize)
         return NSSize(width: max(96, iconSize + 32), height: iconSize + 46)
     }
 
@@ -324,7 +330,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         }
         let record = viewModel.filteredRecords[indexPath.item]
         let isSelected = viewModel.selectedIndex == indexPath.item
-        let iconSize = gridModel.gridSettings.iconSize
+        let iconSize = gridViewController.currentIconSize
         item.configure(record: record, icon: NSWorkspace.shared.icon(for: .applicationBundle), isSelected: isSelected, iconSize: iconSize)
 
         let cache = iconCache

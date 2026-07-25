@@ -317,6 +317,23 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
+    /// The icon size the grid is *actually* rendering right now — not the
+    /// same thing as `model.gridSettings.iconSize`. Cells are scaled to the
+    /// cell's own computed size (with `gridSettings.iconSize` only acting as
+    /// a ceiling), since a fixed pixel value made icons look tiny inside the
+    /// huge cells a sparse grid (e.g. few columns/rows) produces. Exposed so
+    /// other surfaces showing the same apps — the search results list — can
+    /// match this exactly instead of independently reapplying the raw
+    /// setting, which visibly disagreed with what the grid displayed
+    /// whenever the proportional size differed from the setting (confirmed:
+    /// user's real grid is 6x3 with `iconSize` 160, but the proportional
+    /// formula renders larger than that on their screen).
+    public var currentIconSize: Double {
+        let cellSize = layout.currentCellSize
+        let proportionalSize = min(cellSize.width, cellSize.height) * 0.55
+        return proportionalSize > 0 ? min(proportionalSize, model.gridSettings.iconSize * 1.5) : model.gridSettings.iconSize
+    }
+
     // MARK: NSCollectionViewDataSource
     //
     // Always exactly one section: `model.pages[currentPage]`. See the type's
@@ -338,14 +355,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             return NSCollectionViewItem()
         }
         let isSelected = collectionView.selectionIndexPaths.contains(indexPath)
-        // Scale to the cell's actual computed size rather than a fixed pixel
-        // value: with only 7x5 cells per page, each cell is far larger than
-        // any one fixed icon size, so a constant made icons look tiny inside
-        // huge empty cells. `gridSettings.iconSize` still acts as a ceiling
-        // for users who want visibly smaller icons via a denser grid.
-        let cellSize = layout.currentCellSize
-        let proportionalSize = min(cellSize.width, cellSize.height) * 0.55
-        let iconSize = proportionalSize > 0 ? min(proportionalSize, model.gridSettings.iconSize * 1.5) : model.gridSettings.iconSize
+        let iconSize = currentIconSize
         switch model.pages[currentPage][indexPath.item] {
         case .app(let id):
             guard let record = model.record(for: id) else { return cell }
