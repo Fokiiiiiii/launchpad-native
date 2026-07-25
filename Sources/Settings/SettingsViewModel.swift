@@ -4,8 +4,22 @@ import Grid
 import Persistence
 import Uninstall
 
+/// Renamed/regrouped to mirror a reference app's General/Screen/Apps/
+/// Advanced/About tab structure (user-confirmed mapping): `general` holds
+/// what used to be the standalone Triggers tab (launch methods), `screen`
+/// holds what used to be the Grid tab (layout/sizing) plus newer display-
+/// related controls, `apps` holds what used to be the Hidden tab, and
+/// `advanced` merges the old Sources and Uninstall tabs behind
+/// `AdvancedSubTab` rather than a 6th top-level tab.
 public enum SettingsTab: Hashable, Sendable {
-    case grid, triggers, sources, hidden, uninstall, about
+    case general, screen, apps, advanced, about
+}
+
+/// Which of the two sub-sections `advanced` is currently showing —
+/// Sources and Uninstall keep their own distinct view structures (a plain
+/// form vs. a master-detail list) rather than being merged into one view.
+public enum AdvancedSubTab: Hashable, Sendable {
+    case sources, uninstall
 }
 
 /// Bridges `GridModel` (a plain `@MainActor` class, not `ObservableObject`)
@@ -16,12 +30,27 @@ public enum SettingsTab: Hashable, Sendable {
 public final class SettingsViewModel: ObservableObject {
     private let model: GridModel
     private let onTriggerSettingsChanged: () -> Bool
+    private let onDockVisibilityChanged: (Bool) -> Void
 
-    @Published public var selectedTab: SettingsTab = .grid
+    @Published public var selectedTab: SettingsTab = .general
+    @Published public var advancedSubTab: AdvancedSubTab = .sources
     @Published public var columns: Int
     @Published public var rows: Int
     @Published public var iconSize: Double
     @Published public var layoutMode: LayoutMode
+    @Published public var sortMode: SortMode {
+        didSet {
+            guard sortMode != oldValue else { return }
+            model.applySortMode(sortMode)
+            persist()
+        }
+    }
+    @Published public var hideDockWhileLauncherOpen: Bool {
+        didSet {
+            guard hideDockWhileLauncherOpen != oldValue else { return }
+            onDockVisibilityChanged(hideDockWhileLauncherOpen)
+        }
+    }
 
     @Published public var f4Enabled: Bool
     /// Whether F4 is actually registered right now — distinct from
@@ -56,15 +85,18 @@ public final class SettingsViewModel: ObservableObject {
 
     private let reportStore = OperationReportStore()
 
-    public init(model: GridModel, onTriggerSettingsChanged: @escaping () -> Bool) {
+    public init(model: GridModel, onTriggerSettingsChanged: @escaping () -> Bool, onDockVisibilityChanged: @escaping (Bool) -> Void) {
         self.model = model
         self.onTriggerSettingsChanged = onTriggerSettingsChanged
+        self.onDockVisibilityChanged = onDockVisibilityChanged
 
         let grid = model.gridSettings
         columns = grid.columns
         rows = grid.rows
         iconSize = grid.iconSize
         layoutMode = model.layoutMode
+        sortMode = grid.sortMode
+        hideDockWhileLauncherOpen = model.hideDockWhileLauncherOpen
 
         let triggers = model.triggerSettings
         f4Enabled = triggers.f4Enabled
@@ -105,7 +137,8 @@ public final class SettingsViewModel: ObservableObject {
     /// Used when the Uninstall tab is opened from a grid item's context
     /// menu — preselects that app instead of leaving the picker empty.
     public func preselectUninstallCandidate(bundleIdentifier: String) {
-        selectedTab = .uninstall
+        selectedTab = .advanced
+        advancedSubTab = .uninstall
         guard let record = uninstallCandidates.first(where: { $0.bundleIdentifier == bundleIdentifier }) else { return }
         selectUninstallCandidate(record.id)
     }
@@ -159,6 +192,15 @@ public final class SettingsViewModel: ObservableObject {
         grid.iconSize = iconSize
         model.updateGridSettings(grid)
         model.setLayoutMode(layoutMode)
+        persist()
+    }
+
+    /// Repacks every page tightly under the *current* grid settings — a
+    /// manual one-shot action (unlike Sort By/Hide Dock, there's no
+    /// toggled state to keep in sync with, so this isn't a `@Published`
+    /// property).
+    public func reorganizePages() {
+        model.reorganizePages()
         persist()
     }
 

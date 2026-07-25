@@ -27,9 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.launcherWindowController.hide()
         }
     )
-    private lazy var settingsWindowController = SettingsWindowController(model: launcherWindowController.model) { [weak self] in
-        self?.applyCurrentTriggerSettings() ?? false
-    }
+    private lazy var settingsWindowController = SettingsWindowController(
+        model: launcherWindowController.model,
+        onTriggerSettingsChanged: { [weak self] in self?.applyCurrentTriggerSettings() ?? false },
+        onDockVisibilityChanged: { [weak self] hideDock in self?.launcherWindowController.updateDockVisibilityPreference(hideDock) }
+    )
     /// Shown instead of the launcher on the very first cold start (see
     /// `OnboardingState`) — the catalog scan/FSEvents watching still run
     /// unconditionally in the background regardless, so by the time

@@ -28,14 +28,20 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// "enabled but missing Input Monitoring permission" apart from
     /// "genuinely working," not just record what the user asked for.
     private let onTriggerSettingsChanged: () -> Bool
+    /// Re-applies the Hide Dock preference to the live `LauncherWindow`
+    /// immediately — `GridModel` alone can persist the setting, but only
+    /// `LauncherWindowController` (which owns the actual window) can update
+    /// its live `level`.
+    private let onDockVisibilityChanged: (Bool) -> Void
     /// Built once, alongside the window, and kept alive for the controller's
     /// lifetime — `showUninstallTab(for:)` needs to reach it even when the
     /// window already exists and `show()` takes its early-return path.
     private var viewModel: SettingsViewModel?
 
-    public init(model: GridModel, onTriggerSettingsChanged: @escaping () -> Bool) {
+    public init(model: GridModel, onTriggerSettingsChanged: @escaping () -> Bool, onDockVisibilityChanged: @escaping (Bool) -> Void) {
         self.model = model
         self.onTriggerSettingsChanged = onTriggerSettingsChanged
+        self.onDockVisibilityChanged = onDockVisibilityChanged
         super.init()
     }
 
@@ -46,7 +52,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
             return
         }
 
-        let viewModel = SettingsViewModel(model: model, onTriggerSettingsChanged: onTriggerSettingsChanged)
+        let viewModel = SettingsViewModel(model: model, onTriggerSettingsChanged: onTriggerSettingsChanged, onDockVisibilityChanged: onDockVisibilityChanged)
         viewModel.refreshF4Status()
         self.viewModel = viewModel
         let hosting = NSHostingController(rootView: SettingsView(viewModel: viewModel))

@@ -13,19 +13,18 @@ public struct SettingsView: View {
 
     public var body: some View {
         TabView(selection: $viewModel.selectedTab) {
-            gridTab.tabItem { Label(L10n.tabGrid, systemImage: "square.grid.3x3") }.tag(SettingsTab.grid)
-            triggersTab.tabItem { Label(L10n.tabTriggers, systemImage: "hand.tap") }.tag(SettingsTab.triggers)
-            sourcesTab.tabItem { Label(L10n.tabSources, systemImage: "folder") }.tag(SettingsTab.sources)
-            hiddenTab.tabItem { Label(L10n.tabHidden, systemImage: "eye.slash") }.tag(SettingsTab.hidden)
-            uninstallTab.tabItem { Label(L10n.tabUninstall, systemImage: "trash") }.tag(SettingsTab.uninstall)
+            generalTab.tabItem { Label(L10n.tabGeneral, systemImage: "gearshape") }.tag(SettingsTab.general)
+            screenTab.tabItem { Label(L10n.tabScreen, systemImage: "macwindow") }.tag(SettingsTab.screen)
+            appsTab.tabItem { Label(L10n.tabApps, systemImage: "app.badge") }.tag(SettingsTab.apps)
+            advancedTab.tabItem { Label(L10n.tabAdvanced, systemImage: "slider.horizontal.3") }.tag(SettingsTab.advanced)
             aboutTab.tabItem { Label(L10n.tabAbout, systemImage: "info.circle") }.tag(SettingsTab.about)
         }
         .frame(width: 620, height: 560)
     }
 
-    // MARK: Grid
+    // MARK: Screen (was Grid)
 
-    private var gridTab: some View {
+    private var screenTab: some View {
         Form {
             Section {
                 Picker(L10n.layoutPickerLabel, selection: $viewModel.layoutMode) {
@@ -55,6 +54,32 @@ public struct SettingsView: View {
             }
 
             Section {
+                Picker(selection: $viewModel.sortMode) {
+                    Text(L10n.sortModeCustom).tag(SortMode.custom)
+                    Text(L10n.sortModeName).tag(SortMode.name)
+                } label: {
+                    Label(L10n.sortByLabel, systemImage: "arrow.up.arrow.down")
+                }
+                .pickerStyle(.radioGroup)
+                .horizontalRadioGroupLayout()
+
+                HStack {
+                    Spacer()
+                    Button {
+                        viewModel.reorganizePages()
+                    } label: {
+                        Label(L10n.reorganizeButton, systemImage: "square.grid.3x2.fill")
+                    }
+                }
+
+                Toggle(isOn: $viewModel.hideDockWhileLauncherOpen) {
+                    Label(L10n.hideDockToggleLabel, systemImage: "dock.rectangle")
+                }
+            } header: {
+                Label(L10n.sortByLabel, systemImage: "arrow.up.arrow.down.circle.fill")
+            }
+
+            Section {
                 HStack {
                     Spacer()
                     Button {
@@ -69,9 +94,9 @@ public struct SettingsView: View {
         .formStyle(.grouped)
     }
 
-    // MARK: Triggers
+    // MARK: General (was Triggers)
 
-    private var triggersTab: some View {
+    private var generalTab: some View {
         Form {
             Section {
                 Toggle(isOn: $viewModel.f4Enabled) {
@@ -236,9 +261,9 @@ public struct SettingsView: View {
         .formStyle(.grouped)
     }
 
-    // MARK: Hidden
+    // MARK: Apps (was Hidden)
 
-    private var hiddenTab: some View {
+    private var appsTab: some View {
         Form {
             Section {
                 if viewModel.hiddenApps.isEmpty {
@@ -258,6 +283,31 @@ public struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    // MARK: Advanced (combines Sources + Uninstall)
+
+    /// Sources and Uninstall keep their own distinct view structures (a
+    /// plain `Form` vs. a master-detail `HStack`+`List`) rather than being
+    /// merged into one shared layout — a segmented control switches
+    /// between them instead of stacking two very differently-shaped views
+    /// in one scroll area.
+    private var advancedTab: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $viewModel.advancedSubTab) {
+                Text(L10n.tabSources).tag(AdvancedSubTab.sources)
+                Text(L10n.tabUninstall).tag(AdvancedSubTab.uninstall)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding([.horizontal, .top])
+            .padding(.bottom, 8)
+
+            switch viewModel.advancedSubTab {
+            case .sources: sourcesTab
+            case .uninstall: uninstallTab
+            }
+        }
     }
 
     // MARK: Uninstall

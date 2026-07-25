@@ -94,6 +94,17 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         await gridModel.save()
     }
 
+    /// Persists the Hide Dock preference and, if the launcher window
+    /// already exists, re-applies its window level immediately — the
+    /// window is created lazily on first `show()`, so there isn't always
+    /// a live window to update yet, but there's nothing to lose either way
+    /// since a freshly-created window already reads the persisted value.
+    public func updateDockVisibilityPreference(_ hideDock: Bool) {
+        gridModel.setHideDockWhileLauncherOpen(hideDock)
+        Task { await gridModel.save() }
+        window?.applyDockVisibilityPreference(hideDock: hideDock)
+    }
+
     public func updateRecords(_ records: [ApplicationRecord]) {
         viewModel.setRecords(records)
 
@@ -270,7 +281,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     }
 
     private func makeWindow(on screen: NSScreen) -> LauncherWindow {
-        let window = LauncherWindow(contentRect: screen.frame)
+        let window = LauncherWindow(contentRect: screen.frame, hideDock: gridModel.hideDockWhileLauncherOpen)
         window.delegate = self
         window.onCancel = { [weak self] in self?.hide() }
 

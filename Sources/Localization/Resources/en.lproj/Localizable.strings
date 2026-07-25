@@ -4,6 +4,10 @@
 "settings.tab.hidden" = "Hidden Apps";
 "settings.tab.uninstall" = "Uninstall";
 "settings.tab.about" = "About";
+"settings.tab.general" = "General";
+"settings.tab.screen" = "Screen";
+"settings.tab.apps" = "Apps";
+"settings.tab.advanced" = "Advanced";
 "settings.about.version" = "Version %@ (%@)";
 "settings.about.license" = "Released under the MIT License.";
 "settings.about.opensource" = "Open source, no third-party dependencies.";
@@ -17,6 +21,11 @@
 "launcher.quickmenu.accessibility" = "View options";
 "launcher.quickmenu.opensettings" = "Open Settings…";
 "settings.apply" = "Apply";
+"settings.grid.sortby" = "Sort By";
+"settings.grid.sortby.custom" = "Custom";
+"settings.grid.sortby.name" = "Name";
+"settings.grid.reorganize" = "Reorganize";
+"settings.grid.hidedock" = "Hide Dock";
 "settings.triggers.f4" = "F4 / Spotlight key";
 "settings.triggers.globalhotkey" = "Global hotkey";
 "settings.triggers.hotcorners" = "Hot Corners";

@@ -4,6 +4,10 @@
 "settings.tab.hidden" = "非表示のApp";
 "settings.tab.uninstall" = "アンインストール";
 "settings.tab.about" = "概要";
+"settings.tab.general" = "一般";
+"settings.tab.screen" = "画面";
+"settings.tab.apps" = "Apps";
+"settings.tab.advanced" = "詳細";
 "settings.about.version" = "バージョン %@ (%@)";
 "settings.about.license" = "MITライセンスの下で公開されています。";
 "settings.about.opensource" = "オープンソース、サードパーティ依存なし。";
@@ -17,6 +21,11 @@
 "launcher.quickmenu.accessibility" = "表示オプション";
 "launcher.quickmenu.opensettings" = "設定を開く…";
 "settings.apply" = "適用";
+"settings.grid.sortby" = "並べ替え";
+"settings.grid.sortby.custom" = "カスタム";
+"settings.grid.sortby.name" = "名前順";
+"settings.grid.reorganize" = "整理する";
+"settings.grid.hidedock" = "Dockを隠す";
 "settings.triggers.f4" = "F4 / Spotlightキー";
 "settings.triggers.globalhotkey" = "グローバルホットキー";
 "settings.triggers.hotcorners" = "ホットコーナー";

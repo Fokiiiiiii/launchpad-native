@@ -23,6 +23,10 @@ public enum L10n {
     public static var tabHidden: String { string("settings.tab.hidden", "Hidden Apps") }
     public static var tabUninstall: String { string("settings.tab.uninstall", "Uninstall") }
     public static var tabAbout: String { string("settings.tab.about", "About") }
+    public static var tabGeneral: String { string("settings.tab.general", "General") }
+    public static var tabScreen: String { string("settings.tab.screen", "Screen") }
+    public static var tabApps: String { string("settings.tab.apps", "Apps") }
+    public static var tabAdvanced: String { string("settings.tab.advanced", "Advanced") }
 
     // MARK: Settings — About tab
 
@@ -48,6 +52,11 @@ public enum L10n {
     public static var layoutModePaged: String { string("settings.grid.layout.paged", "Paged") }
     public static var layoutModeVerticalScroll: String { string("settings.grid.layout.verticalscroll", "Vertical Scroll") }
     public static var applyButton: String { string("settings.apply", "Apply") }
+    public static var sortByLabel: String { string("settings.grid.sortby", "Sort By") }
+    public static var sortModeCustom: String { string("settings.grid.sortby.custom", "Custom") }
+    public static var sortModeName: String { string("settings.grid.sortby.name", "Name") }
+    public static var reorganizeButton: String { string("settings.grid.reorganize", "Reorganize") }
+    public static var hideDockToggleLabel: String { string("settings.grid.hidedock", "Hide Dock") }
     public static var quickMenuAccessibilityLabel: String { string("launcher.quickmenu.accessibility", "View options") }
     public static var openSettingsMenuItem: String { string("launcher.quickmenu.opensettings", "Open Settings…") }
 

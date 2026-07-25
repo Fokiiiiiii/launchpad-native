@@ -10,7 +10,7 @@ final class LauncherWindow: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
-    convenience init(contentRect: NSRect) {
+    convenience init(contentRect: NSRect, hideDock: Bool = false) {
         self.init(
             contentRect: contentRect,
             styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
@@ -20,19 +20,29 @@ final class LauncherWindow: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        // `.popUpMenu` (101) sat well above the real Dock's window level
-        // (`CGWindowLevelForKey(.dockWindow)`, ~20), so the launcher always
-        // painted over the Dock, hiding it — unlike real Launchpad, where
-        // the Dock stays visible on top. `CGWindowLevelForKey` and
-        // `.dockWindow` are public CoreGraphics API (Quartz Window
-        // Services), not a private one — placing this window one level
-        // below the Dock's own keeps the same "floats above regular/
-        // fullscreen app windows" behavior while letting the real Dock
-        // render in front, matching the user's explicit ask.
-        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) - 1)
+        applyDockVisibilityPreference(hideDock: hideDock)
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
         isMovable = false
         hidesOnDeactivate = false
+    }
+
+    /// `.popUpMenu` (101) sat well above the real Dock's window level
+    /// (`CGWindowLevelForKey(.dockWindow)`, ~20), so the launcher always
+    /// painted over the Dock, hiding it — unlike real Launchpad, where the
+    /// Dock stays visible on top. `CGWindowLevelForKey`/`.dockWindow` are
+    /// public CoreGraphics API (Quartz Window Services), not private.
+    ///
+    /// `hideDock` (the Settings "Hide Dock" toggle, default off) switches
+    /// which side of the Dock's own level the launcher sits on: off (the
+    /// default) keeps the launcher one level *below* the Dock so it renders
+    /// on top, matching real Launchpad; on puts the launcher one level
+    /// *above* instead, so it paints over the Dock — the pre-Phase-14
+    /// behavior, now opt-in. Either way this never touches the real Dock
+    /// process or macOS's own autohide setting — only this window's own
+    /// level changes.
+    func applyDockVisibilityPreference(hideDock: Bool) {
+        let dockLevel = Int(CGWindowLevelForKey(.dockWindow))
+        level = NSWindow.Level(rawValue: hideDock ? dockLevel + 1 : dockLevel - 1)
     }
 
     /// Escape reaches here via the standard responder chain when no control
