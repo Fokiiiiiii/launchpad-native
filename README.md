@@ -1353,6 +1353,54 @@ proper `beginItemDrag` follows for the second item. `swift test`:
 debug hook exercises the same real `model.moveItem`/`save()` path as
 production).
 
+**6th round, root-caused with genuine OS-level input for the first time
+this project** — the user granted Accessibility permission to the host
+app mid-session, which unlocked real `CGEventPost`-driven mouse drags
+(indistinguishable from actual hardware input, unlike every prior
+verification method in this saga) plus real screenshots via
+`screencapture`. This is what finally exposed two structurally different
+bugs hiding behind the same symptom ("the grabbed icon still doesn't
+move"):
+
+1. **`cell.view.isHidden = true` broke `mouseDragged` continuity.**
+   `createFloatingDragView` hid the original cell so only the floating
+   snapshot would be visible — but setting `isHidden` on a descendant of
+   `collectionView` (not `collectionView` itself) silently broke AppKit's
+   "the view that got `mouseDown` keeps getting `mouseDragged`/`mouseUp`"
+   continuity for the rest of the gesture. A real drag would fire
+   `mouseDown` → one `mouseDragged` → `beginItemDrag`, then never receive
+   another `mouseDragged` at all — confirmed by toggling only that one
+   line (6/6 synthetic drag events got through with it removed; the
+   1-event cutoff came back every time it was restored). Same bug family
+   as the `reloadItems`-mid-`mouseDown` regression documented at
+   `handleItemMouseDown` — mutating view-hierarchy/visibility state on the
+   actively-tracked view's subtree mid-gesture is unsafe. Fixed by hiding
+   the cell through its `CALayer` `opacity` instead, which never touches
+   AppKit's own view-visibility machinery.
+2. **`updateItemDrag` mixed point-conversion and rect-conversion across a
+   flipped/non-flipped boundary.** `floatingViewOriginalFrameInRoot` is
+   computed by converting the cell's *rect* from `collectionView`
+   (flipped) to `view` (non-flipped) — `NSView.convert(_ rect:to:)`
+   automatically corrects for the flip, so its `minY` always means "the
+   visual bottom edge" in the destination space. `updateItemDrag`
+   converted the drag target as a bare *point* instead, which doesn't get
+   that same correction. Diagnostic logging showed the result directly: a
+   purely horizontal drag produced `dy == the cell's own height` on every
+   single frame, never 0 — so the floating icon tracked the cursor
+   correctly on X but jumped to a wildly wrong Y position instead of
+   staying level. Fixed by building a full rect on both sides of the
+   subtraction so they agree on what `minY` means.
+
+Verified end-to-end: real `CGEventPost` drags (not `window.sendEvent`) at
+20 steps/50ms produced all 20 `mouseDragged` events reaching
+`GridCollectionView` and a correct `endItemDrag` commit (previously: 1
+event, then silence); real screenshots taken mid-drag show the floating
+icon lifted, shadowed, and tracking the cursor exactly along the drag
+axis with no vertical drift. `swift test`: 95/95. The real `layout.json`
+was repeatedly touched by this round's verification (the same real
+`model.moveItem`/`createOrJoinFolder`/`save()` path production code
+uses) and was backed up before and restored after.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
