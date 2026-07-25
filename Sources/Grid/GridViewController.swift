@@ -454,14 +454,34 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
+    /// Real, confirmed bug (user report: "the previous app flashes right at
+    /// the switch"): this used to reset `collectionView`'s transform to 0
+    /// — bringing it into the visible position — *before* calling
+    /// `reloadData()`. Between that transform reset and `reloadData()`'s
+    /// cells actually being laid out, `collectionView` sat on-screen still
+    /// showing the *old* page's content, and removing the neighbor snapshot
+    /// (which was covering it with the correct new-page image) right after
+    /// exposed that stale frame for however long AppKit took to catch up —
+    /// a real, visible flash of the previous page.
+    ///
+    /// Fixed by doing everything data-related while `collectionView` is
+    /// still off-screen (at whatever transform `endPageDrag`'s spring left
+    /// it at, e.g. ±width): reload, force the layout *and* the actual
+    /// on-screen redraw to complete synchronously, and only *then* bring it
+    /// on-screen (transform reset to 0) and remove the neighbor overlay. By
+    /// the time either of those becomes visible, the live view already
+    /// shows the correct content — nothing stale to flash.
     private func finishPageDrag(targetPage: Int) {
         currentPage = targetPage
+        collectionView.reloadData()
+        collectionView.layoutSubtreeIfNeeded()
+        collectionView.displayIfNeeded()
+
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         collectionView.layer?.removeAllAnimations()
         collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
         CATransaction.commit()
-        collectionView.reloadData()
         pageControl.currentPage = currentPage
         dragNeighborImageView?.removeFromSuperview()
         dragNeighborImageView = nil
