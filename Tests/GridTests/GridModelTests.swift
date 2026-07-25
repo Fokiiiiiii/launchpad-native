@@ -236,3 +236,37 @@ private func makeModel(directory: URL) -> GridModel {
     }
     #expect(model.pages.flatMap { $0 }.count == 34)
 }
+
+/// The reverse direction of the same bug, confirmed via a real user report:
+/// increasing rows from 3 to 4 changed the layout (shorter cells, an extra
+/// visible row) but left existing pages grouped at the *old*, smaller
+/// capacity — the newly-available row just sat empty instead of pulling
+/// items up from later pages. `updateGridSettings` previously only reflowed
+/// when an existing page *exceeded* the new capacity, never when capacity
+/// grew, since growing a capacity never makes an existing page exceed it.
+@Test @MainActor func increasingGridCapacityConsolidatesUnderfilledPages() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+
+    var small = model.gridSettings
+    small.columns = 6
+    small.rows = 3 // capacity 18
+    model.updateGridSettings(small)
+
+    let records = (0..<40).map { record("App \($0)", id: "app\($0)") }
+    model.reconcile(with: records)
+    // 40 items at capacity 18 should pack as [18, 18, 4].
+    #expect(model.pages.map(\.count) == [18, 18, 4])
+
+    var grown = model.gridSettings
+    grown.columns = 6
+    grown.rows = 4 // capacity 24
+    model.updateGridSettings(grown)
+
+    // The same 40 items must now be repacked at the larger capacity, not
+    // left in their old [18, 18, 4] grouping with the extra row empty.
+    #expect(model.pages.map(\.count) == [24, 16], "pages must be consolidated to the new, larger capacity")
+    #expect(model.pages.flatMap { $0 }.count == 40, "reflow must not lose or duplicate items")
+}

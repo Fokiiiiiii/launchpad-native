@@ -52,17 +52,22 @@ public final class GridModel {
     }
 
     /// Applies immediately (relayout) without losing item order — the grid
-    /// only changes how many items fit per page, not which items exist. If
-    /// the new capacity is smaller than an existing page's item count
-    /// though, the *distribution* across pages has to change too, or the
-    /// overflow items render off the bottom of their page and vanish (see
-    /// `loadDocument()`'s doc comment for the confirmed real-world case).
+    /// only changes how many items fit per page, not which items exist.
+    /// Always reflows, regardless of whether capacity grew or shrank: a
+    /// *smaller* capacity needs it so overflow items don't render off the
+    /// bottom of their page and vanish (see `loadDocument()`'s doc comment
+    /// for the confirmed real-world case), but a *larger* capacity needs it
+    /// too — confirmed via a separate real user report: increasing rows
+    /// from 3 to 4 changed the layout (shorter cells, an extra visible row)
+    /// but left existing pages grouped at the *old*, smaller capacity, so
+    /// the newly-available row just sat empty instead of pulling items up
+    /// from the next page. Reflowing at an unchanged capacity is a no-op in
+    /// effect (already-correct grouping in, same grouping out), so this is
+    /// safe to run unconditionally rather than only on the shrink path.
     public func updateGridSettings(_ settings: GridSettings) {
         gridSettings = settings
         document.gridSettings = settings
-        if pages.contains(where: { $0.count > capacityPerPage }) {
-            reflowPagesToCurrentCapacity()
-        }
+        reflowPagesToCurrentCapacity()
         onChange?()
     }
 

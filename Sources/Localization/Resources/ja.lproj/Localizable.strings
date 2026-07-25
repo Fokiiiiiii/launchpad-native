@@ -19,7 +19,7 @@
 "settings.triggers.hotcorner.bottomleft" = "左下";
 "settings.triggers.hotcorner.bottomright" = "右下";
 "settings.triggers.trackpadgesture" = "トラックパッドジェスチャー";
-"settings.triggers.multitouch" = "4本指ピンチで開く、広げて閉じる";
+"settings.triggers.multitouch" = "3本指ピンチで開く、広げて閉じる";
 "settings.triggers.sensitivity" = "感度";
 "settings.triggers.sensitivity.accessibility" = "ジェスチャーの感度";
 "settings.triggers.f4hint" = "F4には入力監視の権限が必要です";

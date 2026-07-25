@@ -19,7 +19,7 @@
 "settings.triggers.hotcorner.bottomleft" = "Bottom Left";
 "settings.triggers.hotcorner.bottomright" = "Bottom Right";
 "settings.triggers.trackpadgesture" = "Trackpad Gesture";
-"settings.triggers.multitouch" = "4-finger pinch to open, spread to close";
+"settings.triggers.multitouch" = "3-finger pinch to open, spread to close";
 "settings.triggers.sensitivity" = "Sensitivity";
 "settings.triggers.sensitivity.accessibility" = "Gesture sensitivity";
 "settings.triggers.f4hint" = "F4 needs Input Monitoring permission";

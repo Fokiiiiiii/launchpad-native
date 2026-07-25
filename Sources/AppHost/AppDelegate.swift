@@ -44,6 +44,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task {
             await launcherWindowController.loadGridDocument()
 
+            // Trigger registration and the first show() used to wait for
+            // performFullScan() below to finish -- neither actually depends
+            // on the catalog being scanned, only on the persisted grid
+            // document (already loaded above). Real user report: cold start
+            // felt slow, and hot corners/gestures were silently inert until
+            // the scan finished (which scales with installed-app count).
+            // Moving both here means triggers work and the launcher can
+            // appear immediately after launch; updateRecords(_:) below
+            // fills in real records moments later exactly the same way the
+            // live FSEvents watcher's incremental updates already do, so
+            // there's nothing new to reconcile.
+            applyCurrentTriggerSettings()
+
+            // Double-clicking the app in Finder is the single most natural
+            // thing a first-time user tries — and until now it did nothing
+            // visible at all (LSUIElement means no Dock icon, no window
+            // unless a trigger fires). Showing the launcher immediately
+            // means that first double-click actually shows something right
+            // away, instead of silently backgrounding while waiting on a
+            // full catalog scan with no discoverable way to know it worked.
+            launcherWindowController.show()
+
+            // Debug-only: drives a real search query into the launcher
+            // right after it actually shows, so the search-results layout
+            // can be screenshotted for verification. This session's
+            // Terminal has no Accessibility/GUI-scripting permission, so
+            // typing into the field interactively isn't otherwise
+            // possible. Deliberately placed here (not a fixed delay from
+            // launch) — a flat delay raced the catalog scan and fired
+            // before the window ever existed, silently no-op'ing.
+            if let query = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SEARCH_QUERY"], !query.isEmpty {
+                launcherWindowController.debugSetSearchQuery(query)
+            }
+
             // Custom sources (2.13) are only known once the document has
             // loaded, so the scanner is created here rather than at
             // declaration time.
@@ -66,29 +100,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DiagnosticsLog.appHost.info("Catalog ready: \(snapshot.records.count, privacy: .public) applications")
             launcherWindowController.updateRecords(snapshot.records)
             await scanner.startWatching()
-
-            applyCurrentTriggerSettings()
-
-            // Double-clicking the app in Finder is the single most natural
-            // thing a first-time user tries — and until now it did nothing
-            // visible at all (LSUIElement means no Dock icon, no window
-            // unless a trigger fires). Showing the launcher once the
-            // catalog is ready means that first double-click actually shows
-            // something, instead of silently backgrounding with no
-            // discoverable way to know it worked.
-            launcherWindowController.show()
-
-            // Debug-only: drives a real search query into the launcher
-            // right after it actually shows, so the search-results layout
-            // can be screenshotted for verification. This session's
-            // Terminal has no Accessibility/GUI-scripting permission, so
-            // typing into the field interactively isn't otherwise
-            // possible. Deliberately placed here (not a fixed delay from
-            // launch) — a flat delay raced the catalog scan and fired
-            // before the window ever existed, silently no-op'ing.
-            if let query = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SEARCH_QUERY"], !query.isEmpty {
-                launcherWindowController.debugSetSearchQuery(query)
-            }
 
             for await update in await scanner.updates() {
                 launcherWindowController.updateRecords(update.records)

@@ -17,22 +17,23 @@ public struct TouchSample: Sendable, Equatable {
     }
 }
 
-/// Detects the classic Launchpad gesture: a fixed number of simultaneous
-/// contacts (default **4**, i.e. thumb+3) whose average pairwise spread
-/// either *contracts* past a threshold (fingers pinching together — fires
-/// `onPinchDetected`, meant to open the launcher) or *expands* past a
-/// threshold relative to the gesture's start (fingers spreading apart —
-/// fires `onSpreadDetected`, meant to close it). Each direction fires once
-/// per gesture; re-arms only once every finger lifts.
+/// Detects the classic Launchpad-style gesture: a fixed number of
+/// simultaneous contacts (default **3**, by explicit user request) whose
+/// average pairwise spread either *contracts* past a threshold (fingers
+/// pinching together — fires `onPinchDetected`, meant to open the launcher)
+/// or *expands* past a threshold relative to the gesture's start (fingers
+/// spreading apart — fires `onSpreadDetected`, meant to close it). Each
+/// direction fires once per gesture; re-arms only once every finger lifts.
 ///
 /// History: this defaulted to 2 fingers for one iteration to dodge a
 /// suspected conflict with the OS's own 4-finger Launchpad/Mission Control
 /// handling — hands-on testing found 2-finger pinch collides with the much
-/// more universal system pinch-to-zoom gesture instead, which is worse. Back
-/// to 4 fingers, now with the real bidirectional open/close semantics real
-/// Launchpad uses (pinch to open, spread to close) rather than a single
-/// toggle-only trigger. Contact count and both ratios are parameters (not
-/// hardcoded) so they can become user settings in Phase 6.
+/// more universal system pinch-to-zoom gesture instead, which is worse. Went
+/// to 4 fingers (real Launchpad's own count) with real bidirectional
+/// open/close semantics (pinch to open, spread to close) rather than a
+/// single toggle-only trigger, then to 3 per a later explicit user request.
+/// Contact count and both ratios are parameters (not hardcoded) so they can
+/// become user settings in a future round.
 public final class PinchGestureRecognizer {
     private enum Phase: Equatable {
         case idle
@@ -52,7 +53,7 @@ public final class PinchGestureRecognizer {
     /// `openingRatio` is the multiple of the starting spread that counts as
     /// "spread enough" to fire — e.g. 1.4 means the fingers must move 40%
     /// farther apart than they started.
-    public init(closingRatio: Float = 0.6, openingRatio: Float = 1.4, requiredContactCount: Int = 4) {
+    public init(closingRatio: Float = 0.6, openingRatio: Float = 1.4, requiredContactCount: Int = 3) {
         self.closingRatio = closingRatio
         self.openingRatio = openingRatio
         self.requiredContactCount = requiredContactCount

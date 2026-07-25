@@ -215,9 +215,23 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// momentum" — the user explicitly asked for this to read more like
     /// iPhone/iPad, so damping loosens to 0.82 rather than staying
     /// critically damped at 1.0.
+    ///
+    /// The alpha fade used to run over the *same* 0.45s as the scale
+    /// spring — meaning for the first ~100-150ms after a trigger fires, the
+    /// window was still nearly transparent, which read as "nothing
+    /// happened yet" (confirmed via a real user report that opening felt
+    /// laggy after a pinch gesture, even though gesture recognition itself
+    /// is near-instant — traced via code review of
+    /// `MultitouchGestureTrigger`/`PinchGestureRecognizer`, which hop to the
+    /// main actor and call `show()` synchronously with no delay of their
+    /// own). apple-design's response/behavior split applies directly here:
+    /// the *fade* is the "did anything happen" signal and needs to resolve
+    /// almost immediately, while the *scale*'s longer, slightly bouncy
+    /// settle is "behavior" that can keep running after the window already
+    /// reads as present.
     private func animateIn(window: NSWindow) {
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.45
+            context.duration = 0.12
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         }

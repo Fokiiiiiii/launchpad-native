@@ -63,14 +63,15 @@ public final class MultitouchGestureTrigger {
     /// reference — acceptable since the app only ever runs one.
     nonisolated(unsafe) private static var current: MultitouchGestureTrigger?
 
-    /// `requiredContactCount` defaults to 4 (thumb+3), matching real
-    /// Launchpad's own gesture. A 2-finger variant was tried and rejected —
-    /// it collides with the far more universal system pinch-to-zoom gesture.
+    /// `requiredContactCount` defaults to 3, per explicit user request — a
+    /// 2-finger variant was tried and rejected earlier (collides with the
+    /// far more universal system pinch-to-zoom gesture); this app no longer
+    /// defaults to real Launchpad's own 4-finger (thumb+3) count.
     public init(
         onPinchClose: @escaping () -> Void,
         onSpreadOpen: @escaping () -> Void,
         sensitivity: Float = 0.6,
-        requiredContactCount: Int = 4
+        requiredContactCount: Int = 3
     ) {
         self.onPinchClose = onPinchClose
         self.onSpreadOpen = onSpreadOpen

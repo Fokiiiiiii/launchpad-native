@@ -555,10 +555,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func startWobble() {
         for item in collectionView.visibleItems() {
             guard let layer = item.view.layer else { continue }
-            let angle: CGFloat = 0.035 // ~2°, subtle
+            // Confirmed too fast/large by the user ("揺れが不気味") at the
+            // original 0.035rad/0.12s — nearly halved the angle and roughly
+            // doubled the cycle so it reads as a calm sway rather than a
+            // frantic shake.
+            let angle: CGFloat = 0.016 // ~0.9°, calmer
             let anim = CAKeyframeAnimation(keyPath: "transform.rotation.z")
             anim.values = [-angle, angle, -angle]
-            anim.duration = 0.12 + Double.random(in: -0.01...0.01)
+            anim.duration = 0.22 + Double.random(in: -0.01...0.01)
             anim.repeatCount = .infinity
             anim.isRemovedOnCompletion = false
             // A random per-cell begin time (rather than a fixed offset) is

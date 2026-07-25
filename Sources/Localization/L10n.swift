@@ -50,7 +50,7 @@ public enum L10n {
     public static var hotCornerBottomLeft: String { string("settings.triggers.hotcorner.bottomleft", "Bottom Left") }
     public static var hotCornerBottomRight: String { string("settings.triggers.hotcorner.bottomright", "Bottom Right") }
     public static var trackpadGestureGroupTitle: String { string("settings.triggers.trackpadgesture", "Trackpad Gesture") }
-    public static var multitouchToggleLabel: String { string("settings.triggers.multitouch", "4-finger pinch to open, spread to close") }
+    public static var multitouchToggleLabel: String { string("settings.triggers.multitouch", "3-finger pinch to open, spread to close") }
     public static var sensitivityLabel: String { string("settings.triggers.sensitivity", "Sensitivity") }
     public static var gestureSensitivityAccessibilityLabel: String { string("settings.triggers.sensitivity.accessibility", "Gesture sensitivity") }
     public static var f4PermissionHint: String { string("settings.triggers.f4hint", "F4 needs Input Monitoring permission") }

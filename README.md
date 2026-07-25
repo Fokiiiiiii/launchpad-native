@@ -527,6 +527,66 @@ specifically need the user's own hands-on check (the mouse-wheel
 direction mapping in particular is a judgment call that may need
 flipping once tried with a real mouse).
 
+**Follow-up round after hands-on feedback on the above**: the user tried
+all of it live and reported several concrete problems, each traced to a
+real, confirmed root cause (not guessed):
+
+- *Wobble read as unsettling* — confirmed too fast/large at 0.035rad
+  (~2°) over a 0.12s cycle; nearly halved the angle (0.016rad, ~0.9°)
+  and roughly doubled the cycle (0.22s) so it reads as a calm sway
+  instead of a frantic shake.
+- *Both cold start and warm-trigger-to-visible felt slow.*
+  `AppDelegate.applicationDidFinishLaunching` previously gated trigger
+  registration (`applyCurrentTriggerSettings()`) and the first
+  `show()` behind `scanner.performFullScan()` completing — meaning hot
+  corners/gestures were silently inert immediately after a cold launch
+  until the whole catalog scan finished (confirmed via code review: the
+  gesture recognizer itself hops to the main actor and calls `show()`
+  synchronously with no delay of its own — the wait was architectural,
+  not in the recognizer). Moved both to run right after the persisted
+  grid document loads instead; `updateRecords(_:)` fills in real catalog
+  data moments later exactly the way the live FSEvents watcher's
+  incremental updates already do. Separately, `LauncherWindowController.animateIn(window:)`
+  faded the window's alpha over the *same* 0.45s as the scale spring, so
+  the first ~100-150ms after any trigger fired were still nearly
+  transparent — read as "nothing happened yet." Split them: alpha now
+  fades in over 0.12s (the "did anything happen" signal, resolves
+  almost immediately) while the scale spring keeps its full, slightly
+  bouncy 0.45s settle running underneath (apple-design's response vs.
+  behavior separation).
+- *Changing rows in Settings changed the layout but not the app count
+  per page* — user's own precise repro: "3→4 rows changes the cell
+  height/empty space, but apps stay arranged for 3 rows, with the new
+  row just empty." Root cause: `GridModel.updateGridSettings(_:)` only
+  called `reflowPagesToCurrentCapacity()` when an existing page
+  *exceeded* the new capacity — true for shrinking capacity, never true
+  for growing it, so existing pages stayed grouped at the old, smaller
+  capacity while only the visual layout (row count, cell size) updated.
+  Now reflows unconditionally (a no-op in effect when capacity is
+  unchanged or already correctly grouped, so this is safe). Added
+  `increasingGridCapacityConsolidatesUnderfilledPages` test covering
+  the previously-missing direction.
+- *Gesture changed from 4-finger to 3-finger* per explicit request —
+  `MultitouchGestureTrigger`/`PinchGestureRecognizer`'s
+  `requiredContactCount` default changed 4→3 (existing tests, which
+  hardcoded 4-contact fixtures, updated to 3-contact fixtures to match).
+- *Continuous, drag-tracked page paging* ("iOS home-screen-like,
+  reversible mid-drag") — user explicitly asked for this despite an
+  earlier documented failure in this exact codebase (a prior
+  "one continuous strip, scroll to x-offset" attempt using
+  `NSScrollView`'s own scroll position "kept executing correctly per
+  logs while visibly never changing the displayed page"). Deliberately
+  not reattempting that approach — see the dedicated section below for
+  the different, `CALayer`-transform-based approach used instead, which
+  carries real, disclosed risk since it can't be verified interactively
+  in this environment.
+
+Full suite: 83/83 pass (82 prior + `increasingGridCapacityConsolidatesUnderfilledPages`).
+Release build reinstalled to `~/Applications`; `log stream` confirmed
+`Triggers applied: ...` now logs roughly a full second *before*
+`Catalog ready: ...` on this machine's real app count (previously
+gated behind it), and the launch is otherwise error-free.
+
 **Known limitations:**
 - Only English and Japanese are localized so far. macOS's other ~38
   supported languages are intentionally deferred to a later round —
