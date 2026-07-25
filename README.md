@@ -1401,6 +1401,70 @@ was repeatedly touched by this round's verification (the same real
 `model.moveItem`/`createOrJoinFolder`/`save()` path production code
 uses) and was backed up before and restored after.
 
+## UI polish round (2026-07-26) — folder popover, search text, menu bar, duplicate Settings entry
+
+User feedback (with reference screenshots from a competing paid launcher,
+used only for layout/visual inspiration — no branding, copy, or paywall
+gating copied) plus real Accessibility-driven testing (real `CGEventPost`
+clicks + real `screencapture` screenshots) surfaced several concrete bugs:
+
+1. **Folders wouldn't open.** `NSPopover.contentSize` (set by the caller)
+   has no effect once the content view controller's view uses Auto
+   Layout — undocumented gotcha, but real: `FolderContentsViewController`
+   had no explicit size constraints of its own, so Auto Layout collapsed
+   it to the smallest size its children could shrink to, and the popover
+   appeared stuck at roughly the folder icon's own size instead of
+   opening. Fixed via `preferredContentSize` (the mechanism that *does*
+   work for Auto-Layout view controllers) plus explicit width/height
+   constraints on the root view.
+2. **Nothing inside an opened folder was clickable.** `FolderContentsViewController`
+   reuses `GridCollectionView`, whose `mouseDown` override never calls
+   `super.mouseDown(with:)` for a content hit — it only calls
+   `onItemMouseDown`, which this controller never wired up. Wired a
+   minimal click-only handler (no drag/reorder machinery needed for a
+   flat folder list). Verified end-to-end: clicking Chess inside the
+   "ゲーム" folder actually launched `/System/Applications/Chess.app`.
+3. **Search field text sat visibly higher than the search icon next to
+   it**, despite both being centerY-anchored to the same pill. Same root
+   cause as the isEditable/isSelectable bug from an earlier round: a bare
+   `NSTextFieldCell()` doesn't inherit `NSTextField`'s convenience-init
+   defaults — this time `usesSingleLineMode`/`wraps`, not
+   editability. Without single-line mode, the cell laid out the text as
+   if it could wrap, top-anchoring it instead of true single-line
+   vertical centering. Fixed by setting `usesSingleLineMode = true` and
+   `wraps = false` explicitly.
+4. **The real macOS menu bar sat visibly over the fullscreen launcher.**
+   Never hidden — this app only positioned its window at the right
+   level, never told the system to treat this as a fullscreen-style
+   presentation. Fixed with `NSApp.presentationOptions.insert(.autoHideMenuBar)`
+   in `show()` (removed again in `hide()`), matching how every other
+   fullscreen-presenting macOS app behaves — independent of the existing
+   `hideDockWhileLauncherOpen` toggle, which is about the Dock icon strip
+   specifically.
+5. **Two routes opened the same Settings window** — a permanently-visible
+   gear chip *and* the quick menu's "Open Settings…" item. Removed the
+   standalone gear chip/button entirely; the quick menu (⊙) is now the
+   only entry point, matching the reference design's single "•••" chip
+   with no separate persistent gear icon.
+
+Verified via real Accessibility-driven interaction throughout (this
+project's first access to genuine OS-level clicks + real screenshots,
+not `window.sendEvent`/`log stream` inference): folder popover opens at
+its real 320×320 size with a visible app grid, clicking an app inside
+launches it, search text now sits level with the search icon, the menu
+bar disappears once the launcher shows, and only one settings icon
+remains in the search bar. `swift test`: 95/95. Real `layout.json` was
+backed up before and restored after each round of interactive testing.
+
+**Not yet addressed this round** (carried forward): the icon hit-test
+area still reportedly feels oversized in some cases; the page-indicator
+dots were seen missing on a cold launch in one capture but present on a
+later one — cause not yet isolated; the icon-size Settings control's
+real-world effect hasn't been re-verified; and the folder icon/popover
+still use the original design (a generic folder glyph + count badge,
+plain grid of labeled icons) rather than the reference's content-preview
+tile and label-free row.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
