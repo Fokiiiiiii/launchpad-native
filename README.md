@@ -783,6 +783,86 @@ full feature-parity spec (pinyin search, multiple sort modes,
 backup/restore, multi-display strategies, a small-window mode, icon style
 switching, etc.).
 
+**Grid-paging fixes: vertical swipe support, and a confirmed page-drag
+safety-net bug.** `GridCollectionView`'s continuous-swipe state machine
+only ever tracked the horizontal axis; a vertical-dominant swipe was
+silently dropped. It now tracks both axes and engages whichever one's
+cumulative distance first clears the existing minimum-engage-distance
+gate, feeding the same cumulative-delta pipeline `GridViewController`
+already treats generically (down swipe = next page, up = previous — same
+"negative delta → next" convention as horizontal; this mapping is an
+unverified judgment call the user's own trackpad feel may want flipped).
+Separately, a real bug was confirmed in `beginPageDrag`'s hard fallback
+timer: it force-reset the entire drag state 1 second after the drag
+*started*, not after it *ended* — so any deliberately slow drag (exactly
+the "look at the next page before committing" use this feature exists
+for) got silently cancelled mid-gesture, wiping the visible neighbor page
+out from under the user's still-active fingers. Bumped to 30 seconds
+(`dragSafetyNetTimeout`), which no realistic gesture will ever reach while
+still guaranteeing eventual recovery from a genuinely stuck spring.
+Verified via the existing `LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG=commit|abort`
+hook — mechanics unaffected, no crash; real trackpad feel for both changes
+still needs the user's own hands-on test.
+
+**4/5-finger gesture picker, About tab, search-bar quick menu,
+Settings-as-overlay, and a first-run onboarding wizard.** Several
+requests bundled into one round, following a reference app's screenshots
+for UI/UX inspiration only — see the note on reverse-engineering below.
+
+- The multitouch gesture's finger count is now a Settings picker (4 or 5
+  fingers), replacing the previous fixed 3-finger default — 3 was dropped
+  as a selectable option per explicit user request.
+  `PinchGestureRecognizer.updateRequiredContactCount(_:)` lets Settings
+  switch this at runtime without recreating the recognizer/trigger. The
+  existing conflict warning (this gesture can collide with macOS's own
+  Launchpad/Mission Control trackpad assignment) is unchanged.
+- A new About tab shows the app icon/name/version and the MIT license —
+  deliberately no credits/contributor list, matching an explicit
+  instruction not to add one (there wasn't one before this tab existed,
+  and none is added now).
+- A new "⋯" quick-menu chip next to the search bar offers the existing
+  Paged/Vertical-Scroll toggle plus an Open Settings shortcut.
+  Deliberately no "sort by" entry — this app has no automatic sort feature
+  (manual drag order only), so a menu item for it would be decorative,
+  not functional.
+- Settings now floats above the still-visible launcher instead of
+  replacing it. `LauncherWindowController` used to hide the launcher
+  before ever opening Settings; that's removed, and
+  `SettingsWindowController`'s window level is now one above the Dock
+  (matching/above `LauncherWindow`'s own `dockLevel - 1`), with the same
+  `collectionBehavior` so it can actually render in front. Implemented as
+  a level/`collectionBehavior` change on the existing titled window rather
+  than converting it to a borderless panel — same visual outcome, notably
+  less risk (the native close button and key-window text-field behavior
+  are untouched).
+- A new first-run onboarding wizard (`Sources/Onboarding`) — welcome /
+  trigger methods / permissions / done — shown once via a `UserDefaults`
+  flag, gated ahead of the launcher's first appearance on a genuine first
+  run. Deliberately read-only: it explains the existing defaults rather
+  than letting the user reconfigure them, so there's no duplicate
+  settings-mutation logic to keep in sync with the real Settings window.
+
+**On reverse-engineering, explicitly**: the user asked, twice, for a
+competing app's compiled binary to be decompiled and its internals used as
+an implementation reference for the features above. This was declined —
+reverse-engineering a third-party proprietary binary and using it to guide
+a public MIT-licensed repo's implementation creates real copyright/EULA/
+trade-secret exposure for the repo itself, independent of whether any code
+is literally copied. Everything above was built from public APIs and this
+project's own established patterns, using only what's visible in
+screenshots for UI/UX reference.
+
+Verification: `swift test` 87/87 passing (+3 over the previous round: a
+runtime finger-count-switch test, two `OnboardingState` tests). Release
+build verified via `log stream`: normal launch and both
+`LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG` paths show no errors;
+`LAUNCHPAD_DEBUG_FORCE_ONBOARDING=1` shows no errors and the process stays
+alive. Visual results (does Settings actually read as floating over the
+grid, does the onboarding wizard look right) could not be screenshotted in
+this session — `screencapture` only captured this session's own
+foreground window rather than the launched app — so those two specifically
+still need the user's own look.
+
 **Known limitations:**
 - Only English and Japanese are localized so far. macOS's other ~38
   supported languages are intentionally deferred to a later round —
