@@ -349,6 +349,13 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         gridViewController.debugSimulatePageDrag(commit: commit)
     }
 
+    /// Debug-only entry point (`LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG`, wired
+    /// in `AppDelegate`) — see `GridViewController.debugSimulateItemDrag`'s
+    /// doc comment for why this exists.
+    func debugSimulateItemDrag(mode: String) {
+        gridViewController.debugSimulateItemDrag(mode: mode)
+    }
+
     /// Search results previously used their own hardcoded cell size,
     /// spacing, and margins entirely independent of the persistent grid —
     /// two related user reports ("検索欄に文字を入れるとアプリのサイズが

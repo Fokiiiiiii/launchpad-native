@@ -101,22 +101,46 @@ final class GridCollectionView: NSCollectionView {
         return menuProvider?(indexPath)
     }
 
-    /// Only forwards to normal NSCollectionView click handling (selection,
-    /// drag initiation) when the click actually lands on a cell's rendered
-    /// icon/label — not just anywhere in its much larger bounding box. A
-    /// margin of a few points is added around the content so clicking right
-    /// at an icon's edge still registers.
+    /// Fires on mouseDown when the click lands within a cell's real content
+    /// area (not its full, often-larger bounding box). `GridViewController`
+    /// drives its own press/lift/reorder/folder-candidate/page-turn state
+    /// machine from here — see that type's "Item drag" section — rather
+    /// than letting NSCollectionView's built-in selection+drag machinery
+    /// handle it, since that machinery has no notion of live neighbor
+    /// displacement, folder-candidate hover zones, or drag-triggered page
+    /// turning (the user's explicit "iOS home screen" interaction ask).
+    var onItemMouseDown: ((IndexPath, NSEvent) -> Void)?
+    var onItemMouseDragged: ((NSEvent) -> Void)?
+    var onItemMouseUp: ((NSEvent) -> Void)?
+
+    /// Only recognizes a press on a cell's rendered icon/label — not just
+    /// anywhere in its much larger bounding box. A margin of a few points is
+    /// added around the content so clicking right at an icon's edge still
+    /// registers. Deliberately never calls `super.mouseDown` for a content
+    /// press: NSCollectionView's own selection/drag-session machinery is
+    /// bypassed entirely in favor of the custom state machine above.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let indexPath = indexPathForItem(at: point),
            let cell = item(at: indexPath) as? GridCellItem {
             let localPoint = cell.view.convert(point, from: self)
             if cell.contentHitTestFrame.insetBy(dx: -10, dy: -10).contains(localPoint) {
-                super.mouseDown(with: event)
+                onItemMouseDown?(indexPath, event)
                 return
             }
         }
         onBackgroundClick?()
+    }
+
+    /// AppKit keeps routing mouseDragged/mouseUp to whichever view received
+    /// the initiating mouseDown, for the duration of that press — standard
+    /// NSResponder tracking behavior, no extra setup needed here.
+    override func mouseDragged(with event: NSEvent) {
+        onItemMouseDragged?(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onItemMouseUp?(event)
     }
 
     /// A page fits entirely in the viewport (no horizontal scroll content),

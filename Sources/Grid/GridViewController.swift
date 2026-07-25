@@ -25,7 +25,6 @@ import WindowBrowser
 /// correctness* for basic page navigation, which is what actually blocked
 /// the user.
 public final class GridViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate {
-    private static let internalDragType = NSPasteboard.PasteboardType("com.launchpadnative.griditem")
     private let itemIdentifier = NSUserInterfaceItemIdentifier("GridCellItem")
 
     private let model: GridModel
@@ -97,25 +96,20 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.register(GridCellItem.self, forItemWithIdentifier: itemIdentifier)
         collectionView.isSelectable = true
         collectionView.backgroundColors = [.clear]
-        // Reordering/folder-creation drags land back on this same
-        // collection view — a *local* drag session, distinct from the
-        // "drag onto the real Dock" case (`forLocal: false`, already set
-        // below). Both masks are tracked independently by AppKit; setting
-        // only one leaves the other at its own framework default, which
-        // this makes explicit rather than relying on to be permissive.
-        collectionView.setDraggingSourceOperationMask(.every, forLocal: true)
-        collectionView.setDraggingSourceOperationMask(.every, forLocal: false)
-        collectionView.registerForDraggedTypes([Self.internalDragType])
         collectionView.menuProvider = { [weak self] indexPath in self?.contextMenu(for: indexPath) }
         collectionView.onSwipePage = { [weak self] delta in self?.jumpToAdjacentPage(delta: delta) }
         collectionView.onSwipeBegan = { [weak self] in self?.beginPageDrag() }
         collectionView.onSwipeChanged = { [weak self] delta in self?.updatePageDrag(deltaX: delta) }
         collectionView.onSwipeEnded = { [weak self] delta, velocity in self?.endPageDrag(deltaX: delta, velocity: velocity) }
+        collectionView.onItemMouseDown = { [weak self] indexPath, event in self?.handleItemMouseDown(indexPath: indexPath, event: event) }
+        collectionView.onItemMouseDragged = { [weak self] event in self?.handleItemMouseDragged(event: event) }
+        collectionView.onItemMouseUp = { [weak self] event in self?.handleItemMouseUp(event: event) }
         collectionView.onBackgroundClick = { [weak self] in
             // Extra safety-net opportunity for the page-drag machinery (see
             // `resetDragStateIfNeeded`'s doc comment) — harmless no-op if
             // no drag is active.
             self?.resetDragStateIfNeeded()
+            self?.cancelItemDragIfNeeded()
             self?.onBackgroundClick()
         }
 
@@ -778,6 +772,75 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
+    /// Debug-only — this session has no Accessibility/GUI-scripting
+    /// permission, so a real mouse-down/drag/mouse-up on an icon can't be
+    /// performed to verify the item-drag state machine end-to-end. Drives
+    /// the real `handleItemMouseDown`/`handleItemMouseDragged`/
+    /// `handleItemMouseUp` methods with synthetic points (bypassing only
+    /// the `NSEvent`/`sendEvent` layer, not the state machine itself), so
+    /// the reorder/folder-creation outcome and absence of a crash can be
+    /// confirmed via `log stream`. `mode: "folder"` drags item 0 onto item
+    /// 1's center (past the folder dwell delay); `mode: "reorder"` drags
+    /// item 0 toward the end of the page.
+    public func debugSimulateItemDrag(mode: String) {
+        guard model.pages.indices.contains(currentPage), model.pages[currentPage].count > 1,
+              let sourceFrame = layout.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame else {
+            DiagnosticsLog.grid.notice("debugSimulateItemDrag: not enough items on the current page to drag")
+            return
+        }
+        let targetIndex = mode == "folder" ? 1 : model.pages[currentPage].count - 1
+        guard let targetFrame = layout.layoutAttributesForItem(at: IndexPath(item: targetIndex, section: 0))?.frame else { return }
+        // "folder" aims dead center (within the ~60% folder-candidate
+        // zone); "reorder" aims just inside the trailing edge, outside
+        // that zone, so it registers purely as an insertion point.
+        let targetPoint = mode == "folder"
+            ? NSPoint(x: targetFrame.midX, y: targetFrame.midY)
+            : NSPoint(x: targetFrame.maxX - 2, y: targetFrame.midY)
+
+        DiagnosticsLog.grid.notice("debugSimulateItemDrag: mode=\(mode, privacy: .public), source item 0 -> target item \(targetIndex, privacy: .public)")
+        let startPoint = NSPoint(x: sourceFrame.midX, y: sourceFrame.midY)
+        handleItemMouseDown(indexPath: IndexPath(item: 0, section: 0), event: Self.syntheticMouseEvent(at: startPoint, in: collectionView))
+
+        let steps = 6
+        for step in 1...steps {
+            let t = CGFloat(step) / CGFloat(steps)
+            let point = NSPoint(x: startPoint.x + (targetPoint.x - startPoint.x) * t, y: startPoint.y + (targetPoint.y - startPoint.y) * t)
+            handleItemMouseDragged(event: Self.syntheticMouseEvent(at: point, in: collectionView))
+        }
+
+        // Longer than both the reorder debounce and folder dwell delay, so
+        // whichever candidate applies has already committed by the time
+        // mouseUp fires — matching a real, deliberate (not flicked) drag.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.itemDragFolderHoverDelay + 0.15) { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.handleItemMouseUp(event: Self.syntheticMouseEvent(at: targetPoint, in: self.collectionView))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    Task { @MainActor in
+                        let pageCounts = self.model.pages.map(\.count)
+                        let folderCount = self.model.folders.count
+                        DiagnosticsLog.grid.notice("debugSimulateItemDrag: settled — page counts=\(pageCounts, privacy: .public), folder count=\(folderCount, privacy: .public), activeDrag=\(self.activeItemDrag != nil, privacy: .public)")
+                    }
+                }
+            }
+        }
+    }
+
+    private static func syntheticMouseEvent(at point: NSPoint, in view: NSView) -> NSEvent {
+        let windowPoint = view.convert(point, to: nil)
+        return NSEvent.mouseEvent(
+            with: .leftMouseDragged,
+            location: windowPoint,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: view.window?.windowNumber ?? 0,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1.0
+        ) ?? NSEvent()
+    }
+
     private func activate(at indexPath: IndexPath) {
         guard model.pages.indices.contains(currentPage),
               model.pages[currentPage].indices.contains(indexPath.item) else { return }
@@ -984,145 +1047,539 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         return cell
     }
 
-    /// Set the instant a native drag session actually begins (see the
-    /// jiggle-mode delegate methods below) so a pending launch can check it
-    /// before firing — see `didSelectItemsAt`'s doc comment for why this is
-    /// necessary at all.
-    private var dragSessionStartedDuringCurrentGesture = false
-
-    public func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
-        // Single click launches/opens — matches real Launchpad convention.
-        // BUT: NSCollectionView fires selection (and this delegate method)
-        // synchronously on mouseDown, *before* it's known whether the
-        // gesture continues into a drag — so launching here unconditionally
-        // fired on every attempt to drag-reorder an icon or drag one icon
-        // onto another to create a folder, before the drag was ever
-        // recognized (confirmed via real user report: dragging opened the
-        // app instead of moving it, and folder creation — already
-        // implemented and unit-tested in `createOrJoinFolder` below — was
-        // effectively unusable over real mouse input for exactly this
-        // reason). Deferring the launch decision to the next run-loop tick
-        // (not a fixed timer) works because `collectionView(_:draggingSession:
-        // willBeginAt:forItemsAt:)` fires synchronously within this same
-        // mouseDown-tracking call if a drag *does* get recognized — by the
-        // time this `async` block runs (after that whole tracking loop has
-        // returned), `dragSessionStartedDuringCurrentGesture` already
-        // reflects whether this gesture turned into a drag.
-        guard let indexPath = indexPaths.first else { return }
-        dragSessionStartedDuringCurrentGesture = false
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            DiagnosticsLog.grid.notice("didSelectItemsAt: deferred check, dragSessionStarted=\(self.dragSessionStartedDuringCurrentGesture, privacy: .public)")
-            guard !self.dragSessionStartedDuringCurrentGesture else { return }
-            self.activate(at: indexPath)
-        }
-    }
-
-    // MARK: Drag and drop (within the current page only — see type doc comment)
+    // MARK: Item drag (lift, live reorder, folder creation, page-turn)
     //
-    // Including `.fileURL` on the pasteboard item for `.app` cells is what
-    // makes "drag onto the real Dock" (2.9) work for free: NSCollectionView's
-    // built-in drag session already lets the OS hand this off to the Dock
-    // process or Finder, no custom NSDraggingSource subclass required.
+    // Replaces NSCollectionView's built-in click/selection/drag machinery
+    // entirely for cell content (see `GridCollectionView.onItemMouseDown`'s
+    // doc comment for why): that machinery fires selection synchronously on
+    // mouseDown before it's known whether the gesture continues into a drag
+    // (a real, confirmed regression from an earlier round — dragging opened
+    // the app instead of moving it), and has no notion of live neighbor
+    // displacement, folder-candidate hover zones, or drag-triggered page
+    // turning — the user's explicit "iOS home screen" interaction ask,
+    // detailed in a pasted specification this design follows (adapted from
+    // its SwiftUI-flavored pseudocode to this project's AppKit/CALayer
+    // idioms, which is what actually works reliably in this codebase — see
+    // the page-drag paging section above for the established pattern of
+    // direct `transform.translation.x/y` manipulation this reuses).
+    //
+    // Deliberately deferred out of this pass (flagged, not silently
+    // dropped): the spec's precise geometric hysteresis band (distinct from
+    // the debounce-timer approach used here), Cmd+Arrow/Option+Arrow
+    // keyboard reorder/page-move shortcuts, dragging an icon out to the
+    // real Dock (previously free via NSCollectionView's native drag
+    // session + `.fileURL` pasteboard type — removed along with that
+    // machinery), and giving `FolderContentsViewController`'s own grid the
+    // same rich system (it keeps its prior, simpler reorder behavior).
 
-    public func collectionView(_ collectionView: NSCollectionView, canDragItemsAt indexPaths: Set<IndexPath>) -> Bool {
-        true
+    /// `@unchecked Sendable`: `Timer.scheduledTimer`'s completion closure is
+    /// technically a non-isolated context by Swift 6's rules, but in
+    /// practice it always fires on the main run loop (the same actor this
+    /// entire view controller is isolated to) — there is no real
+    /// cross-thread access here, just the compiler unable to see that a
+    /// `Timer` scheduled from `@MainActor` code stays on that same thread.
+    private final class ItemDragSession: @unchecked Sendable {
+        let sourcePage: Int
+        let sourceOriginalIndex: Int
+        let draggedItem: LayoutItem
+        let originalFrame: NSRect
+        /// Offset from the cell's origin to where the user actually grabbed
+        /// it — respected while following the cursor so the icon doesn't
+        /// jump to be centered under the pointer (apple-design's direct-
+        /// manipulation guidance).
+        let grabOffset: NSPoint
+        var floatingView: NSView?
+        var candidateSlot: Int
+        var pendingRawSlot: Int
+        var folderCandidateOriginalIndex: Int?
+        var pendingRawFolderCandidateIndex: Int?
+        var edgeDirection: Int = 0
+        var reorderTimer: Timer?
+        var folderTimer: Timer?
+        var edgeTimer: Timer?
+        let generation: Int
+
+        init(sourcePage: Int, sourceOriginalIndex: Int, draggedItem: LayoutItem, originalFrame: NSRect, grabOffset: NSPoint, generation: Int) {
+            self.sourcePage = sourcePage
+            self.sourceOriginalIndex = sourceOriginalIndex
+            self.draggedItem = draggedItem
+            self.originalFrame = originalFrame
+            self.grabOffset = grabOffset
+            self.candidateSlot = sourceOriginalIndex
+            self.pendingRawSlot = sourceOriginalIndex
+            self.generation = generation
+        }
+
+        func invalidateTimers() {
+            reorderTimer?.invalidate()
+            folderTimer?.invalidate()
+            edgeTimer?.invalidate()
+        }
     }
 
-    public func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
-        guard model.pages.indices.contains(currentPage),
-              model.pages[currentPage].indices.contains(indexPath.item) else {
-            DiagnosticsLog.grid.notice("pasteboardWriterForItemAt: nil (index out of range for page \(self.currentPage, privacy: .public))")
-            return nil
-        }
-        DiagnosticsLog.grid.notice("pasteboardWriterForItemAt: item \(indexPath.item, privacy: .public) on page \(self.currentPage, privacy: .public)")
-        let pbItem = NSPasteboardItem()
-        pbItem.setString("\(indexPath.item)", forType: Self.internalDragType)
-        if case .app(let id) = model.pages[currentPage][indexPath.item], let record = model.record(for: id) {
-            pbItem.setString(record.bundleURL.absoluteString, forType: .fileURL)
-        }
-        return pbItem
+    private var pendingItemPress: (indexPath: IndexPath, startPoint: NSPoint)?
+    private var activeItemDrag: ItemDragSession?
+    private var itemDragGeneration = 0
+
+    private static let itemDragThresholdDistance: CGFloat = 6
+    private static let itemDragEdgeZoneWidth: CGFloat = 70
+    private static let itemDragEdgeHoverDelay: TimeInterval = 0.45
+    private static let itemDragFolderHoverDelay: TimeInterval = 0.5
+    private static let itemDragReorderDebounce: TimeInterval = 0.12
+    private static let itemDragFolderZoneInset: CGFloat = 0.2 // ~60% center region
+
+    private func handleItemMouseDown(indexPath: IndexPath, event: NSEvent) {
+        guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(indexPath.item) else { return }
+        collectionView.selectionIndexPaths = [indexPath]
+        collectionView.reloadItems(at: [indexPath])
+        let point = collectionView.convert(event.locationInWindow, from: nil)
+        pendingItemPress = (indexPath, point)
+        applyPressFeedback(at: indexPath, pressed: true)
     }
 
-    public func collectionView(
-        _ collectionView: NSCollectionView,
-        validateDrop draggingInfo: NSDraggingInfo,
-        proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>,
-        dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>
-    ) -> NSDragOperation {
-        guard draggingInfo.draggingPasteboard.string(forType: Self.internalDragType) != nil else {
-            DiagnosticsLog.grid.notice("validateDrop: rejected (no internal drag type on pasteboard)")
-            return []
+    private func handleItemMouseDragged(event: NSEvent) {
+        let point = collectionView.convert(event.locationInWindow, from: nil)
+        if let session = activeItemDrag {
+            updateItemDrag(session: session, point: point)
+            return
         }
-        DiagnosticsLog.grid.notice("validateDrop: accepted, proposedIndexPath=\(String(describing: proposedDropIndexPath.pointee), privacy: .public), operation=\(String(describing: proposedDropOperation.pointee), privacy: .public)")
-        return .move
+        guard let pending = pendingItemPress else { return }
+        let distance = hypot(point.x - pending.startPoint.x, point.y - pending.startPoint.y)
+        guard distance >= Self.itemDragThresholdDistance else { return }
+        beginItemDrag(indexPath: pending.indexPath, pressPoint: pending.startPoint, currentPoint: point)
     }
 
-    public func collectionView(
-        _ collectionView: NSCollectionView,
-        acceptDrop draggingInfo: NSDraggingInfo,
-        indexPath: IndexPath,
-        dropOperation: NSCollectionView.DropOperation
-    ) -> Bool {
-        guard let sourceIndexString = draggingInfo.draggingPasteboard.string(forType: Self.internalDragType),
-              let sourceIndex = Int(sourceIndexString) else {
-            DiagnosticsLog.grid.notice("acceptDrop: rejected (no internal drag type / index on pasteboard)")
-            return false
+    private func handleItemMouseUp(event: NSEvent) {
+        if let session = activeItemDrag {
+            endItemDrag(session: session)
+            return
+        }
+        guard let pending = pendingItemPress else { return }
+        pendingItemPress = nil
+        applyPressFeedback(at: pending.indexPath, pressed: false)
+        activate(at: pending.indexPath)
+    }
+
+    /// Cancels any in-progress item drag, reverting to the original
+    /// arrangement — reachable from a background click (mirrors the
+    /// page-drag machinery's own safety net) and available for a future
+    /// Escape-key wire-up.
+    private func cancelItemDragIfNeeded() {
+        guard let session = activeItemDrag else { return }
+        DiagnosticsLog.grid.notice("cancelItemDragIfNeeded: reverting drag of item \(session.sourceOriginalIndex, privacy: .public)")
+        revertItemDrag(session: session)
+    }
+
+    /// Spec 28.1: a light press-down scale, distinct from the drag lift —
+    /// this alone doesn't commit to launching (mouseUp on the same item
+    /// without exceeding the drag threshold does that in `handleItemMouseUp`).
+    private func applyPressFeedback(at indexPath: IndexPath, pressed: Bool) {
+        guard let cell = collectionView.item(at: indexPath) as? GridCellItem, let layer = cell.view.layer else { return }
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.08)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        layer.transform = CATransform3DMakeScale(pressed ? 0.96 : 1.0, pressed ? 0.96 : 1.0, 1)
+        CATransaction.commit()
+    }
+
+    private func beginItemDrag(indexPath: IndexPath, pressPoint: NSPoint, currentPoint: NSPoint) {
+        pendingItemPress = nil
+        guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(indexPath.item),
+              let attributes = layout.layoutAttributesForItem(at: indexPath) else { return }
+        let item = model.pages[currentPage][indexPath.item]
+        itemDragGeneration += 1
+        let grabOffset = NSPoint(x: pressPoint.x - attributes.frame.minX, y: pressPoint.y - attributes.frame.minY)
+        let session = ItemDragSession(
+            sourcePage: currentPage,
+            sourceOriginalIndex: indexPath.item,
+            draggedItem: item,
+            originalFrame: attributes.frame,
+            grabOffset: grabOffset,
+            generation: itemDragGeneration
+        )
+        activeItemDrag = session
+        DiagnosticsLog.grid.notice("beginItemDrag: item \(indexPath.item, privacy: .public) on page \(self.currentPage, privacy: .public)")
+        startWobble()
+        createFloatingDragView(session: session)
+        updateItemDrag(session: session, point: currentPoint)
+    }
+
+    private func snapshotImage(of view: NSView) -> NSImage? {
+        guard view.bounds.width > 0, view.bounds.height > 0,
+              let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        let image = NSImage(size: view.bounds.size)
+        image.addRepresentation(bitmap)
+        return image
+    }
+
+    private func createFloatingDragView(session: ItemDragSession) {
+        guard let cell = collectionView.item(at: IndexPath(item: session.sourceOriginalIndex, section: 0)) as? GridCellItem else { return }
+        let image = snapshotImage(of: cell.view)
+        let frameInRoot = collectionView.convert(session.originalFrame, to: view)
+        let imageView = NSImageView(frame: frameInRoot)
+        imageView.image = image
+        imageView.imageScaling = .scaleNone
+        imageView.wantsLayer = true
+        imageView.layer?.zPosition = 1000
+        imageView.layer?.shadowOpacity = 0.35
+        imageView.layer?.shadowRadius = 12
+        imageView.layer?.shadowOffset = CGSize(width: 0, height: -6)
+        view.addSubview(imageView, positioned: .above, relativeTo: nil)
+        session.floatingView = imageView
+        cell.view.isHidden = true
+
+        // Spec 5.2: a short lift (scale 1.00 -> 1.06), a touch of bounce
+        // since a real grab is what triggered it (apple-design: reserve
+        // bounce for gesture-driven motion). Reduce Motion keeps the
+        // functional feedback (the icon still visibly separates and gets a
+        // shadow) without the scale animation itself.
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        guard let layer = imageView.layer else { return }
+        if reduceMotion {
+            layer.transform = CATransform3DIdentity
+        } else {
+            layer.transform = CATransform3DMakeScale(1.06, 1.06, 1)
+            layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.0, to: 1.06, damping: 0.82, response: 0.20), forKey: "lift")
+        }
+    }
+
+    private func updateItemDrag(session: ItemDragSession, point: NSPoint) {
+        guard let floatingView = session.floatingView else { return }
+        let targetOriginInCollectionView = NSPoint(x: point.x - session.grabOffset.x, y: point.y - session.grabOffset.y)
+        let targetOriginInRoot = collectionView.convert(targetOriginInCollectionView, to: view)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        floatingView.frame.origin = targetOriginInRoot
+        CATransaction.commit()
+
+        evaluateReorderCandidate(session: session, point: point)
+        evaluateFolderCandidate(session: session, point: point)
+        evaluateEdgeCandidate(session: session, point: point)
+    }
+
+    // MARK: Live reorder preview
+
+    private func frameForSlot(_ slot: Int) -> NSRect {
+        let columns = max(model.gridSettings.columns, 1)
+        let hSpacing = CGFloat(model.gridSettings.horizontalSpacing)
+        let vSpacing = CGFloat(model.gridSettings.verticalSpacing)
+        let margin = CGFloat(model.gridSettings.pageMargins)
+        let cellSize = layout.currentCellSize
+        let column = slot % columns
+        let row = slot / columns
+        let x = margin + CGFloat(column) * (cellSize.width + hSpacing)
+        let y = margin + CGFloat(row) * (cellSize.height + vSpacing)
+        return NSRect(x: x, y: y, width: cellSize.width, height: cellSize.height)
+    }
+
+    /// Nearest-remaining-cell + a short debounce timer — a simplified stand-
+    /// in for the spec's precise geometric hysteresis band (7.3), chosen to
+    /// avoid over-fitting timing constants that can't be hands-on tuned in
+    /// this session (no Accessibility permission for real trackpad/mouse
+    /// testing). Achieves the same practical goal: a candidate slot only
+    /// commits once the pointer has settled near it, not on every frame of
+    /// raw movement.
+    private func insertionSlot(forPoint point: NSPoint, excluding sourceOriginalIndex: Int) -> Int? {
+        guard model.pages.indices.contains(currentPage) else { return nil }
+        let items = model.pages[currentPage]
+        var naturalPos = 0
+        var closestNaturalPos = 0
+        var closestDistance = CGFloat.greatestFiniteMagnitude
+        var closestFrame = NSRect.zero
+        var found = false
+        for originalIndex in items.indices where originalIndex != sourceOriginalIndex {
+            defer { naturalPos += 1 }
+            guard let frame = layout.layoutAttributesForItem(at: IndexPath(item: originalIndex, section: 0))?.frame else { continue }
+            let dx = frame.midX - point.x
+            let dy = frame.midY - point.y
+            let distance = dx * dx + dy * dy
+            if distance < closestDistance {
+                closestDistance = distance
+                closestNaturalPos = naturalPos
+                closestFrame = frame
+                found = true
+            }
+        }
+        guard found else { return 0 }
+        return point.x > closestFrame.midX ? closestNaturalPos + 1 : closestNaturalPos
+    }
+
+    private func evaluateReorderCandidate(session: ItemDragSession, point: NSPoint) {
+        guard let rawSlot = insertionSlot(forPoint: point, excluding: session.sourceOriginalIndex),
+              rawSlot != session.pendingRawSlot else { return }
+        session.pendingRawSlot = rawSlot
+        session.reorderTimer?.invalidate()
+        session.reorderTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragReorderDebounce, repeats: false) { [weak self, weak session] _ in
+            guard let self, let session, session.generation == self.itemDragGeneration else { return }
+            self.commitReorderCandidate(session: session, slot: rawSlot)
+        }
+    }
+
+    private func commitReorderCandidate(session: ItemDragSession, slot: Int) {
+        guard slot != session.candidateSlot else { return }
+        session.candidateSlot = slot
+        animateReorderPreview(session: session)
+    }
+
+    /// Spec 8.2: remaining items spring to their preview slot — no fade, no
+    /// rotation, uniform timing regardless of row. Only the *visual*
+    /// arrangement changes here (via each live cell view's own layer
+    /// transform); `model.pages` itself is untouched until the drop
+    /// actually commits in `endItemDrag`.
+    private func animateReorderPreview(session: ItemDragSession) {
+        guard model.pages.indices.contains(currentPage) else { return }
+        let items = model.pages[currentPage]
+        var naturalPos = 0
+        for originalIndex in items.indices where originalIndex != session.sourceOriginalIndex {
+            let previewSlot = naturalPos < session.candidateSlot ? naturalPos : naturalPos + 1
+            naturalPos += 1
+            guard let cell = collectionView.item(at: IndexPath(item: originalIndex, section: 0)) as? GridCellItem,
+                  let originalFrame = layout.layoutAttributesForItem(at: IndexPath(item: originalIndex, section: 0))?.frame,
+                  let layer = cell.view.layer else { continue }
+            let targetFrame = frameForSlot(previewSlot)
+            animateLayerTranslation(layer, toX: targetFrame.minX - originalFrame.minX, toY: targetFrame.minY - originalFrame.minY)
+        }
+    }
+
+    private func animateLayerTranslation(_ layer: CALayer, toX dx: CGFloat, toY dy: CGFloat) {
+        let presentationLayer = layer.presentation() ?? layer
+        let currentX = (presentationLayer.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? 0
+        let currentY = (presentationLayer.value(forKeyPath: "transform.translation.y") as? CGFloat) ?? 0
+        layer.setValue(dx, forKeyPath: "transform.translation.x")
+        layer.setValue(dy, forKeyPath: "transform.translation.y")
+        layer.add(Self.springAnimation(keyPath: "transform.translation.x", from: currentX, to: dx, damping: 0.86, response: 0.24), forKey: "reorderX")
+        layer.add(Self.springAnimation(keyPath: "transform.translation.y", from: currentY, to: dy, damping: 0.86, response: 0.24), forKey: "reorderY")
+    }
+
+    private func resetItemTransform(_ view: NSView) {
+        guard let layer = view.layer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.removeAllAnimations()
+        layer.transform = CATransform3DIdentity
+        CATransaction.commit()
+    }
+
+    // MARK: Folder-candidate detection
+
+    /// Spec 11.1: only apps can be a folder-creation *source* onto another
+    /// item — dragging a folder doesn't nest folders, matching
+    /// `GridModel.createOrJoinFolder`'s existing app+app/app+folder-only
+    /// semantics (unchanged by this rewrite).
+    private func evaluateFolderCandidate(session: ItemDragSession, point: NSPoint) {
+        guard case .app = session.draggedItem, model.pages.indices.contains(currentPage) else {
+            clearFolderCandidate(session: session)
+            return
+        }
+        let items = model.pages[currentPage]
+        var target: Int?
+        for index in items.indices where index != session.sourceOriginalIndex {
+            guard let frame = layout.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { continue }
+            let inset = min(frame.width, frame.height) * Self.itemDragFolderZoneInset
+            let centerZone = frame.insetBy(dx: inset, dy: inset)
+            if centerZone.contains(point) { target = index; break }
+        }
+        guard target != session.pendingRawFolderCandidateIndex else { return }
+        session.pendingRawFolderCandidateIndex = target
+        session.folderTimer?.invalidate()
+        guard let target else {
+            clearFolderCandidate(session: session)
+            return
+        }
+        session.folderTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragFolderHoverDelay, repeats: false) { [weak self, weak session] _ in
+            guard let self, let session, session.generation == self.itemDragGeneration else { return }
+            self.commitFolderCandidate(session: session, index: target)
+        }
+    }
+
+    private func commitFolderCandidate(session: ItemDragSession, index: Int) {
+        guard session.folderCandidateOriginalIndex != index else { return }
+        clearFolderCandidateHighlight(session: session)
+        session.folderCandidateOriginalIndex = index
+        DiagnosticsLog.grid.notice("commitFolderCandidate: index \(index, privacy: .public)")
+        guard let cell = collectionView.item(at: IndexPath(item: index, section: 0)) as? GridCellItem, let layer = cell.view.layer else { return }
+        layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.0, to: 1.06, damping: 0.82, response: 0.2), forKey: "folderCandidate")
+        layer.transform = CATransform3DMakeScale(1.06, 1.06, 1)
+    }
+
+    private func clearFolderCandidate(session: ItemDragSession) {
+        session.pendingRawFolderCandidateIndex = nil
+        session.folderTimer?.invalidate()
+        clearFolderCandidateHighlight(session: session)
+    }
+
+    private func clearFolderCandidateHighlight(session: ItemDragSession) {
+        guard let index = session.folderCandidateOriginalIndex else { return }
+        session.folderCandidateOriginalIndex = nil
+        guard let cell = collectionView.item(at: IndexPath(item: index, section: 0)) as? GridCellItem else { return }
+        resetItemTransform(cell.view)
+    }
+
+    // MARK: Page-edge turning while dragging
+
+    /// Spec 9: holding the dragged icon near a page edge previews and then
+    /// commits a page turn, while the dragged icon itself stays fixed under
+    /// the pointer (it's a floating overlay on `view`, independent of the
+    /// collection view being transformed) — only the grid/background/page
+    /// indicator move, matching "掴んだアイコンまでページと一緒に流しては
+    /// いけない". First/last page gets a small resistance nudge instead
+    /// (spec 10), reusing the page-drag machinery's own `rubberBand` helper.
+    private func evaluateEdgeCandidate(session: ItemDragSession, point: NSPoint) {
+        let width = max(collectionView.bounds.width, 1)
+        var direction = 0
+        if point.x < Self.itemDragEdgeZoneWidth, currentPage > 0 {
+            direction = -1
+        } else if point.x > width - Self.itemDragEdgeZoneWidth, currentPage < model.pages.count - 1 {
+            direction = 1
         }
 
-        DiagnosticsLog.grid.notice("acceptDrop: sourceIndex=\(sourceIndex, privacy: .public), destinationIndex=\(indexPath.item, privacy: .public), dropOperation=\(String(describing: dropOperation), privacy: .public)")
-        if dropOperation == .on {
+        guard direction != session.edgeDirection else { return }
+        session.edgeDirection = direction
+        session.edgeTimer?.invalidate()
+        guard direction != 0 else { return }
+        session.edgeTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragEdgeHoverDelay, repeats: false) { [weak self, weak session] _ in
+            guard let self, let session, session.generation == self.itemDragGeneration, session.edgeDirection == direction else { return }
+            self.commitPageTurnDuringDrag(session: session, direction: direction)
+        }
+    }
+
+    private func commitPageTurnDuringDrag(session: ItemDragSession, direction: Int) {
+        let targetPage = currentPage + direction
+        guard model.pages.indices.contains(targetPage) else { return }
+        DiagnosticsLog.grid.notice("commitPageTurnDuringDrag: page \(self.currentPage, privacy: .public) -> \(targetPage, privacy: .public)")
+
+        // Settle any in-flight reorder preview on the page being left, then
+        // move to the new page as a fresh drag target (its own items become
+        // the new "remaining" set — the dragged item conceptually floats
+        // above whichever page is current, matching the spec's "screen
+        // coordinates are re-converted to page-local coordinates, candidate
+        // re-evaluated" sequence in 9.4).
+        for item in collectionView.visibleItems() { resetItemTransform(item.view) }
+
+        let width = max(collectionView.bounds.width, 1)
+        let offset: CGFloat = direction > 0 ? -width : width
+        collectionView.wantsLayer = true
+        collectionView.layer?.add(Self.springAnimation(keyPath: "transform.translation.x", from: 0, to: offset, damping: 1.0, response: 0.28), forKey: "itemDragPageTurnOut")
+        collectionView.layer?.setValue(offset, forKeyPath: "transform.translation.x")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.activeItemDrag === session, session.generation == self.itemDragGeneration else { return }
+                self.currentPage = targetPage
+                self.collectionView.reloadData()
+                self.collectionView.layoutSubtreeIfNeeded()
+
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                self.collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
+                CATransaction.commit()
+                self.pageControl.currentPage = targetPage
+                self.prefetchAdjacentPageIcons()
+
+                session.pendingRawSlot = -1
+                session.candidateSlot = self.model.pages.indices.contains(targetPage) ? self.model.pages[targetPage].count : 0
+                session.edgeDirection = 0
+                self.updateItemDrag(session: session, point: session.floatingView.map { self.collectionView.convert($0.frame.origin, from: self.view) } ?? .zero)
+            }
+        }
+    }
+
+    // MARK: Drop / settle / cancel
+
+    private func endItemDrag(session: ItemDragSession) {
+        session.invalidateTimers()
+        activeItemDrag = nil
+        stopWobble()
+
+        let hasFolderTarget = session.folderCandidateOriginalIndex != nil
+        DiagnosticsLog.grid.notice("endItemDrag: committing reorder to slot \(session.candidateSlot, privacy: .public), folderTarget=\(hasFolderTarget, privacy: .public)")
+
+        for item in collectionView.visibleItems() { resetItemTransform(item.view) }
+
+        if let folderTargetIndex = session.folderCandidateOriginalIndex {
             model.createOrJoinFolder(
-                sourcePage: currentPage,
-                sourceIndex: sourceIndex,
+                sourcePage: session.sourcePage,
+                sourceIndex: session.sourceOriginalIndex,
                 destinationPage: currentPage,
-                destinationIndex: indexPath.item
+                destinationIndex: folderTargetIndex
             )
         } else {
             model.moveItem(
-                fromPage: currentPage,
-                fromIndex: sourceIndex,
+                fromPage: session.sourcePage,
+                fromIndex: session.sourceOriginalIndex,
                 toPage: currentPage,
-                toIndex: indexPath.item
+                toIndex: min(session.candidateSlot, model.pages.indices.contains(currentPage) ? model.pages[currentPage].count : 0)
             )
         }
         Task { await model.save() }
-        return true
+
+        settleFloatingView(session: session)
+    }
+
+    /// Spec 13.1: the floating icon springs to its final cell before being
+    /// cleaned up, so the drop reads as "landing," not an abrupt swap.
+    private func settleFloatingView(session: ItemDragSession) {
+        guard let floatingView = session.floatingView else {
+            collectionView.reloadData()
+            return
+        }
+        collectionView.reloadData()
+        collectionView.layoutSubtreeIfNeeded()
+
+        let targetOriginalIndex = min(session.candidateSlot, model.pages.indices.contains(currentPage) ? max(model.pages[currentPage].count - 1, 0) : 0)
+        let targetFrame = layout.layoutAttributesForItem(at: IndexPath(item: targetOriginalIndex, section: 0))?.frame ?? session.originalFrame
+        let targetFrameInRoot = collectionView.convert(targetFrame, to: view)
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            floatingView.animator().frame = targetFrameInRoot
+            if let layer = floatingView.layer {
+                layer.transform = CATransform3DIdentity
+            }
+        }, completionHandler: { [weak self] in
+            Task { @MainActor in
+                floatingView.removeFromSuperview()
+                self?.collectionView.item(at: IndexPath(item: targetOriginalIndex, section: 0))?.view.isHidden = false
+                self?.collectionView.reloadData()
+            }
+        })
+    }
+
+    /// Spec 13.2/13.3: invalid drop or cancel — spring back to the original
+    /// cell, undo any reorder preview, no model mutation.
+    private func revertItemDrag(session: ItemDragSession) {
+        session.invalidateTimers()
+        activeItemDrag = nil
+        stopWobble()
+        clearFolderCandidateHighlight(session: session)
+        for item in collectionView.visibleItems() { resetItemTransform(item.view) }
+
+        guard let floatingView = session.floatingView else { return }
+        let targetFrameInRoot = collectionView.convert(session.originalFrame, to: view)
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            floatingView.animator().frame = targetFrameInRoot
+            floatingView.layer?.transform = CATransform3DIdentity
+        }, completionHandler: {
+            Task { @MainActor in
+                floatingView.removeFromSuperview()
+            }
+        })
+        collectionView.item(at: IndexPath(item: session.sourceOriginalIndex, section: 0))?.view.isHidden = false
     }
 
     // MARK: Jiggle mode
     //
     // Real Launchpad/iOS home-screen convention: starting to drag any icon
     // makes every icon on screen wobble, signaling "you're rearranging now."
-    // Scoped to just the duration of one native drag session (starts when
-    // AppKit's own drag machinery actually begins, stops when it ends,
-    // dropped or cancelled) — this project has no "done editing" affordance
-    // (no delete badges, no explicit exit button) for a persistent post-drag
-    // edit mode the way real Launchpad has, so extending the wobble beyond
-    // one drag's lifetime wouldn't have anything meaningful to attach to.
-
-    public func collectionView(
-        _ collectionView: NSCollectionView,
-        draggingSession session: NSDraggingSession,
-        willBeginAt screenPoint: NSPoint,
-        forItemsAt indexPaths: Set<IndexPath>
-    ) {
-        DiagnosticsLog.grid.notice("draggingSession willBeginAt: a real drag session started for \(indexPaths.count, privacy: .public) item(s)")
-        dragSessionStartedDuringCurrentGesture = true
-        startWobble()
-    }
-
-    public func collectionView(
-        _ collectionView: NSCollectionView,
-        draggingSession session: NSDraggingSession,
-        endedAt screenPoint: NSPoint,
-        dragOperation operation: NSDragOperation
-    ) {
-        DiagnosticsLog.grid.notice("draggingSession endedAt: operation=\(String(describing: operation), privacy: .public)")
-        // Fires on both a completed drop and a cancelled drag, so this one
-        // method covers both — no separate cancel handler needed.
-        stopWobble()
-    }
+    // Scoped to just the duration of one item drag (see the section above)
+    // — this project has no "done editing" affordance (no delete badges, no
+    // explicit exit button) for a persistent post-drag edit mode the way
+    // real Launchpad has, so extending the wobble beyond one drag's
+    // lifetime wouldn't have anything meaningful to attach to.
 
     private func startWobble() {
         for item in collectionView.visibleItems() {

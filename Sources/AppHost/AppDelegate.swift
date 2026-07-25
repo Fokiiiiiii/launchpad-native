@@ -161,6 +161,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 launcherWindowController.debugSimulatePageDrag(commit: mode != "abort")
             }
 
+            // Debug-only: drives the custom item-drag state machine
+            // (lift/reorder/folder-creation) with synthetic points, same
+            // reasoning as LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG above —
+            // "reorder" or "folder" selects which outcome to simulate.
+            if let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG"] {
+                launcherWindowController.debugSimulateItemDrag(mode: mode)
+            }
+
             for await update in await scanner.updates() {
                 launcherWindowController.updateRecords(update.records)
             }
