@@ -83,10 +83,17 @@ public final class GridModel {
     }
 
     /// Regroups `pages` into chunks of exactly `capacityPerPage` (the last
-    /// chunk may be smaller), preserving overall item order. Only called
-    /// when at least one existing page already exceeds the current
-    /// capacity, so this never reshuffles an arrangement that's already
-    /// valid under the current grid settings.
+    /// chunk may be smaller), preserving overall item order. Called
+    /// automatically whenever capacity actually changes (see
+    /// `updateGridSettings`), and exposed publicly as the Settings
+    /// "Reorganize" button for a user who wants pages tightly repacked
+    /// under the *current*, unchanged grid settings — e.g. after manually
+    /// dragging gaps into pages over time.
+    public func reorganizePages() {
+        reflowPagesToCurrentCapacity()
+        onChange?()
+    }
+
     private func reflowPagesToCurrentCapacity() {
         let capacity = capacityPerPage
         let flattened = pages.flatMap { $0 }
@@ -108,6 +115,60 @@ public final class GridModel {
     public func setLayoutMode(_ mode: LayoutMode) {
         document.layoutMode = mode
         onChange?()
+    }
+
+    public var hideDockWhileLauncherOpen: Bool {
+        document.hideDockWhileLauncherOpen
+    }
+
+    public func setHideDockWhileLauncherOpen(_ value: Bool) {
+        document.hideDockWhileLauncherOpen = value
+        onChange?()
+    }
+
+    /// "カスタム" (manual drag order, unchanged) or "名前順" — the reference
+    /// app's "date added"/"last used" sort modes aren't implemented: neither
+    /// piece of metadata is tracked anywhere yet (`ApplicationRecord` has no
+    /// install-date or last-launch field), and adding that tracking is a
+    /// separate feature, not a Settings-tab wiring change.
+    ///
+    /// Sorts *within* each existing page/folder-page rather than flattening
+    /// and repacking across them — page boundaries and folder membership
+    /// are left exactly as they are, only the order within each container
+    /// changes. Switching back to `.custom` is deliberately a no-op beyond
+    /// recording the preference: the manual order was already overwritten
+    /// by the last `.name` sort, so there's nothing to restore without
+    /// tracking separate undo history, which isn't worth it for a toggle.
+    public func applySortMode(_ mode: SortMode) {
+        gridSettings.sortMode = mode
+        document.gridSettings = gridSettings
+        if mode == .name {
+            for pageIndex in pages.indices {
+                pages[pageIndex].sort(by: isOrderedByLabel)
+            }
+            for folderID in Array(folders.keys) {
+                guard var folder = folders[folderID] else { continue }
+                for pageIndex in folder.pages.indices {
+                    folder.pages[pageIndex].sort(by: isOrderedByLabel)
+                }
+                folders[folderID] = folder
+            }
+        }
+        onChange?()
+    }
+
+    private func isOrderedByLabel(_ lhs: LayoutItem, _ rhs: LayoutItem) -> Bool {
+        effectiveLabel(for: lhs).localizedCaseInsensitiveCompare(effectiveLabel(for: rhs)) == .orderedAscending
+    }
+
+    private func effectiveLabel(for item: LayoutItem) -> String {
+        switch item {
+        case .app(let identifier):
+            guard let record = recordsByIDValue[identifier.value] else { return "" }
+            return displayName(for: record)
+        case .folder(let folderID):
+            return folders[folderID]?.name ?? ""
+        }
     }
 
     public func record(for identifier: StableAppIdentifier) -> ApplicationRecord? {
@@ -168,22 +229,65 @@ public final class GridModel {
         return result
     }
 
+    /// Removes items no longer found in the current catalog scan from both
+    /// pages and folders. Folders that become empty as a result are
+    /// dissolved (reusing `isFolderEmpty`/`dissolveFolder`, the same pair
+    /// `removeFromFolder` already uses for the user-driven single-item
+    /// case) — a real bug had this path leave behind empty, named folder
+    /// shells (confirmed on a real `layout.json`: "その他"/"ゲーム", legacy-
+    /// imported with real contents per project history, both later found
+    /// with 0 items but their folder entries still present) because only
+    /// the user-driven removal path used to check for the resulting empty
+    /// state.
+    ///
+    /// Every identifier actually pruned is logged — root-caused why
+    /// specific apps stop matching `validIDs` between scans wasn't possible
+    /// from this session's read-only investigation (code-signing team ID
+    /// and path were both confirmed stable via `codesign` for the affected
+    /// apps), so if this recurs, `DiagnosticsLog.grid` is where to look
+    /// next time instead of reverse-engineering it after the fact. This
+    /// path prunes top-level page items with the exact same `validIDs`
+    /// check, so a recurrence could in principle affect ordinary grid items
+    /// too, not just folder contents — the logging covers both.
     private func pruneMissingItems(validIDs: Set<String>) {
         for pageIndex in pages.indices {
-            pages[pageIndex] = pages[pageIndex].filter { item in
+            let before = pages[pageIndex]
+            pages[pageIndex] = before.filter { item in
                 guard case .app(let id) = item else { return true }
                 return validIDs.contains(id.value)
+            }
+            let removed = before.count - pages[pageIndex].count
+            if removed > 0 {
+                let removedIDs = before.compactMap { item -> String? in
+                    guard case .app(let id) = item, !validIDs.contains(id.value) else { return nil }
+                    return id.value
+                }
+                DiagnosticsLog.grid.notice("Pruned \(removed, privacy: .public) item(s) from page \(pageIndex, privacy: .public): \(removedIDs, privacy: .private)")
             }
         }
         for folderID in Array(folders.keys) {
             guard var folder = folders[folderID] else { continue }
+            var prunedFromFolder = 0
+            var removedFromFolder: [String] = []
             folder.pages = folder.pages.map { folderPage in
                 folderPage.filter { item in
                     guard case .app(let id) = item else { return true }
-                    return validIDs.contains(id.value)
+                    let isValid = validIDs.contains(id.value)
+                    if !isValid {
+                        prunedFromFolder += 1
+                        removedFromFolder.append(id.value)
+                    }
+                    return isValid
                 }
             }
             folders[folderID] = folder
+            if prunedFromFolder > 0 {
+                DiagnosticsLog.grid.notice("Pruned \(prunedFromFolder, privacy: .public) item(s) from folder \"\(folder.name, privacy: .public)\": \(removedFromFolder, privacy: .private)")
+            }
+            if isFolderEmpty(folderID) {
+                DiagnosticsLog.grid.notice("Folder \"\(folder.name, privacy: .public)\" is empty after pruning — dissolving")
+                dissolveFolder(folderID)
+            }
         }
     }
 

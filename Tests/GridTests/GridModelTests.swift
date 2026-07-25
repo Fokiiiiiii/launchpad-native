@@ -146,6 +146,33 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(model.folders[folderID] == nil) // dissolved once empty
 }
 
+/// Regression test for a real bug found on a live `layout.json`: folders
+/// whose entire contents got pruned by `reconcile` (apps no longer found
+/// in the catalog scan) kept existing as empty, named shells — only the
+/// user-driven `removeFromFolder` path used to check for the resulting
+/// empty state and dissolve. `pruneMissingItems` must do the same.
+@Test @MainActor func reconcilePrunesFolderContentsAndDissolvesEmptyFolder() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")])
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+
+    guard case .folder(let folderID) = model.pages[0].first(where: { if case .folder = $0 { return true }; return false }) else {
+        Issue.record("expected a folder")
+        return
+    }
+    #expect(model.folders[folderID]?.pages.first?.count == 2) // A and B
+
+    // Both A and B "uninstalled" (no longer in the scan) — C remains.
+    model.reconcile(with: [record("C", id: "c")])
+
+    #expect(model.folders[folderID] == nil) // dissolved, not left empty
+    let hasFolderReference = model.pages.flatMap { $0 }.contains { if case .folder(folderID) = $0 { return true }; return false }
+    #expect(!hasFolderReference)
+}
+
 @Test @MainActor func renameFolderUpdatesName() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
@@ -280,6 +307,50 @@ private func makeModel(directory: URL) -> GridModel {
 /// reordering) every time *any* grid setting was applied, even ones
 /// completely unrelated to capacity like icon size. `updateGridSettings`
 /// must only reflow when columns*rows actually changes.
+@Test @MainActor func applySortModeNameOrdersItemsWithinEachPageAlphabetically() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("Zebra", id: "z"), record("Apple", id: "a"), record("Mango", id: "m")])
+
+    // reconcile already alphabetizes newly-added items, so manually
+    // scramble the order first to actually exercise the sort.
+    model.moveItem(fromPage: 0, fromIndex: 0, toPage: 0, toIndex: 2)
+    let scrambled = model.pages[0].compactMap { item -> String? in
+        if case .app(let id) = item { return model.record(for: id)?.displayName }
+        return nil
+    }
+    #expect(scrambled != ["Apple", "Mango", "Zebra"])
+
+    model.applySortMode(.name)
+
+    let sorted = model.pages[0].compactMap { item -> String? in
+        if case .app(let id) = item { return model.record(for: id)?.displayName }
+        return nil
+    }
+    #expect(sorted == ["Apple", "Mango", "Zebra"])
+    #expect(model.gridSettings.sortMode == .name)
+}
+
+@Test @MainActor func reorganizePagesRepacksTightlyUnderCurrentCapacity() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")])
+
+    // Manually leave a gap: move C to a fresh second page, leaving page 0
+    // under-full even though everything would fit on one page.
+    model.moveItem(fromPage: 0, fromIndex: 2, toPage: 1, toIndex: 0)
+    #expect(model.pages.count == 2)
+
+    model.reorganizePages()
+
+    #expect(model.pages.count == 1)
+    #expect(model.pages[0].count == 3)
+}
+
 @Test @MainActor func updatingSettingsWithoutCapacityChangePreservesNonCompactArrangement() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
