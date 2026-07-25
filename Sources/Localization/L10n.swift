@@ -22,6 +22,15 @@ public enum L10n {
     public static var tabSources: String { string("settings.tab.sources", "Sources") }
     public static var tabHidden: String { string("settings.tab.hidden", "Hidden Apps") }
     public static var tabUninstall: String { string("settings.tab.uninstall", "Uninstall") }
+    public static var tabAbout: String { string("settings.tab.about", "About") }
+
+    // MARK: Settings — About tab
+
+    public static func aboutVersionLabel(_ version: String, _ build: String) -> String {
+        String(format: string("settings.about.version", "Version %@ (%@)"), version, build)
+    }
+    public static var aboutLicenseLabel: String { string("settings.about.license", "Released under the MIT License.") }
+    public static var aboutOpenSourceLabel: String { string("settings.about.opensource", "Open source, no third-party dependencies.") }
 
     // MARK: Settings — Grid tab
 
@@ -39,6 +48,8 @@ public enum L10n {
     public static var layoutModePaged: String { string("settings.grid.layout.paged", "Paged") }
     public static var layoutModeVerticalScroll: String { string("settings.grid.layout.verticalscroll", "Vertical Scroll") }
     public static var applyButton: String { string("settings.apply", "Apply") }
+    public static var quickMenuAccessibilityLabel: String { string("launcher.quickmenu.accessibility", "View options") }
+    public static var openSettingsMenuItem: String { string("launcher.quickmenu.opensettings", "Open Settings…") }
 
     // MARK: Settings — Triggers tab
 
@@ -50,7 +61,10 @@ public enum L10n {
     public static var hotCornerBottomLeft: String { string("settings.triggers.hotcorner.bottomleft", "Bottom Left") }
     public static var hotCornerBottomRight: String { string("settings.triggers.hotcorner.bottomright", "Bottom Right") }
     public static var trackpadGestureGroupTitle: String { string("settings.triggers.trackpadgesture", "Trackpad Gesture") }
-    public static var multitouchToggleLabel: String { string("settings.triggers.multitouch", "3-finger pinch to open, spread to close") }
+    public static var multitouchToggleLabel: String { string("settings.triggers.multitouch", "Pinch to open, spread to close") }
+    public static var fingerCountLabel: String { string("settings.triggers.fingercount", "Fingers") }
+    public static var fingerCountFour: String { string("settings.triggers.fingercount.four", "4") }
+    public static var fingerCountFive: String { string("settings.triggers.fingercount.five", "5") }
     public static var sensitivityLabel: String { string("settings.triggers.sensitivity", "Sensitivity") }
     public static var gestureSensitivityAccessibilityLabel: String { string("settings.triggers.sensitivity.accessibility", "Gesture sensitivity") }
     public static var f4PermissionHint: String { string("settings.triggers.f4hint", "F4 needs Input Monitoring permission") }
@@ -73,6 +87,31 @@ public enum L10n {
 
     public static var noHiddenAppsMessage: String { string("settings.hidden.empty", "No hidden apps.") }
     public static var unhideButton: String { string("settings.hidden.unhide", "Unhide") }
+
+    // MARK: Onboarding
+
+    public static var onboardingWelcomeTitle: String { string("onboarding.welcome.title", "Welcome to LaunchpadNative") }
+    public static var onboardingWelcomeSubtitle: String {
+        string("onboarding.welcome.subtitle", "A fast, native app launcher for your Mac — no account, no tracking, fully open source.")
+    }
+    public static var onboardingTriggersTitle: String { string("onboarding.triggers.title", "Three ways to open it") }
+    public static var onboardingTriggersHotCorner: String { string("onboarding.triggers.hotcorner", "Hot corner — bottom right, on by default") }
+    public static var onboardingTriggersHotkey: String { string("onboarding.triggers.hotkey", "F4 / Spotlight key") }
+    public static var onboardingTriggersGesture: String { string("onboarding.triggers.gesture", "Trackpad pinch gesture (off by default)") }
+    public static var onboardingTriggersFootnote: String {
+        string("onboarding.triggers.footnote", "All of these can be changed anytime from the gear icon next to the search bar.")
+    }
+    public static var onboardingPermissionsTitle: String { string("onboarding.permissions.title", "One optional permission") }
+    public static var onboardingPermissionsBody: String {
+        string("onboarding.permissions.body", "The F4/Spotlight-key trigger needs Input Monitoring permission. Everything else works without it.")
+    }
+    public static var onboardingDoneTitle: String { string("onboarding.done.title", "You're all set") }
+    public static var onboardingDoneBody: String {
+        string("onboarding.done.body", "Open Settings anytime from the gear icon next to the search bar.")
+    }
+    public static var onboardingBackButton: String { string("onboarding.back", "Back") }
+    public static var onboardingNextButton: String { string("onboarding.next", "Next") }
+    public static var onboardingGetStartedButton: String { string("onboarding.getstarted", "Get Started") }
 
     // MARK: Settings — Uninstall tab
 

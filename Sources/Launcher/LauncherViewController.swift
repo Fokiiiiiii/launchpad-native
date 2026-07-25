@@ -3,6 +3,7 @@ import Catalog
 import Diagnostics
 import Grid
 import Localization
+import Persistence
 import UniformTypeIdentifiers
 
 /// Two display modes sharing one search field: an empty query shows
@@ -22,6 +23,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private let searchField = NSTextField()
     private let searchIcon = NSImageView()
     private let settingsButton = NSButton()
+    private let quickMenuButton = NSButton()
     private let searchResultsCollectionView = SearchResultsCollectionView()
     private let searchResultsScrollView = NSScrollView()
     private let searchResultsLayout = NSCollectionViewFlowLayout()
@@ -101,6 +103,24 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         settingsButton.target = self
         settingsButton.action = #selector(settingsButtonTapped)
 
+        // A second glass chip alongside the settings gear — a quick-access
+        // menu (browsing mode + a Settings shortcut) without requiring a
+        // full trip into Settings for a toggle already surfaced there.
+        // Explicitly does NOT include a "sort by" entry: this app has no
+        // automatic sort feature (manual drag order only), so a menu item
+        // for it would be decorative, not functional.
+        let quickMenuGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 14)
+        quickMenuGlass.translatesAutoresizingMaskIntoConstraints = false
+
+        quickMenuButton.translatesAutoresizingMaskIntoConstraints = false
+        quickMenuButton.bezelStyle = .circular
+        quickMenuButton.isBordered = false
+        quickMenuButton.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: L10n.quickMenuAccessibilityLabel)?
+            .withSymbolConfiguration(.init(pointSize: 18, weight: .regular))
+        quickMenuButton.contentTintColor = .secondaryLabelColor
+        quickMenuButton.target = self
+        quickMenuButton.action = #selector(quickMenuButtonTapped)
+
         applySearchResultsLayoutMetrics()
 
         searchResultsCollectionView.collectionViewLayout = searchResultsLayout
@@ -136,7 +156,13 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         settingsChip.addSubview(settingsGlass)
         settingsChip.addSubview(settingsButton)
 
+        let quickMenuChip = NSView()
+        quickMenuChip.translatesAutoresizingMaskIntoConstraints = false
+        quickMenuChip.addSubview(quickMenuGlass)
+        quickMenuChip.addSubview(quickMenuButton)
+
         root.addSubview(searchBar)
+        root.addSubview(quickMenuChip)
         root.addSubview(settingsChip)
         root.addSubview(gridViewController.view)
         root.addSubview(searchResultsScrollView)
@@ -172,6 +198,21 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             settingsButton.centerYAnchor.constraint(equalTo: settingsChip.centerYAnchor),
             settingsButton.widthAnchor.constraint(equalToConstant: 28),
             settingsButton.heightAnchor.constraint(equalToConstant: 28),
+
+            quickMenuChip.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+            quickMenuChip.trailingAnchor.constraint(equalTo: settingsChip.leadingAnchor, constant: -12),
+            quickMenuChip.widthAnchor.constraint(equalToConstant: 32),
+            quickMenuChip.heightAnchor.constraint(equalToConstant: 32),
+
+            quickMenuGlass.leadingAnchor.constraint(equalTo: quickMenuChip.leadingAnchor),
+            quickMenuGlass.trailingAnchor.constraint(equalTo: quickMenuChip.trailingAnchor),
+            quickMenuGlass.topAnchor.constraint(equalTo: quickMenuChip.topAnchor),
+            quickMenuGlass.bottomAnchor.constraint(equalTo: quickMenuChip.bottomAnchor),
+
+            quickMenuButton.centerXAnchor.constraint(equalTo: quickMenuChip.centerXAnchor),
+            quickMenuButton.centerYAnchor.constraint(equalTo: quickMenuChip.centerYAnchor),
+            quickMenuButton.widthAnchor.constraint(equalToConstant: 28),
+            quickMenuButton.heightAnchor.constraint(equalToConstant: 28),
 
             gridViewController.view.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 24),
             gridViewController.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -267,6 +308,38 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     @objc private func settingsButtonTapped() {
         onOpenSettings()
+    }
+
+    @objc private func quickMenuButtonTapped() {
+        let menu = NSMenu()
+
+        let pagedItem = NSMenuItem(title: L10n.layoutModePaged, action: #selector(selectPagedLayoutMode), keyEquivalent: "")
+        pagedItem.target = self
+        pagedItem.state = gridModel.layoutMode == .paged ? .on : .off
+        menu.addItem(pagedItem)
+
+        let scrollItem = NSMenuItem(title: L10n.layoutModeVerticalScroll, action: #selector(selectVerticalScrollLayoutMode), keyEquivalent: "")
+        scrollItem.target = self
+        scrollItem.state = gridModel.layoutMode == .verticalScroll ? .on : .off
+        menu.addItem(scrollItem)
+
+        menu.addItem(.separator())
+
+        let settingsItem = NSMenuItem(title: L10n.openSettingsMenuItem, action: #selector(settingsButtonTapped), keyEquivalent: "")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        if let event = NSApp.currentEvent {
+            NSMenu.popUpContextMenu(menu, with: event, for: quickMenuButton)
+        }
+    }
+
+    @objc private func selectPagedLayoutMode() { applyLayoutMode(.paged) }
+    @objc private func selectVerticalScrollLayoutMode() { applyLayoutMode(.verticalScroll) }
+
+    private func applyLayoutMode(_ mode: LayoutMode) {
+        gridModel.setLayoutMode(mode)
+        Task { await gridModel.save() }
     }
 
     private func setSearchMode(active: Bool) {

@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import Grid
 import SwiftUI
 
@@ -6,6 +7,18 @@ import SwiftUI
 /// like an ordinary Mac preferences window: it can be the key/main window,
 /// stays open across Spaces switches, and doesn't auto-dismiss on an
 /// outside click.
+///
+/// It does, however, float *above* the launcher rather than behind it:
+/// `LauncherWindowController` used to call `hide()` before ever opening
+/// Settings, which is why the grid always disappeared first. That's been
+/// removed — the launcher now stays visible underneath, matching reference
+/// apps where a floating preferences panel sits over the still-visible
+/// grid. For that to actually render correctly (not just *not hide* the
+/// launcher while an invisible-behind-it Settings window sits underneath),
+/// this window's `level` must be above `LauncherWindow`'s own
+/// (`CGWindowLevelForKey(.dockWindow) - 1`) and its `collectionBehavior`
+/// must match closely enough to appear on whatever Space/fullscreen state
+/// the launcher is currently in.
 @MainActor
 public final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
@@ -44,6 +57,14 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
+        // One level above the Dock — and therefore above `LauncherWindow`
+        // (`dockLevel - 1`) too — so Settings renders in front of the still-
+        // visible launcher grid instead of behind it. `.canJoinAllSpaces`/
+        // `.fullScreenAuxiliary` mirror `LauncherWindow`'s own
+        // `collectionBehavior` so Settings can actually appear over the
+        // launcher regardless of which Space or fullscreen state it's in.
+        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) + 1)
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         self.window = window
         window.makeKeyAndOrderFront(nil)

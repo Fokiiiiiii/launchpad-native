@@ -51,6 +51,7 @@ public final class TriggerCoordinator {
         }
 
         multitouch.stop()
+        multitouch.updateRequiredContactCount(settings.multitouchFingerCount)
         var multitouchActive = false
         if settings.multitouchGestureEnabled {
             multitouchActive = multitouch.start()

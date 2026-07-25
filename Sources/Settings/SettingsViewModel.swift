@@ -5,7 +5,7 @@ import Persistence
 import Uninstall
 
 public enum SettingsTab: Hashable, Sendable {
-    case grid, triggers, sources, hidden, uninstall
+    case grid, triggers, sources, hidden, uninstall, about
 }
 
 /// Bridges `GridModel` (a plain `@MainActor` class, not `ObservableObject`)
@@ -38,6 +38,7 @@ public final class SettingsViewModel: ObservableObject {
     @Published public var hotCornerBottomRight: Bool
     @Published public var multitouchEnabled: Bool
     @Published public var multitouchSensitivity: Double
+    @Published public var multitouchFingerCount: Int
 
     @Published public var customSources: [CustomSourceConfig]
     @Published public var hiddenApps: [(identifier: StableAppIdentifier, name: String)]
@@ -76,6 +77,7 @@ public final class SettingsViewModel: ObservableObject {
         hotCornerBottomRight = triggers.hotCornersEnabled["bottomRight"] ?? false
         multitouchEnabled = triggers.multitouchGestureEnabled
         multitouchSensitivity = triggers.multitouchSensitivity
+        multitouchFingerCount = triggers.multitouchFingerCount
 
         customSources = model.customSources
         hiddenApps = model.hiddenApplicationIdentifiers.compactMap { identifier in
@@ -174,6 +176,7 @@ public final class SettingsViewModel: ObservableObject {
         ]
         triggers.multitouchGestureEnabled = multitouchEnabled
         triggers.multitouchSensitivity = multitouchSensitivity
+        triggers.multitouchFingerCount = multitouchFingerCount
         model.updateTriggerSettings(triggers)
         persist()
         f4Active = onTriggerSettingsChanged()

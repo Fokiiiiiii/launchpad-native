@@ -100,6 +100,10 @@ public struct TriggerSettings: Codable, Sendable, Hashable {
     public var f4Enabled: Bool
     public var multitouchGestureEnabled: Bool
     public var multitouchSensitivity: Double
+    /// 4 or 5 — Settings only offers those two (3-finger was dropped as a
+    /// selectable option per explicit user request; see
+    /// `PinchGestureRecognizer`'s doc comment for the history).
+    public var multitouchFingerCount: Int
 
     // hotCornersEnabled defaults with bottomRight on: real hands-on testing
     // found that relying on the 4-finger gesture alone left no
@@ -127,7 +131,8 @@ public struct TriggerSettings: Codable, Sendable, Hashable {
         hotCornersEnabled: ["bottomRight": true],
         f4Enabled: true,
         multitouchGestureEnabled: false,
-        multitouchSensitivity: 0.5
+        multitouchSensitivity: 0.5,
+        multitouchFingerCount: 4
     )
 }
 

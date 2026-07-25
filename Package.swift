@@ -10,7 +10,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AppHost",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "Launcher", "Grid", "Triggers", "Settings", "WindowBrowser"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "Launcher", "Grid", "Triggers", "Settings", "WindowBrowser", "Onboarding"],
             path: "Sources/AppHost"
         ),
         .target(
@@ -62,6 +62,11 @@ let package = Package(
             name: "Uninstall",
             dependencies: ["Diagnostics", "Catalog", "Persistence"],
             path: "Sources/Uninstall"
+        ),
+        .target(
+            name: "Onboarding",
+            dependencies: ["Diagnostics", "Localization"],
+            path: "Sources/Onboarding"
         ),
         .executableTarget(
             name: "ContractProbe",
@@ -137,6 +142,11 @@ let package = Package(
             name: "UninstallTests",
             dependencies: ["Uninstall", "Catalog"],
             path: "Tests/UninstallTests"
+        ),
+        .testTarget(
+            name: "OnboardingTests",
+            dependencies: ["Onboarding"],
+            path: "Tests/OnboardingTests"
         )
     ]
 )

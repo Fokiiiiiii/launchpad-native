@@ -63,19 +63,34 @@ public final class MultitouchGestureTrigger {
     /// reference — acceptable since the app only ever runs one.
     nonisolated(unsafe) private static var current: MultitouchGestureTrigger?
 
-    /// `requiredContactCount` defaults to 3, per explicit user request — a
-    /// 2-finger variant was tried and rejected earlier (collides with the
-    /// far more universal system pinch-to-zoom gesture); this app no longer
-    /// defaults to real Launchpad's own 4-finger (thumb+3) count.
+    /// `requiredContactCount` defaults to 4 (real Launchpad's own thumb+3
+    /// count) — Settings exposes a 4/5-finger picker (`TriggerSettings
+    /// .multitouchFingerCount`) that overrides this via
+    /// `updateRequiredContactCount(_:)` immediately after construction, so
+    /// this default only matters for the brief window before the first
+    /// `TriggerCoordinator.apply(_:)` call. A 2-finger variant was tried and
+    /// rejected earlier (collides with the far more universal system
+    /// pinch-to-zoom gesture); 3-finger was also tried and later dropped as
+    /// a selectable option per explicit user request.
     public init(
         onPinchClose: @escaping () -> Void,
         onSpreadOpen: @escaping () -> Void,
         sensitivity: Float = 0.6,
-        requiredContactCount: Int = 3
+        requiredContactCount: Int = 4
     ) {
         self.onPinchClose = onPinchClose
         self.onSpreadOpen = onSpreadOpen
         self.recognizer = PinchGestureRecognizer(closingRatio: sensitivity, requiredContactCount: requiredContactCount)
+    }
+
+    /// Switches the required finger count at runtime (Settings' 4/5-finger
+    /// picker) without tearing down and recreating the whole trigger.
+    /// `recognizer` is touched from the multitouch callback thread in
+    /// `handleFrame`, so this update is guarded by the same `lock`.
+    public func updateRequiredContactCount(_ count: Int) {
+        lock.lock()
+        recognizer.updateRequiredContactCount(count)
+        lock.unlock()
     }
 
     @discardableResult

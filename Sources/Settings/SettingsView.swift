@@ -18,6 +18,7 @@ public struct SettingsView: View {
             sourcesTab.tabItem { Label(L10n.tabSources, systemImage: "folder") }.tag(SettingsTab.sources)
             hiddenTab.tabItem { Label(L10n.tabHidden, systemImage: "eye.slash") }.tag(SettingsTab.hidden)
             uninstallTab.tabItem { Label(L10n.tabUninstall, systemImage: "trash") }.tag(SettingsTab.uninstall)
+            aboutTab.tabItem { Label(L10n.tabAbout, systemImage: "info.circle") }.tag(SettingsTab.about)
         }
         .frame(width: 620, height: 560)
     }
@@ -111,6 +112,12 @@ public struct SettingsView: View {
             Section {
                 Toggle(isOn: $viewModel.multitouchEnabled) {
                     Label(L10n.multitouchToggleLabel, systemImage: "hand.draw")
+                }
+                Picker(selection: $viewModel.multitouchFingerCount) {
+                    Text(L10n.fingerCountFour).tag(4)
+                    Text(L10n.fingerCountFive).tag(5)
+                } label: {
+                    Label(L10n.fingerCountLabel, systemImage: "hand.raised.fingers.spread")
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     Label(L10n.sensitivityLabel, systemImage: "dial.medium")
@@ -345,6 +352,42 @@ public struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()
         }
+    }
+
+    /// App identity + license only — deliberately no credits/contributor
+    /// list. There wasn't one before this tab existed, and none is added
+    /// now.
+    private var aboutTab: some View {
+        VStack(spacing: 16) {
+            Spacer()
+
+            Image(nsImage: NSImage(named: NSImage.applicationIconName) ?? NSImage())
+                .resizable()
+                .frame(width: 96, height: 96)
+
+            VStack(spacing: 4) {
+                Text(Bundle.main.infoDictionary?["CFBundleName"] as? String ?? "LaunchpadNative")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Text(L10n.aboutVersionLabel(
+                    Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—",
+                    Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—"
+                ))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+
+            VStack(spacing: 4) {
+                Label(L10n.aboutLicenseLabel, systemImage: "doc.text")
+                Label(L10n.aboutOpenSourceLabel, systemImage: "chevron.left.forwardslash.chevron.right")
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(32)
     }
 
     /// The confirmation this project's safety rules require before any

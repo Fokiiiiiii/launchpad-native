@@ -2,6 +2,7 @@ import AppKit
 import Catalog
 import Diagnostics
 import Launcher
+import Onboarding
 import Persistence
 import Settings
 import Triggers
@@ -28,6 +29,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private lazy var settingsWindowController = SettingsWindowController(model: launcherWindowController.model) { [weak self] in
         self?.applyCurrentTriggerSettings() ?? false
+    }
+    /// Shown instead of the launcher on the very first cold start (see
+    /// `OnboardingState`) — everything else in `applicationDidFinishLaunching`
+    /// (trigger registration, catalog scan, FSEvents watching) still runs
+    /// unconditionally in the background, so by the time onboarding
+    /// finishes and the launcher actually appears, the catalog is already
+    /// populated exactly like the existing "scan finishes after show()"
+    /// pattern.
+    private lazy var onboardingWindowController = OnboardingWindowController { [weak self] in
+        self?.launcherWindowController.show()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -64,7 +75,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // means that first double-click actually shows something right
             // away, instead of silently backgrounding while waiting on a
             // full catalog scan with no discoverable way to know it worked.
-            launcherWindowController.show()
+            // On a genuine first run, the onboarding wizard takes this slot
+            // instead — it shows the launcher itself once finished.
+            let forceOnboarding = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_FORCE_ONBOARDING"] == "1"
+            if forceOnboarding || !OnboardingState.hasCompleted() {
+                onboardingWindowController.show()
+            } else {
+                launcherWindowController.show()
+            }
 
             // Debug-only: drives a real search query into the launcher
             // right after it actually shows, so the search-results layout

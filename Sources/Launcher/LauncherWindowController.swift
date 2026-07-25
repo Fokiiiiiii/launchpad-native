@@ -281,11 +281,14 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             onDidLaunch: { [weak self] in self?.hide() },
             onDidCancel: { [weak self] in self?.hide() },
             onOpenSettings: { [weak self] in
-                self?.hide()
+                // Deliberately does NOT hide the launcher first — Settings
+                // now floats above it (see `SettingsWindowController`'s
+                // elevated window level), matching real Launchpad-style
+                // reference apps where the grid stays visible behind an
+                // open preferences panel instead of disappearing.
                 self?.onOpenSettings?()
             },
             onRequestUninstall: { [weak self] bundleIdentifier in
-                self?.hide()
                 self?.onRequestUninstall?(bundleIdentifier)
             }
         )
