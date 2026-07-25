@@ -799,13 +799,27 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         DiagnosticsLog.grid.notice("debugSimulateItemDrag: mode=\(mode, privacy: .public), source item 0 -> target item \(targetIndex, privacy: .public)")
         let startPoint = NSPoint(x: sourceFrame.midX, y: sourceFrame.midY)
-        handleItemMouseDown(indexPath: IndexPath(item: 0, section: 0), event: Self.syntheticMouseEvent(at: startPoint, in: collectionView))
+
+        // Dispatched through window.sendEvent (a *real* AppKit event-
+        // routing pass), not by calling handleItemMouseDown/Dragged/Up
+        // directly — three prior "fixes" in this exact area all missed
+        // real regressions because calling those methods directly bypasses
+        // GridCollectionView's own mouseDown/mouseDragged/mouseUp overrides
+        // entirely, so it could never have caught a bug in whether real
+        // events even reach them (the same blind spot the search-field bug
+        // exposed, caught there only via window.sendEvent). This is the
+        // first version of this hook that actually exercises that path.
+        guard let window = collectionView.window else {
+            DiagnosticsLog.grid.notice("debugSimulateItemDrag: no window")
+            return
+        }
+        window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDown, at: startPoint, in: collectionView))
 
         let steps = 6
         for step in 1...steps {
             let t = CGFloat(step) / CGFloat(steps)
             let point = NSPoint(x: startPoint.x + (targetPoint.x - startPoint.x) * t, y: startPoint.y + (targetPoint.y - startPoint.y) * t)
-            handleItemMouseDragged(event: Self.syntheticMouseEvent(at: point, in: collectionView))
+            window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDragged, at: point, in: collectionView))
         }
 
         // Longer than both the reorder debounce and folder dwell delay, so
@@ -814,7 +828,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.itemDragFolderHoverDelay + 0.15) { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                self.handleItemMouseUp(event: Self.syntheticMouseEvent(at: targetPoint, in: self.collectionView))
+                window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseUp, at: targetPoint, in: self.collectionView))
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     Task { @MainActor in
                         let pageCounts = self.model.pages.map(\.count)
@@ -826,10 +840,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    private static func syntheticMouseEvent(at point: NSPoint, in view: NSView) -> NSEvent {
+    private static func syntheticMouseEvent(type: NSEvent.EventType, at point: NSPoint, in view: NSView) -> NSEvent {
         let windowPoint = view.convert(point, to: nil)
         return NSEvent.mouseEvent(
-            with: .leftMouseDragged,
+            with: type,
             location: windowPoint,
             modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime,
@@ -837,7 +851,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             context: nil,
             eventNumber: 0,
             clickCount: 1,
-            pressure: 1.0
+            pressure: type == .leftMouseUp ? 0.0 : 1.0
         ) ?? NSEvent()
     }
 
@@ -1229,6 +1243,45 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         startWobble()
         createFloatingDragView(session: session)
         updateItemDrag(session: session, point: currentPoint)
+        armItemDragSafetyNets(generation: session.generation)
+    }
+
+    /// Real, confirmed bug found via a genuine (not simulated) trackpad
+    /// drag on this exact codebase: `mouseDown` -> `mouseDragged` ->
+    /// `beginItemDrag` all fired correctly, but `mouseUp` never arrived —
+    /// AppKit's per-window mouse-tracking continuity (the mechanism
+    /// `GridCollectionView`'s override relies on) isn't guaranteed if the
+    /// pointer leaves the window's bounds, key status changes, or a handful
+    /// of other real-world edge cases a synthetic in-bounds test never hits.
+    /// Without a way out, `activeItemDrag` stayed non-nil forever — the
+    /// floating icon stuck on screen, and every subsequent
+    /// `handleItemMouseDown` treating the grid as still mid-drag,
+    /// effectively freezing all grid interaction ("操作が効かない"). Two
+    /// independent nets, matching the page-drag machinery's own established
+    /// pattern:
+    ///  1. A fixed, generous fallback timer (far longer than any real
+    ///     drag) that force-reverts no matter what.
+    ///  2. A *global* mouse-up monitor — catches a real mouseUp AppKit
+    ///     delivered somewhere else entirely (a different view/window)
+    ///     instead of back to `GridCollectionView`, which the per-window
+    ///     tracking continuity alone can miss.
+    private static let itemDragSafetyNetTimeout: TimeInterval = 15.0
+    private var itemDragGlobalMouseUpMonitor: Any?
+
+    private func armItemDragSafetyNets(generation: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.itemDragSafetyNetTimeout) { [weak self] in
+            Task { @MainActor in
+                guard let self, let session = self.activeItemDrag, session.generation == generation else { return }
+                DiagnosticsLog.grid.notice("armItemDragSafetyNets: fallback timeout fired, force-reverting")
+                self.revertItemDrag(session: session)
+            }
+        }
+        guard itemDragGlobalMouseUpMonitor == nil else { return }
+        itemDragGlobalMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
+            guard let self, let session = self.activeItemDrag else { return }
+            DiagnosticsLog.grid.notice("armItemDragSafetyNets: global mouseUp monitor fired while a drag was still active — GridCollectionView never received it, committing via this fallback instead")
+            self.endItemDrag(session: session)
+        }
     }
 
     private func snapshotImage(of view: NSView) -> NSImage? {

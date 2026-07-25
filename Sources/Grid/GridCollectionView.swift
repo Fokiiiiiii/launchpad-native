@@ -125,10 +125,12 @@ final class GridCollectionView: NSCollectionView {
            let cell = item(at: indexPath) as? GridCellItem {
             let localPoint = cell.view.convert(point, from: self)
             if cell.contentHitTestFrame.insetBy(dx: -10, dy: -10).contains(localPoint) {
+                DiagnosticsLog.grid.notice("GridCollectionView.mouseDown: content hit at \(indexPath.item, privacy: .public)")
                 onItemMouseDown?(indexPath, event)
                 return
             }
         }
+        DiagnosticsLog.grid.notice("GridCollectionView.mouseDown: background click at \(String(describing: point), privacy: .public)")
         onBackgroundClick?()
     }
 
@@ -136,10 +138,12 @@ final class GridCollectionView: NSCollectionView {
     /// the initiating mouseDown, for the duration of that press — standard
     /// NSResponder tracking behavior, no extra setup needed here.
     override func mouseDragged(with event: NSEvent) {
+        DiagnosticsLog.grid.notice("GridCollectionView.mouseDragged fired")
         onItemMouseDragged?(event)
     }
 
     override func mouseUp(with event: NSEvent) {
+        DiagnosticsLog.grid.notice("GridCollectionView.mouseUp fired")
         onItemMouseUp?(event)
     }
 
