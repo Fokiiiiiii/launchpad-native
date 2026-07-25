@@ -470,12 +470,30 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let distanceRemaining = targetTranslation - deltaX
         let relativeVelocity = abs(distanceRemaining) > 1 ? velocity / distanceRemaining : 0
 
+        // Distinguish commit vs. abort settle timing. Real captured log
+        // evidence from an actual trackpad swipe (user report: "looks like
+        // a fade, not a slide") showed a commit resolving from a short flick
+        // (e.g. 76pt dragged, ~1000pt/s release velocity) — meaning the
+        // spring has to visibly travel nearly the *entire* remaining page
+        // width, not the short distance the finger actually covered. The
+        // old single damping-1.0/response-0.32 spring (tuned for a quick,
+        // small correction) covered that whole distance in well under half
+        // a second with no overshoot, which reads as an abrupt snap rather
+        // than a continuous slide. A longer response for the commit case
+        // specifically, plus a touch of momentum-appropriate bounce
+        // (apple-design: add bounce only when the gesture itself carried
+        // momentum — a flick/release is exactly that), gives the eye time
+        // to actually see the motion. Abort keeps the original fast/no-
+        // bounce spring — it only ever travels back the short distance the
+        // user dragged, so a quick correction still fits there.
+        let (damping, response): (CGFloat, CGFloat) = commit ? (0.86, 0.45) : (1.0, 0.32)
+
         let spring = Self.springAnimation(
             keyPath: "transform.translation.x",
             from: deltaX,
             to: targetTranslation,
-            damping: 1.0,
-            response: 0.32,
+            damping: damping,
+            response: response,
             initialVelocity: relativeVelocity
         )
         collectionView.layer?.add(spring, forKey: "pageDragSettle")
@@ -491,7 +509,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // Clamped defensively — this is a display-timing nicety, not the
         // real safety net (that's the fixed `dragSafetyNetTimeout` fallback
         // armed in `beginPageDrag`, which fires regardless of this value).
-        let settleDuration = min(max(spring.settlingDuration, 0), 0.6)
+        // Raised from 0.6 to 1.0: with the longer commit-case response
+        // above, `spring.settlingDuration` can legitimately exceed 0.6s —
+        // a too-tight clamp here would schedule `finishPageDrag` (which
+        // hard-cancels the layer's in-flight animation and snaps straight
+        // to the final position) *before* the spring visually finishes,
+        // which would itself look like exactly the abrupt cut this change
+        // is trying to fix.
+        let settleDuration = min(max(spring.settlingDuration, 0), 1.0)
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) { [weak self] in
             Task { @MainActor in
                 guard let self, self.dragGeneration == generation else { return }
