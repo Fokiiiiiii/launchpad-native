@@ -1,17 +1,16 @@
 import AppKit
 import Catalog
 
-/// Composites up to 4 of a folder's actual app icons into a rounded 2x2
-/// preview tile, matching real iOS/macOS Springboard-style folder icons —
-/// replaces the generic `folder.fill` glyph + count badge this app used
-/// before.
+/// Composites up to 9 of a folder's actual app icons into a rounded 3x3
+/// preview tile, matching real macOS Launchpad folder icons — replaces the
+/// generic `folder.fill` glyph + count badge this app used before.
 enum FolderIconComposer {
     @MainActor
     static func makeThumbnail(records: [ApplicationRecord], iconCache: IconCache, size: CGFloat) async -> NSImage {
-        let previews = Array(records.prefix(4))
+        let previews = Array(records.prefix(9))
         var icons: [NSImage] = []
         for record in previews {
-            icons.append(await iconCache.icon(for: record, size: max(size / 2, 32)))
+            icons.append(await iconCache.icon(for: record, size: max(size / 3, 24)))
         }
         return draw(icons: icons, tileSize: size)
     }
@@ -27,7 +26,7 @@ enum FolderIconComposer {
     /// best-effort peek at whatever's already warm in memory, falling back
     /// to a blank slot per icon on a cache miss rather than blocking.
     static func makeThumbnailSync(records: [ApplicationRecord], iconCache: IconCache, size: CGFloat) -> NSImage {
-        let icons = records.prefix(4).map { iconCache.cachedIconIfAvailable(for: $0) ?? NSImage() }
+        let icons = records.prefix(9).map { iconCache.cachedIconIfAvailable(for: $0) ?? NSImage() }
         return draw(icons: Array(icons), tileSize: size)
     }
 
@@ -45,14 +44,17 @@ enum FolderIconComposer {
         NSColor.white.withAlphaComponent(0.18).setFill()
         background.fill()
         background.addClip()
-        let pad = tileSize * 0.14
-        let gap = tileSize * 0.08
-        let side = (tileSize - pad * 2 - gap) / 2
-        let slots: [(Int, Int)] = [(0, 1), (1, 1), (0, 0), (1, 0)] // TL, TR, BL, BR (AppKit y-up)
-        for (index, icon) in icons.prefix(4).enumerated() {
-            let (columnIndex, rowIndex) = slots[index]
-            let x = pad + CGFloat(columnIndex) * (side + gap)
-            let y = pad + CGFloat(rowIndex) * (side + gap)
+        // Tighter padding/gap than the old 2x2 tile — 9 cells need to read as
+        // a dense mosaic (matching real Launchpad's 3x3 folder-preview
+        // density), not 4 cells' spacing stretched to fit 9.
+        let pad = tileSize * 0.10
+        let gap = tileSize * 0.06
+        let side = (tileSize - pad * 2 - gap * 2) / 3
+        for (index, icon) in icons.prefix(9).enumerated() {
+            let row = index / 3 // 0 = top row, reading order (left-to-right, top-to-bottom)
+            let col = index % 3
+            let x = pad + CGFloat(col) * (side + gap)
+            let y = pad + CGFloat(2 - row) * (side + gap) // AppKit y-up: flip row->y
             icon.draw(in: NSRect(x: x, y: y, width: side, height: side), from: .zero, operation: .sourceOver, fraction: 1.0)
         }
         return image

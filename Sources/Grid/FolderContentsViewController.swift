@@ -18,7 +18,14 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
     private let titleField = NSTextField(labelWithString: "")
     private let collectionView = GridCollectionView()
     private var pendingClickIndexPath: IndexPath?
-    private static let contentSize = NSSize(width: 320, height: 320)
+    // Icon (56pt) + top/bottom padding + a 2-line label needs ~96pt of cell
+    // height once labels are shown again (see §3 of Round 12's plan — this
+    // reverses the earlier "icon-only" decision). Width is a bit wider than
+    // the icon itself so the label has room to breathe before truncating.
+    private static let itemWidth: CGFloat = 80
+    private static let itemHeight: CGFloat = 96
+    private static let cellSpacing: CGFloat = 16
+    private static let maxColumns = 7
 
     /// Flattened (folderPage, folderIndex, item) so context-menu "Remove from
     /// Folder" can address the exact underlying position.
@@ -45,18 +52,27 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
     override func loadView() {
         let root = NSView()
 
+        // Dark, styled card background (Round 12 §3) — a decorative sibling
+        // behind the title/collection view, matching the reference's
+        // self-contained floating "Utilities"-style card rather than the
+        // bare, unstyled default NSPopover chrome this used to rely on.
+        // `NSPopover` itself is deliberately kept (not replaced with a
+        // custom borderless NSWindow) since its `.transient` behavior
+        // already gives correct "outside click closes just the popover,
+        // never the launcher" dismissal for free — a thin sliver of the
+        // popover's own default bezel/arrow remains around this card since
+        // there's no public API to fully suppress it.
+        let background = GlassBackgroundHelper.makeBackground(cornerRadius: 20, dark: true)
+        background.translatesAutoresizingMaskIntoConstraints = false
+
         titleField.translatesAutoresizingMaskIntoConstraints = false
         titleField.font = .systemFont(ofSize: 15, weight: .semibold)
         titleField.alignment = .center
 
         let layout = NSCollectionViewFlowLayout()
-        // Icon-only cells (no name label — see `configureAsApp`'s
-        // `showsLabel: false` below): a compact grid reading like real
-        // iOS/macOS Springboard folder contents, with the folder's own name
-        // shown once above via `titleField` instead of repeated per-cell.
-        layout.itemSize = NSSize(width: 64, height: 64)
-        layout.minimumInteritemSpacing = 16
-        layout.minimumLineSpacing = 16
+        layout.itemSize = NSSize(width: Self.itemWidth, height: Self.itemHeight)
+        layout.minimumInteritemSpacing = Self.cellSpacing
+        layout.minimumLineSpacing = Self.cellSpacing
         layout.sectionInset = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
 
         collectionView.collectionViewLayout = layout
@@ -90,20 +106,23 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
 
+        root.addSubview(background)
         root.addSubview(titleField)
         root.addSubview(scrollView)
         NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(equalToConstant: Self.contentSize.width),
-            root.heightAnchor.constraint(equalToConstant: Self.contentSize.height),
+            background.topAnchor.constraint(equalTo: root.topAnchor),
+            background.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            background.bottomAnchor.constraint(equalTo: root.bottomAnchor),
 
-            titleField.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
+            titleField.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
             titleField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             titleField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
 
             scrollView.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10)
         ])
         view = root
         // Real, confirmed bug: `NSPopover.contentSize` (set by the caller in
@@ -114,11 +133,22 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         // its children could shrink to, which is why the popover appeared
         // stuck at roughly the size of the folder icon itself instead of
         // actually opening. `preferredContentSize` is the mechanism that
-        // *does* work for an Auto Layout view controller; the explicit
-        // width/height constraints above back it so the layout is
-        // unambiguous either way.
-        preferredContentSize = Self.contentSize
+        // *does* work for an Auto Layout view controller.
         refresh()
+    }
+
+    /// Computes `preferredContentSize` from the actual item count — a wide
+    /// (up to 7 columns), scrollable card rather than the old fixed 320x320
+    /// square, matching the reference's wide "Utilities"-style folder.
+    private func updatePreferredContentSize() {
+        let itemCount = max(flattenedItems.count, 1)
+        let columns = max(1, min(Self.maxColumns, Int(ceil(sqrt(Double(itemCount) * 1.6)))))
+        let rows = max(1, Int(ceil(Double(itemCount) / Double(columns))))
+        let cellWidth = Self.itemWidth + Self.cellSpacing
+        let cellHeight = Self.itemHeight + Self.cellSpacing
+        let width = min(CGFloat(columns) * cellWidth + 24, 640)
+        let height = min(CGFloat(rows) * cellHeight + 60, 480)
+        preferredContentSize = NSSize(width: max(width, 240), height: max(height, 180))
     }
 
     private func refresh() {
@@ -131,6 +161,7 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
                 }
             }
         }
+        updatePreferredContentSize()
         collectionView.reloadData()
     }
 
@@ -154,13 +185,13 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
             // popover's cells are a compact 80x96pt, independent of the
             // user's main-grid icon size setting.
             let folderIconSize = 56.0
-            cell.configureAsApp(record: record, icon: NSImage(), isSelected: false, iconSize: folderIconSize, showsLabel: false)
+            cell.configureAsApp(record: record, icon: NSImage(), isSelected: false, iconSize: folderIconSize)
             let expectedKey = record.iconCacheKey
             Task { @MainActor in
                 let icon = await cache.icon(for: record)
                 // Same cell-reuse guard as GridViewController — see its comment.
                 guard cell.currentRequestKey == expectedKey else { return }
-                cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: folderIconSize, showsLabel: false)
+                cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: folderIconSize)
             }
         }
         return cell
