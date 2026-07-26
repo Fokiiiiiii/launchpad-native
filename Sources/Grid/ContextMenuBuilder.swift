@@ -48,9 +48,11 @@ public enum ContextMenuBuilder {
         return menu
     }
 
-    public static func folderMenu(rename: @escaping () -> Void) -> NSMenu {
+    public static func folderMenu(open: @escaping () -> Void, rename: @escaping () -> Void, ungroup: @escaping () -> Void) -> NSMenu {
         let menu = NSMenu()
+        menu.addItem(makeItem(L10n.menuOpen, symbolName: "arrow.up.forward.app", action: open))
         menu.addItem(makeItem(L10n.menuRenameFolder, symbolName: "pencil", action: rename))
+        menu.addItem(makeItem(L10n.menuUngroupFolder, symbolName: "folder.badge.minus", action: ungroup))
         return menu
     }
 

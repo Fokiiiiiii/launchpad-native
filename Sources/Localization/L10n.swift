@@ -149,6 +149,7 @@ public enum L10n {
     public static var menuShowWindows: String { string("menu.showwindows", "Show Windows") }
     public static var menuGetInfo: String { string("menu.getinfo", "Get Info") }
     public static var menuRenameFolder: String { string("menu.renamefolder", "Rename Folder") }
+    public static var menuUngroupFolder: String { string("menu.ungroupfolder", "Ungroup") }
 
     // MARK: Grid — rename alert, folders
 

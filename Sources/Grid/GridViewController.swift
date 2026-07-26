@@ -1007,10 +1007,16 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let item = model.pages[currentPage][indexPath.item]
 
         switch item {
-        case .folder:
-            return ContextMenuBuilder.folderMenu(rename: { [weak self] in
-                self?.promptRenameFolder(at: indexPath)
-            })
+        case .folder(let folderID):
+            return ContextMenuBuilder.folderMenu(
+                open: { [weak self] in self?.openFolder(folderID, anchorIndexPath: indexPath) },
+                rename: { [weak self] in self?.promptRenameFolder(at: indexPath) },
+                ungroup: { [weak self] in
+                    guard let self else { return }
+                    self.model.ungroupFolder(folderID)
+                    Task { await self.model.save() }
+                }
+            )
         case .app(let id):
             guard let record = model.record(for: id) else { return nil }
             let actions = ContextMenuBuilder.Actions(

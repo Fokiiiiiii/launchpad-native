@@ -472,6 +472,37 @@ public final class GridModel {
         onChange?()
     }
 
+    /// User-invoked "Ungroup" — unlike the private `dissolveFolder`/
+    /// `isFolderEmpty` pair above (which only ever fire automatically once a
+    /// folder has *already* emptied via pruning or a drag-out), this
+    /// dissolves a folder that still has real contents. Flattens the
+    /// folder's internal pages in their existing order and splices them into
+    /// `pages` at exactly the folder's former position — contiguous,
+    /// matching a real Springboard/Launchpad ungroup. Reuses
+    /// `reflowPagesToCurrentCapacity()` for the overflow case (splicing N
+    /// items in place of 1 can push a page over `capacityPerPage`) rather
+    /// than a bespoke overflow routine.
+    public func ungroupFolder(_ id: FolderID) {
+        guard let folder = folders[id] else { return }
+        let flattenedItems = folder.pages.flatMap { $0 }
+
+        outer: for pageIndex in pages.indices {
+            for (itemIndex, item) in pages[pageIndex].enumerated() {
+                if case .folder(let folderID) = item, folderID == id {
+                    pages[pageIndex].remove(at: itemIndex)
+                    pages[pageIndex].insert(contentsOf: flattenedItems, at: itemIndex)
+                    break outer
+                }
+            }
+        }
+        folders.removeValue(forKey: id)
+
+        if pages.contains(where: { $0.count > capacityPerPage }) {
+            reflowPagesToCurrentCapacity()
+        }
+        onChange?()
+    }
+
     // MARK: - Hidden apps (2.16)
 
     /// Hides without unregistering/deleting anything — the app stays

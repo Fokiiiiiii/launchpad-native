@@ -61,6 +61,7 @@
 "menu.showwindows" = "Show Windows";
 "menu.getinfo" = "Get Info";
 "menu.renamefolder" = "Rename Folder";
+"menu.ungroupfolder" = "Ungroup";
 "grid.renamealert.title" = "Rename";
 "grid.renamealert.confirm" = "Rename";
 "grid.defaultfoldername" = "Folder";

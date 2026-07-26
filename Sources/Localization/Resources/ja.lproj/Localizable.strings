@@ -61,6 +61,7 @@
 "menu.showwindows" = "ウインドウを表示";
 "menu.getinfo" = "情報を見る";
 "menu.renamefolder" = "フォルダ名を変更";
+"menu.ungroupfolder" = "グループ解除";
 "grid.renamealert.title" = "名称変更";
 "grid.renamealert.confirm" = "変更";
 "grid.defaultfoldername" = "フォルダ";
