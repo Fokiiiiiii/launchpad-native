@@ -18,7 +18,7 @@ public struct SettingsView: View {
             advancedTab.tabItem { Label(L10n.tabAdvanced, systemImage: "slider.horizontal.3") }.tag(SettingsTab.advanced)
             aboutTab.tabItem { Label(L10n.tabAbout, systemImage: "info.circle") }.tag(SettingsTab.about)
         }
-        .frame(width: 620, height: 560)
+        .frame(width: 620, height: 600)
     }
 
     // MARK: Screen (was Grid)
@@ -34,6 +34,7 @@ public struct SettingsView: View {
                 .horizontalRadioGroupLayout()
             } header: {
                 Label(L10n.layoutPickerLabel, systemImage: "rectangle.3.group")
+                    .foregroundStyle(.blue)
             }
 
             Section {
@@ -50,6 +51,7 @@ public struct SettingsView: View {
                 }
             } header: {
                 Label(L10n.tabGrid, systemImage: "square.grid.3x3.fill")
+                    .foregroundStyle(.blue)
             }
 
             Section {
@@ -77,6 +79,7 @@ public struct SettingsView: View {
                 }
             } header: {
                 Label(L10n.displaySectionHeader, systemImage: "macwindow.badge.plus")
+                    .foregroundStyle(.blue)
             }
         }
         .formStyle(.grouped)
@@ -107,6 +110,7 @@ public struct SettingsView: View {
                 }
             } header: {
                 Label(L10n.tabTriggers, systemImage: "hand.tap.fill")
+                    .foregroundStyle(.orange)
             }
 
             Section {
@@ -124,6 +128,7 @@ public struct SettingsView: View {
                 }
             } header: {
                 Label(L10n.hotCornersGroupTitle, systemImage: "rectangle.inset.filled")
+                    .foregroundStyle(.orange)
             }
 
             Section {
@@ -146,9 +151,51 @@ public struct SettingsView: View {
                 }
             } header: {
                 Label(L10n.trackpadGestureGroupTitle, systemImage: "hand.point.up.braille")
+                    .foregroundStyle(.orange)
+            }
+
+            Section {
+                HStack(spacing: 16) {
+                    ForEach(AppIconStyle.allCases, id: \.self) { style in
+                        Button {
+                            viewModel.appIconStyle = style
+                        } label: {
+                            VStack(spacing: 6) {
+                                Image(nsImage: AppIconStyleApplier.previewImage(for: style) ?? NSImage())
+                                    .resizable()
+                                    .frame(width: 48, height: 48)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .strokeBorder(viewModel.appIconStyle == style ? Color.accentColor : .clear, lineWidth: 2)
+                                    )
+                                Text(displayName(for: style))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Text(L10n.appIconLimitedEffectNotice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Label(L10n.appIconSectionHeader, systemImage: "app.badge")
+                    .foregroundStyle(.purple)
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func displayName(for style: AppIconStyle) -> String {
+        switch style {
+        case .classic: L10n.appIconStyleClassic
+        case .monochrome: L10n.appIconStyleMonochrome
+        case .solid: L10n.appIconStyleSolid
+        case .diagonal: L10n.appIconStyleDiagonal
+        }
     }
 
     /// Shown only when F4 is turned on but genuinely isn't working — this
@@ -236,6 +283,7 @@ public struct SettingsView: View {
                 }
             } header: {
                 Label(L10n.tabSources, systemImage: "folder.fill.badge.plus")
+                    .foregroundStyle(.green)
             }
         }
         .formStyle(.grouped)
@@ -260,6 +308,7 @@ public struct SettingsView: View {
                 }
             } header: {
                 Label(L10n.tabHidden, systemImage: "eye.slash.circle.fill")
+                    .foregroundStyle(.gray)
             }
         }
         .formStyle(.grouped)
@@ -280,7 +329,7 @@ public struct SettingsView: View {
         VStack(spacing: 16) {
             Spacer()
 
-            Image(nsImage: NSImage(named: NSImage.applicationIconName) ?? NSImage())
+            Image(nsImage: AppIconStyleApplier.previewImage(for: viewModel.appIconStyle) ?? NSImage(named: NSImage.applicationIconName) ?? NSImage())
                 .resizable()
                 .frame(width: 96, height: 96)
 

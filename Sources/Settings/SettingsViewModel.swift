@@ -77,6 +77,14 @@ public final class SettingsViewModel: ObservableObject {
             onDockVisibilityChanged(hideDockWhileLauncherOpen)
         }
     }
+    @Published public var appIconStyle: AppIconStyle {
+        didSet {
+            guard appIconStyle != oldValue else { return }
+            model.setAppIconStyle(appIconStyle)
+            AppIconStyleApplier.apply(appIconStyle)
+            persist()
+        }
+    }
 
     @Published public var f4Enabled: Bool {
         didSet {
@@ -162,6 +170,7 @@ public final class SettingsViewModel: ObservableObject {
         layoutMode = model.layoutMode
         sortMode = grid.sortMode
         hideDockWhileLauncherOpen = model.hideDockWhileLauncherOpen
+        appIconStyle = model.appIconStyle
 
         let triggers = model.triggerSettings
         f4Enabled = triggers.f4Enabled

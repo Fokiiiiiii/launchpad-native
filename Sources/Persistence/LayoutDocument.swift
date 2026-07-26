@@ -51,6 +51,17 @@ public enum SortMode: String, Codable, Sendable {
     case lastUsed
 }
 
+/// Selectable app-icon designs — all original artwork (see
+/// `Tools/IconGenerator`), never a reproduction of Apple's or any
+/// competitor's actual icon. Adding new raw-`String` cases here is
+/// backward compatible on its own, same reasoning as `SortMode` above.
+public enum AppIconStyle: String, Codable, Sendable, CaseIterable {
+    case classic
+    case monochrome
+    case solid
+    case diagonal
+}
+
 /// Populated in Phase 6 (Customization); present now so the schema doesn't
 /// need a migration just to add it later.
 ///
@@ -285,6 +296,11 @@ public struct LayoutDocument: Codable, Sendable {
     /// apps sink to the end under a "most recent first" sort rather than
     /// contaminating the order of apps that do have real data.
     public var lastUsedByID: [StableAppIdentifier: Date]
+    /// The app's own selected icon design — an app-wide preference (not a
+    /// grid layout setting, so it lives as a top-level field rather than
+    /// nested in `GridSettings`). Applied at runtime via
+    /// `NSApp.applicationIconImage`; see `Settings.AppIconStyleApplier`.
+    public var appIconStyle: AppIconStyle
 
     public init(
         schemaVersion: Int,
@@ -301,7 +317,8 @@ public struct LayoutDocument: Codable, Sendable {
         lastScrollPosition: Double,
         hideDockWhileLauncherOpen: Bool = false,
         dateAddedByID: [StableAppIdentifier: Date] = [:],
-        lastUsedByID: [StableAppIdentifier: Date] = [:]
+        lastUsedByID: [StableAppIdentifier: Date] = [:],
+        appIconStyle: AppIconStyle = .classic
     ) {
         self.schemaVersion = schemaVersion
         self.layoutMode = layoutMode
@@ -318,10 +335,11 @@ public struct LayoutDocument: Codable, Sendable {
         self.hideDockWhileLauncherOpen = hideDockWhileLauncherOpen
         self.dateAddedByID = dateAddedByID
         self.lastUsedByID = lastUsedByID
+        self.appIconStyle = appIconStyle
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, layoutMode, gridSettings, pages, folders, itemOrder, aliases, hiddenApplicationIDs, customSources, triggerSettings, lastSelectedPage, lastScrollPosition, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID
+        case schemaVersion, layoutMode, gridSettings, pages, folders, itemOrder, aliases, hiddenApplicationIDs, customSources, triggerSettings, lastSelectedPage, lastScrollPosition, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle
     }
 
     public init(from decoder: Decoder) throws {
@@ -341,6 +359,7 @@ public struct LayoutDocument: Codable, Sendable {
         hideDockWhileLauncherOpen = try container.decodeIfPresent(Bool.self, forKey: .hideDockWhileLauncherOpen) ?? false
         dateAddedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .dateAddedByID) ?? [:]
         lastUsedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .lastUsedByID) ?? [:]
+        appIconStyle = try container.decodeIfPresent(AppIconStyle.self, forKey: .appIconStyle) ?? .classic
     }
 
     public static let currentSchemaVersion = 1
@@ -360,6 +379,7 @@ public struct LayoutDocument: Codable, Sendable {
         lastScrollPosition: 0,
         hideDockWhileLauncherOpen: false,
         dateAddedByID: [:],
-        lastUsedByID: [:]
+        lastUsedByID: [:],
+        appIconStyle: .classic
     )
 }

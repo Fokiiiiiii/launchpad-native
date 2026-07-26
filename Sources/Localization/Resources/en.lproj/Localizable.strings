@@ -27,6 +27,12 @@
 "settings.grid.display" = "Display";
 "settings.grid.reorganize" = "Reorganize";
 "settings.grid.hidedock" = "Hide Dock";
+"settings.appicon.header" = "App Icon";
+"settings.appicon.limitednotice" = "This app runs without a Dock icon by default — the new icon mainly shows here, in Finder, and in Get Info, unless you keep it pinned to the Dock.";
+"settings.appicon.style.classic" = "Classic";
+"settings.appicon.style.monochrome" = "Monochrome";
+"settings.appicon.style.solid" = "Solid";
+"settings.appicon.style.diagonal" = "Diagonal";
 "settings.triggers.f4" = "F4 / Spotlight key";
 "settings.triggers.globalhotkey" = "Global hotkey";
 "settings.triggers.hotcorners" = "Hot Corners";

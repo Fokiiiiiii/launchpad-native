@@ -62,6 +62,21 @@ public enum L10n {
     public static var sortModeLastUsed: String { string("settings.grid.sortby.lastused", "Last Used") }
     public static var reorganizeButton: String { string("settings.grid.reorganize", "Reorganize") }
     public static var hideDockToggleLabel: String { string("settings.grid.hidedock", "Hide Dock") }
+
+    // MARK: Settings — App Icon picker
+
+    public static var appIconSectionHeader: String { string("settings.appicon.header", "App Icon") }
+    public static var appIconLimitedEffectNotice: String {
+        string(
+            "settings.appicon.limitednotice",
+            "This app runs without a Dock icon by default — the new icon mainly shows here, in Finder, and in Get Info, unless you keep it pinned to the Dock."
+        )
+    }
+    public static var appIconStyleClassic: String { string("settings.appicon.style.classic", "Classic") }
+    public static var appIconStyleMonochrome: String { string("settings.appicon.style.monochrome", "Monochrome") }
+    public static var appIconStyleSolid: String { string("settings.appicon.style.solid", "Solid") }
+    public static var appIconStyleDiagonal: String { string("settings.appicon.style.diagonal", "Diagonal") }
+
     public static var quickMenuAccessibilityLabel: String { string("launcher.quickmenu.accessibility", "View options") }
     public static var openSettingsMenuItem: String { string("launcher.quickmenu.opensettings", "Open Settings…") }
 

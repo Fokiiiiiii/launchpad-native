@@ -127,6 +127,15 @@ public final class GridModel {
         onChange?()
     }
 
+    public var appIconStyle: AppIconStyle {
+        document.appIconStyle
+    }
+
+    public func setAppIconStyle(_ style: AppIconStyle) {
+        document.appIconStyle = style
+        onChange?()
+    }
+
     /// "カスタム" (manual drag order, unchanged), "名前順", "追加日順" (newest
     /// first), or "最終使用日順" (most recently launched first) — the latter
     /// two read from `LayoutDocument.dateAddedByID`/`lastUsedByID`, stamped

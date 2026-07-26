@@ -27,6 +27,12 @@
 "settings.grid.display" = "表示";
 "settings.grid.reorganize" = "整理する";
 "settings.grid.hidedock" = "Dockを隠す";
+"settings.appicon.header" = "アプリアイコン";
+"settings.appicon.limitednotice" = "このアプリは標準でDockアイコンを表示しない常駐アプリのため、アイコン変更の効果はここ・Finder・「情報を見る」で主に確認できます(Dockにピン留めしている場合を除く)。";
+"settings.appicon.style.classic" = "クラシック";
+"settings.appicon.style.monochrome" = "モノクロ";
+"settings.appicon.style.solid" = "ソリッド";
+"settings.appicon.style.diagonal" = "ダイアゴナル";
 "settings.triggers.f4" = "F4 / Spotlightキー";
 "settings.triggers.globalhotkey" = "グローバルホットキー";
 "settings.triggers.hotcorners" = "ホットコーナー";

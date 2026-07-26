@@ -33,6 +33,9 @@ cp "$BIN" "$APP/Contents/MacOS/AppHost"
 if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
     cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
+if [ -d "$ROOT/Resources/AppIconVariants" ]; then
+    cp -R "$ROOT/Resources/AppIconVariants" "$APP/Contents/Resources/"
+fi
 # SwiftPM's default Bundle.module resolution checks Bundle.main.bundleURL
 # (the .app's root) before falling back to an absolute build-dir path —
 # neither matches Contents/Resources/, which is where a real .app actually

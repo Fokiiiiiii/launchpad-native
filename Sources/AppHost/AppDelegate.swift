@@ -69,6 +69,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task {
             await launcherWindowController.loadGridDocument()
 
+            // `NSApp.applicationIconImage` resets to the bundle default on
+            // every relaunch — the user's saved AppIconStyle selection must
+            // be re-applied here every time, not just when they pick a new
+            // one in Settings.
+            AppIconStyleApplier.apply(launcherWindowController.model.appIconStyle)
+
             // Trigger registration and the first show() used to wait for
             // performFullScan() below to finish -- neither actually depends
             // on the catalog being scanned, only on the persisted grid
