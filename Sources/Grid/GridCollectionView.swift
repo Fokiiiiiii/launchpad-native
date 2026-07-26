@@ -80,7 +80,16 @@ final class GridCollectionView: NSCollectionView {
     /// (resting fingers) could cross that bar trivially. Requiring the
     /// *cumulative* delta to clear this distance first is what actually
     /// distinguishes "the user is swiping" from incidental motion.
-    private let minimumEngageDistance: CGFloat = 15
+    ///
+    /// Lowered from `15` to `10`: the user found 15pt of required finger
+    /// travel before a swipe engaged noticeably less responsive than it
+    /// should feel — a real, reported complaint distinct from
+    /// `discreteWheelCooldown` below (that's a separate anti-double-trigger
+    /// debounce for discrete hardware wheel ticks, not a distance gate, and
+    /// is unrelated to this fix). `10` is chosen to feel snappier while
+    /// still sitting comfortably above the incidental resting-finger jitter
+    /// this gate exists to reject (see doc comment above).
+    private let minimumEngageDistance: CGFloat = 10
 
     /// A plain scroll-wheel mouse (non-Apple, or any mouse without a
     /// touch-sensitive surface) sends discrete wheel ticks with no

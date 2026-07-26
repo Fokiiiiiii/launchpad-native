@@ -48,7 +48,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private let iconCache: IconCache
     private let onLaunch: (ApplicationRecord) -> Void
     private let onBackgroundClick: () -> Void
-    private let onRequestUninstall: (String) -> Void
 
     private let collectionView = GridCollectionView()
     private let scrollView = NSScrollView()
@@ -89,14 +88,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         model: GridModel,
         iconCache: IconCache,
         onLaunch: @escaping (ApplicationRecord) -> Void,
-        onBackgroundClick: @escaping () -> Void,
-        onRequestUninstall: @escaping (String) -> Void = { _ in }
+        onBackgroundClick: @escaping () -> Void
     ) {
         self.model = model
         self.iconCache = iconCache
         self.onLaunch = onLaunch
         self.onBackgroundClick = onBackgroundClick
-        self.onRequestUninstall = onRequestUninstall
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -279,12 +276,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         if let layer = collectionView.layer {
             layer.setValue(-direction * offset, forKeyPath: "transform.translation.x")
             layer.add(
-                Self.springAnimation(keyPath: "transform.translation.x", from: 0, to: -direction * offset, damping: 1.0, response: 0.22),
+                Self.springAnimation(keyPath: "transform.translation.x", from: 0, to: -direction * offset, damping: 1.0, response: 0.20),
                 forKey: "pageSlideOut"
             )
         }
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.14
+            context.duration = 0.10
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             collectionView.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
@@ -310,12 +307,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 if let layer = self.collectionView.layer {
                     layer.setValue(0, forKeyPath: "transform.translation.x")
                     layer.add(
-                        Self.springAnimation(keyPath: "transform.translation.x", from: direction * offset, to: 0, damping: 1.0, response: 0.3),
+                        Self.springAnimation(keyPath: "transform.translation.x", from: direction * offset, to: 0, damping: 1.0, response: 0.24),
                         forKey: "pageSlideIn"
                     )
                 }
                 NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.20
+                    context.duration = 0.13
                     context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                     self.collectionView.animator().alphaValue = 1
                 }
@@ -1031,8 +1028,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 hide: { [weak self] in self?.hideApp(record) },
                 removeFromFolder: nil,
                 getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
-                showWindows: { [weak self] in self?.showWindows(for: record, anchorIndexPath: indexPath) },
-                uninstall: { [weak self] in self?.onRequestUninstall(record.bundleIdentifier) }
+                showWindows: { [weak self] in self?.showWindows(for: record, anchorIndexPath: indexPath) }
             )
             return ContextMenuBuilder.menu(for: record, isInFolder: false, actions: actions)
         }
@@ -1073,21 +1069,31 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    /// The icon size the grid is *actually* rendering right now — not the
-    /// same thing as `model.gridSettings.iconSize`. Cells are scaled to the
-    /// cell's own computed size (with `gridSettings.iconSize` only acting as
-    /// a ceiling), since a fixed pixel value made icons look tiny inside the
-    /// huge cells a sparse grid (e.g. few columns/rows) produces. Exposed so
-    /// other surfaces showing the same apps — the search results list — can
-    /// match this exactly instead of independently reapplying the raw
-    /// setting, which visibly disagreed with what the grid displayed
-    /// whenever the proportional size differed from the setting (confirmed:
-    /// user's real grid is 6x3 with `iconSize` 160, but the proportional
-    /// formula renders larger than that on their screen).
+    /// The icon size the grid is *actually* rendering right now — not always
+    /// the same as `model.gridSettings.iconSize`, but `iconSize` is now the
+    /// **primary driver**: this used to treat the cell's proportional size
+    /// (`min(cellSize.width, cellSize.height) * 0.55`) as the real value and
+    /// `iconSize * 1.5` as a rarely-binding ceiling, which was structurally
+    /// broken — for realistic grid configs the proportional size sits far
+    /// below that ceiling, so the Settings icon-size slider had no visible
+    /// effect across most of its range (confirmed: user's real grid is 6x3
+    /// with `iconSize` 160, but the proportional formula rendered smaller
+    /// than that regardless of where the slider was set). Roles are now
+    /// inverted: `gridSettings.iconSize` is returned directly, and cell
+    /// geometry only clamps it down as a safety ceiling — `cellSize.height`
+    /// minus `labelAllowance` (room reserved for the label band below the
+    /// icon) and `cellSize.width`, whichever is smaller — so the icon can
+    /// never overflow the cell or clip its own label. Exposed so other
+    /// surfaces showing the same apps — the search results list — can match
+    /// this exactly instead of independently reapplying the raw setting,
+    /// which visibly disagreed with what the grid displayed whenever the two
+    /// formulas differed.
     public var currentIconSize: Double {
         let cellSize = layout.currentCellSize
-        let proportionalSize = min(cellSize.width, cellSize.height) * 0.55
-        return proportionalSize > 0 ? min(proportionalSize, model.gridSettings.iconSize * 1.5) : model.gridSettings.iconSize
+        guard cellSize.width > 0, cellSize.height > 0 else { return model.gridSettings.iconSize }
+        let labelAllowance: CGFloat = 44
+        let cellCeiling = min(cellSize.width, cellSize.height - labelAllowance)
+        return min(model.gridSettings.iconSize, Double(max(cellCeiling, 1)))
     }
 
     /// The grid's actual per-cell size right now (`PagedGridLayout`'s
@@ -1144,8 +1150,24 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             }
         case .folder(let folderID):
             let folder = model.folders[folderID]
-            let count = folder?.pages.reduce(0) { $0 + $1.count } ?? 0
-            cell.configureAsFolder(name: folder?.name ?? L10n.defaultFolderName, itemCount: count, isSelected: isSelected, iconSize: iconSize)
+            let name = folder?.name ?? L10n.defaultFolderName
+            let key = "folder:\(folderID.value)"
+            cell.configureAsFolder(name: name, isSelected: isSelected, iconSize: iconSize, thumbnail: nil, requestKey: key)
+            if let folder {
+                let records: [ApplicationRecord] = folder.pages.flatMap { $0 }.compactMap { item in
+                    guard case .app(let id) = item else { return nil }
+                    return model.record(for: id)
+                }
+                let cache = iconCache
+                Task { @MainActor in
+                    let image = await FolderIconComposer.makeThumbnail(records: records, iconCache: cache, size: iconSize)
+                    // Same cell-reuse guard as the app case above — the cell
+                    // may have been recycled for a different folder (or an
+                    // app) by the time the composite finishes.
+                    guard cell.currentRequestKey == key else { return }
+                    cell.setFolderThumbnail(image)
+                }
+            }
         }
         return cell
     }
@@ -1915,8 +1937,20 @@ private final class SnapshotDataSource: NSObject, NSCollectionViewDataSource {
             cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: iconSize, displayName: displayName)
         case .folder(let folderID):
             let folder = model.folders[folderID]
-            let count = folder?.pages.reduce(0) { $0 + $1.count } ?? 0
-            cell.configureAsFolder(name: folder?.name ?? L10n.defaultFolderName, itemCount: count, isSelected: false, iconSize: iconSize)
+            let name = folder?.name ?? L10n.defaultFolderName
+            // Synchronous, cache-only thumbnail: this data source only
+            // renders one offscreen snapshot bitmap with no async work in
+            // between (see this type's doc comment and `IconCache.icon`'s
+            // `cachedIconIfAvailable` counterpart used for the app case
+            // above) — an async composite here would resolve after the
+            // snapshot's already been captured and the temp collection view
+            // torn down.
+            let records: [ApplicationRecord] = folder?.pages.flatMap { $0 }.compactMap { item in
+                guard case .app(let id) = item else { return nil }
+                return model.record(for: id)
+            } ?? []
+            let thumbnail = FolderIconComposer.makeThumbnailSync(records: records, iconCache: iconCache, size: iconSize)
+            cell.configureAsFolder(name: name, isSelected: false, iconSize: iconSize, thumbnail: thumbnail, requestKey: "folder:\(folderID.value)")
         }
         return cell
     }

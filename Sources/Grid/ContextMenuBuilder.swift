@@ -15,59 +15,52 @@ public enum ContextMenuBuilder {
         public var removeFromFolder: (() -> Void)?
         public var getInfo: () -> Void
         public var showWindows: (() -> Void)?
-        public var uninstall: (() -> Void)?
     }
 
     public static func menu(for record: ApplicationRecord, isInFolder: Bool, actions: Actions) -> NSMenu {
         let menu = NSMenu()
 
-        menu.addItem(makeItem(L10n.menuOpen, action: actions.open))
+        menu.addItem(makeItem(L10n.menuOpen, symbolName: "arrow.up.forward.app", action: actions.open))
 
         if record.canOpenNewInstance, let openNewInstance = actions.openNewInstance {
-            menu.addItem(makeItem(L10n.menuOpenNewInstance, action: openNewInstance))
+            menu.addItem(makeItem(L10n.menuOpenNewInstance, symbolName: "macwindow.badge.plus", action: openNewInstance))
         }
 
         menu.addItem(.separator())
-        menu.addItem(makeItem(L10n.menuShowInFinder, action: actions.showInFinder))
-        menu.addItem(makeItem(L10n.menuAddToDock, action: actions.addToDock))
+        menu.addItem(makeItem(L10n.menuShowInFinder, symbolName: "folder", action: actions.showInFinder))
+        menu.addItem(makeItem(L10n.menuAddToDock, symbolName: "dock.rectangle", action: actions.addToDock))
 
         menu.addItem(.separator())
-        menu.addItem(makeItem(L10n.menuRename, action: actions.rename))
-        menu.addItem(makeItem(L10n.menuHide, action: actions.hide))
+        menu.addItem(makeItem(L10n.menuRename, symbolName: "pencil", action: actions.rename))
+        menu.addItem(makeItem(L10n.menuHide, symbolName: "eye.slash", action: actions.hide))
         if isInFolder, let removeFromFolder = actions.removeFromFolder {
-            menu.addItem(makeItem(L10n.menuRemoveFromFolder, action: removeFromFolder))
+            menu.addItem(makeItem(L10n.menuRemoveFromFolder, symbolName: "folder.badge.minus", action: removeFromFolder))
         }
 
         menu.addItem(.separator())
         if let showWindows = actions.showWindows {
-            menu.addItem(makeItem(L10n.menuShowWindows, action: showWindows))
-        }
-
-        // System-protected apps (bundled with the OS) never get an Uninstall
-        // item at all — `RemovalPlanner` would reject them outright, so
-        // there's nothing useful the item could do for one.
-        if !record.isSystemProtected, let uninstall = actions.uninstall {
-            let item = makeItem(L10n.menuUninstall, action: uninstall)
-            item.toolTip = L10n.menuUninstallTooltip
-            menu.addItem(item)
+            menu.addItem(makeItem(L10n.menuShowWindows, symbolName: "macwindow.on.rectangle", action: showWindows))
         }
 
         menu.addItem(.separator())
-        menu.addItem(makeItem(L10n.menuGetInfo, action: actions.getInfo))
+        menu.addItem(makeItem(L10n.menuGetInfo, symbolName: "info.circle", action: actions.getInfo))
 
         return menu
     }
 
     public static func folderMenu(rename: @escaping () -> Void) -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(makeItem(L10n.menuRenameFolder, action: rename))
+        menu.addItem(makeItem(L10n.menuRenameFolder, symbolName: "pencil", action: rename))
         return menu
     }
 
-    private static func makeItem(_ title: String, action: @escaping () -> Void) -> NSMenuItem {
+    private static func makeItem(_ title: String, symbolName: String? = nil, action: @escaping () -> Void) -> NSMenuItem {
         let item = ClosureMenuItem(title: title, action: #selector(ClosureMenuItem.invoke), keyEquivalent: "")
         item.target = item
         item.actionClosure = action
+        if let symbolName {
+            item.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        }
         return item
     }
 }

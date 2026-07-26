@@ -102,15 +102,24 @@ final class HotkeyRecorderNSView: NSView {
 }
 
 /// SwiftUI bridge for `HotkeyRecorderNSView`.
+///
+/// `onCommit` fires exactly once per captured combo, after both `keyCode`
+/// and `carbonModifiers` bindings have already been written — settings now
+/// apply live (no more "Apply" button), and writing the two bindings one
+/// after the other would otherwise let a `didSet` on either property
+/// register a half-formed combo (new key, still-old modifiers) as a real
+/// global hotkey for one update cycle before the second write corrects it.
 struct HotkeyRecorderView: NSViewRepresentable {
     @Binding var keyCode: UInt16?
     @Binding var carbonModifiers: UInt
+    var onCommit: ((UInt16, UInt) -> Void)?
 
     func makeNSView(context: Context) -> HotkeyRecorderNSView {
         let view = HotkeyRecorderNSView()
         view.onCapture = { keyCode, modifiers in
             self.keyCode = keyCode
             self.carbonModifiers = modifiers
+            self.onCommit?(keyCode, modifiers)
         }
         return view
     }

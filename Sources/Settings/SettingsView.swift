@@ -2,7 +2,6 @@ import AppKit
 import Localization
 import Persistence
 import SwiftUI
-import Uninstall
 
 public struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
@@ -77,19 +76,7 @@ public struct SettingsView: View {
                     Label(L10n.hideDockToggleLabel, systemImage: "dock.rectangle")
                 }
             } header: {
-                Label(L10n.sortByLabel, systemImage: "arrow.up.arrow.down.circle.fill")
-            }
-
-            Section {
-                HStack {
-                    Spacer()
-                    Button {
-                        viewModel.saveGridSettings()
-                    } label: {
-                        Label(L10n.applyButton, systemImage: "checkmark.circle.fill")
-                    }
-                    .keyboardShortcut(.defaultAction)
-                }
+                Label(L10n.displaySectionHeader, systemImage: "macwindow.badge.plus")
             }
         }
         .formStyle(.grouped)
@@ -111,8 +98,12 @@ public struct SettingsView: View {
                     Label(L10n.globalHotkeyToggleLabel, systemImage: "command")
                 }
                 if viewModel.hotkeyEnabled {
-                    HotkeyRecorderView(keyCode: $viewModel.hotkeyKeyCode, carbonModifiers: $viewModel.hotkeyCarbonModifiers)
-                        .frame(width: 160, height: 24)
+                    HotkeyRecorderView(
+                        keyCode: $viewModel.hotkeyKeyCode,
+                        carbonModifiers: $viewModel.hotkeyCarbonModifiers,
+                        onCommit: { keyCode, modifiers in viewModel.recordHotkey(keyCode: keyCode, carbonModifiers: modifiers) }
+                    )
+                    .frame(width: 160, height: 24)
                 }
             } header: {
                 Label(L10n.tabTriggers, systemImage: "hand.tap.fill")
@@ -155,18 +146,6 @@ public struct SettingsView: View {
                 }
             } header: {
                 Label(L10n.trackpadGestureGroupTitle, systemImage: "hand.point.up.braille")
-            }
-
-            Section {
-                HStack {
-                    Spacer()
-                    Button {
-                        viewModel.saveTriggerSettings()
-                    } label: {
-                        Label(L10n.applyButton, systemImage: "checkmark.circle.fill")
-                    }
-                    .keyboardShortcut(.defaultAction)
-                }
             }
         }
         .formStyle(.grouped)
@@ -286,123 +265,12 @@ public struct SettingsView: View {
         .formStyle(.grouped)
     }
 
-    // MARK: Advanced (combines Sources + Uninstall)
+    // MARK: Advanced (Sources only — the Uninstall feature that used to
+    // share this tab behind a segmented sub-picker was removed at the
+    // user's explicit request; Settings should not surface file deletion)
 
-    /// Sources and Uninstall keep their own distinct view structures (a
-    /// plain `Form` vs. a master-detail `HStack`+`List`) rather than being
-    /// merged into one shared layout — a segmented control switches
-    /// between them instead of stacking two very differently-shaped views
-    /// in one scroll area.
     private var advancedTab: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $viewModel.advancedSubTab) {
-                Text(L10n.tabSources).tag(AdvancedSubTab.sources)
-                Text(L10n.tabUninstall).tag(AdvancedSubTab.uninstall)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding([.horizontal, .top])
-            .padding(.bottom, 8)
-
-            switch viewModel.advancedSubTab {
-            case .sources: sourcesTab
-            case .uninstall: uninstallTab
-            }
-        }
-    }
-
-    // MARK: Uninstall
-
-    private var uninstallTab: some View {
-        HStack(spacing: 0) {
-            List(viewModel.uninstallCandidates, selection: Binding(
-                get: { viewModel.selectedUninstallRecordID },
-                set: { newValue in
-                    guard let newValue else { return }
-                    viewModel.selectUninstallCandidate(newValue)
-                }
-            )) { record in
-                Label(viewModel.displayName(for: record), systemImage: "app.fill")
-                    .tag(record.id)
-            }
-            .frame(width: 220)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 12) {
-                if viewModel.selectedUninstallRecordID == nil {
-                    ContentUnavailableLikeHint(
-                        systemImage: "trash.circle",
-                        text: L10n.uninstallSelectPrompt
-                    )
-                } else if viewModel.uninstallPlan.isEmpty {
-                    ContentUnavailableLikeHint(
-                        systemImage: "checkmark.circle",
-                        text: L10n.uninstallNoItemsFound
-                    )
-                } else {
-                    Label(L10n.uninstallPreviewNotice, systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    List(Array(viewModel.uninstallPlan.enumerated()), id: \.offset) { _, item in
-                        HStack {
-                            classificationBadge(item.classification)
-                            Text(item.path.path)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer()
-                            if item.requiresPrivilegedHelper {
-                                Label(L10n.needsHelperLabel, systemImage: "lock.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    HStack {
-                        Button {
-                            viewModel.saveUninstallDryRunReport()
-                        } label: {
-                            Label(L10n.saveDryRunReportButton, systemImage: "doc.text")
-                        }
-                        Spacer()
-                        Button(role: .destructive) {
-                            confirmAndExecuteRemoval()
-                        } label: {
-                            Label(L10n.moveToTrashButton, systemImage: "trash")
-                        }
-                        .disabled(viewModel.itemsEligibleForRemoval.isEmpty)
-                    }
-                    Label(L10n.uninstallSafetyNotice, systemImage: "shield.checkerboard")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    /// A small `Label` + secondary text placeholder, matching the tone of
-    /// SwiftUI's `ContentUnavailableView` (not used directly since this
-    /// project's minimum, macOS 15, technically supports it, but a plain
-    /// `Label` keeps this file's styling consistent with the rest of the
-    /// hand-built rows above rather than mixing two different idioms).
-    private struct ContentUnavailableLikeHint: View {
-        let systemImage: String
-        let text: String
-
-        var body: some View {
-            VStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 32))
-                    .foregroundStyle(.secondary)
-                Text(text)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding()
-        }
+        sourcesTab
     }
 
     /// App identity + license only — deliberately no credits/contributor
@@ -439,42 +307,6 @@ public struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(32)
-    }
-
-    /// The confirmation this project's safety rules require before any
-    /// irreversible-looking action: lists exactly what will move to Trash,
-    /// requires an explicit destructive-styled click, and only then calls
-    /// into the view model. Trash is itself recoverable, but the dialog
-    /// still exists — the user should never be surprised by what happened.
-    private func confirmAndExecuteRemoval() {
-        let items = viewModel.itemsEligibleForRemoval
-        guard !items.isEmpty else { return }
-
-        let alert = NSAlert()
-        alert.messageText = L10n.moveToTrashAlertTitle(items.count)
-        alert.informativeText = items.map(\.path.path).joined(separator: "\n")
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: L10n.moveToTrashConfirmButton)
-        alert.addButton(withTitle: L10n.cancelButton)
-
-        if alert.runModal() == .alertFirstButtonReturn {
-            viewModel.executeOwnedRemoval()
-        }
-    }
-
-    private func classificationBadge(_ classification: OwnershipClassification) -> some View {
-        let (label, symbol, color): (String, String, Color) = switch classification {
-        case .owned: (L10n.classificationOwned, "checkmark.circle.fill", .green)
-        case .sharedRisk: (L10n.classificationSharedRisk, "exclamationmark.triangle.fill", .yellow)
-        case .unknown: (L10n.classificationUnknown, "questionmark.circle.fill", .red)
-        }
-        return Label(label, systemImage: symbol)
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .foregroundStyle(color)
-            .background(color.opacity(0.18))
-            .clipShape(Capsule())
     }
 
     private func addFolder() {

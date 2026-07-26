@@ -18,7 +18,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private let onDidLaunch: () -> Void
     private let onDidCancel: () -> Void
     private let onOpenSettings: () -> Void
-    private let onRequestUninstall: (String) -> Void
 
     private let searchField = NSTextField()
     private let searchIcon = NSImageView()
@@ -31,8 +30,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         model: gridModel,
         iconCache: iconCache,
         onLaunch: { [weak self] record in self?.launch(record) },
-        onBackgroundClick: { [weak self] in self?.onDidCancel() },
-        onRequestUninstall: { [weak self] bundleIdentifier in self?.onRequestUninstall(bundleIdentifier) }
+        onBackgroundClick: { [weak self] in self?.onDidCancel() }
     )
 
     init(
@@ -41,15 +39,13 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         iconCache: IconCache,
         onDidLaunch: @escaping () -> Void,
         onDidCancel: @escaping () -> Void,
-        onOpenSettings: @escaping () -> Void,
-        onRequestUninstall: @escaping (String) -> Void = { _ in }
+        onOpenSettings: @escaping () -> Void
     ) {
         self.viewModel = viewModel
         self.gridModel = gridModel
         self.iconCache = iconCache
         self.onDidLaunch = onDidLaunch
         self.onDidCancel = onDidCancel
-        self.onRequestUninstall = onRequestUninstall
         self.onOpenSettings = onOpenSettings
         super.init(nibName: nil, bundle: nil)
     }
@@ -129,12 +125,9 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // the reference design's search bar (one "•••" chip, no separate
         // persistent gear icon).
         //
-        // A single glass chip for a quick-access menu (browsing mode + a
-        // Settings shortcut) without requiring a full trip into Settings
-        // for a toggle already surfaced there. Explicitly does NOT include
-        // a "sort by" entry: this app has no automatic sort feature
-        // (manual drag order only), so a menu item for it would be
-        // decorative, not functional.
+        // A single glass chip for a quick-access menu (browsing mode, sort
+        // order, and a Settings shortcut) without requiring a full trip
+        // into Settings for a toggle already surfaced there.
         let quickMenuGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 14)
         quickMenuGlass.translatesAutoresizingMaskIntoConstraints = false
 
@@ -198,7 +191,12 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             searchBarGlass.bottomAnchor.constraint(equalTo: searchBar.bottomAnchor),
 
             searchIcon.leadingAnchor.constraint(equalTo: searchBar.leadingAnchor, constant: 16),
-            searchIcon.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+            // SF Symbol "magnifyingglass" has its handle in the lower-right,
+            // so its optical center sits slightly up-left of the glyph's
+            // true geometric center — nudge centerY up by 1pt to compensate.
+            searchIcon.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor, constant: -1),
+            searchIcon.widthAnchor.constraint(equalToConstant: 20),
+            searchIcon.heightAnchor.constraint(equalToConstant: 20),
 
             searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 10),
             searchField.trailingAnchor.constraint(equalTo: searchBar.trailingAnchor, constant: -16),
@@ -394,6 +392,23 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         menu.addItem(scrollItem)
 
         menu.addItem(.separator())
+        let sortItem = NSMenuItem(title: L10n.sortByLabel, action: nil, keyEquivalent: "")
+        let sortSubmenu = NSMenu()
+        let modes: [(SortMode, String)] = [
+            (.custom, L10n.sortModeCustom), (.name, L10n.sortModeName),
+            (.dateAdded, L10n.sortModeDateAdded), (.lastUsed, L10n.sortModeLastUsed)
+        ]
+        for (mode, title) in modes {
+            let mi = NSMenuItem(title: title, action: #selector(selectSortMode(_:)), keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = mode.rawValue
+            mi.state = gridModel.gridSettings.sortMode == mode ? .on : .off
+            sortSubmenu.addItem(mi)
+        }
+        sortItem.submenu = sortSubmenu
+        menu.addItem(sortItem)
+
+        menu.addItem(.separator())
 
         let settingsItem = NSMenuItem(title: L10n.openSettingsMenuItem, action: #selector(settingsButtonTapped), keyEquivalent: "")
         settingsItem.target = self
@@ -409,6 +424,12 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     private func applyLayoutMode(_ mode: LayoutMode) {
         gridModel.setLayoutMode(mode)
+        Task { await gridModel.save() }
+    }
+
+    @objc private func selectSortMode(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let mode = SortMode(rawValue: raw) else { return }
+        gridModel.applySortMode(mode)
         Task { await gridModel.save() }
     }
 

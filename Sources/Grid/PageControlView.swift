@@ -136,12 +136,42 @@ final class PageControlView: NSView {
         updateDotStates()
     }
 
+    /// Best-effort defensive fix for an intermittent, not-reliably-reproduced
+    /// symptom seen once on cold launch where the page dots rendered
+    /// invisible until the next page change. `labelColor`/`tertiaryLabelColor`
+    /// are dynamic, appearance-dependent colors; taking `.cgColor` resolves
+    /// against whatever appearance is "current" at that instant, which could
+    /// be wrong if this runs before the view is actually attached to a
+    /// window with a settled effective appearance. Resolving explicitly
+    /// against `effectiveAppearance` here, plus re-running on
+    /// `viewDidMoveToWindow`/`viewDidChangeEffectiveAppearance` below, is a
+    /// plausible mitigation — it is not confirmed to be the actual root
+    /// cause of the original symptom.
     private func updateDotStates() {
-        for (index, button) in dotButtons.enumerated() {
-            button.layer?.backgroundColor = index == currentPage
-                ? NSColor.labelColor.cgColor
-                : NSColor.tertiaryLabelColor.cgColor
+        // `NSColor` has no `resolvedColor(with:)` API — the correct way to
+        // force a dynamic color's `.cgColor` snapshot to resolve against a
+        // specific appearance is running the read inside
+        // `NSAppearance.performAsCurrentDrawingAppearance`, which sets
+        // `NSAppearance.currentDrawingAppearance` for the duration of the
+        // closure.
+        effectiveAppearance.performAsCurrentDrawingAppearance { [weak self] in
+            guard let self else { return }
+            for (index, button) in dotButtons.enumerated() {
+                button.layer?.backgroundColor = (index == currentPage)
+                    ? NSColor.labelColor.cgColor
+                    : NSColor.tertiaryLabelColor.cgColor
+            }
         }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateDotStates()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateDotStates()
     }
 
     /// Kept simple on purpose: earlier this dimmed disabled buttons to 0.3

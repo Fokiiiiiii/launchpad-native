@@ -1,9 +1,10 @@
 import AppKit
 import Catalog
 
-/// One grid cell: either an app (icon + label) or a folder (folder glyph +
-/// name + item count). Both are visually similar on purpose — apps and
-/// folders live in the same grid and should read as siblings.
+/// One grid cell: either an app (icon + label) or a folder (a composited
+/// 2x2 preview tile of the folder's own contents, built by
+/// `FolderIconComposer`, + name). Both are visually similar on purpose —
+/// apps and folders live in the same grid and should read as siblings.
 final class GridCellItem: NSCollectionViewItem {
     /// Identifies which record this cell is *currently* configured for.
     /// `NSCollectionView` recycles cell instances across `reloadData()`
@@ -18,7 +19,6 @@ final class GridCellItem: NSCollectionViewItem {
     private let highlightView = NSView()
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
-    private let countBadge = NSTextField(labelWithString: "")
     private var iconWidthConstraint: NSLayoutConstraint?
     private var iconHeightConstraint: NSLayoutConstraint?
 
@@ -37,14 +37,6 @@ final class GridCellItem: NSCollectionViewItem {
         label.lineBreakMode = .byTruncatingTail
         label.maximumNumberOfLines = 2
 
-        countBadge.translatesAutoresizingMaskIntoConstraints = false
-        countBadge.font = .systemFont(ofSize: 10, weight: .semibold)
-        countBadge.textColor = .white
-        countBadge.alignment = .center
-        countBadge.wantsLayer = true
-        countBadge.backgroundColor = .clear
-        countBadge.isHidden = true
-
         // highlightView goes in first so it renders *behind* the icon/label
         // — see `applySelection`'s doc comment for why it's sized to hug
         // the icon+label instead of filling the whole (grid-settings-sized,
@@ -52,7 +44,6 @@ final class GridCellItem: NSCollectionViewItem {
         container.addSubview(highlightView)
         container.addSubview(iconView)
         container.addSubview(label)
-        container.addSubview(countBadge)
 
         let widthConstraint = iconView.widthAnchor.constraint(equalToConstant: 96)
         let heightConstraint = iconView.heightAnchor.constraint(equalToConstant: 96)
@@ -64,11 +55,6 @@ final class GridCellItem: NSCollectionViewItem {
             iconView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             widthConstraint,
             heightConstraint,
-
-            countBadge.topAnchor.constraint(equalTo: iconView.topAnchor, constant: -2),
-            countBadge.trailingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 4),
-            countBadge.widthAnchor.constraint(equalToConstant: 18),
-            countBadge.heightAnchor.constraint(equalToConstant: 18),
 
             label.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 4),
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 2),
@@ -110,13 +96,27 @@ final class GridCellItem: NSCollectionViewItem {
         iconHeightConstraint?.constant = clamped
     }
 
-    func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, displayName: String? = nil) {
+    /// - Parameter showsLabel: When `false`, hides and empties the name
+    ///   label (an empty, hidden label has 0 intrinsic height, so the
+    ///   existing Auto Layout constraints between `iconView`/`label`/
+    ///   `container` stay satisfied with no conflicts) — used by
+    ///   `FolderContentsViewController`'s compact icon-only popover cells,
+    ///   where the folder's name is already shown once above the grid.
+    ///   VoiceOver still announces the name either way (`setAccessibilityLabel`
+    ///   is unconditional) since hiding the visible label shouldn't hide it
+    ///   from accessibility.
+    func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, displayName: String? = nil, showsLabel: Bool = true) {
         currentRequestKey = record.iconCacheKey
         applyIconSize(iconSize)
         iconView.image = icon
         let name = displayName ?? record.displayName
-        label.stringValue = name
-        countBadge.isHidden = true
+        if showsLabel {
+            label.isHidden = false
+            label.stringValue = name
+        } else {
+            label.isHidden = true
+            label.stringValue = ""
+        }
         applySelection(isSelected)
         // VoiceOver reads the cell as one element ("AppName"), matching how
         // Finder/Launchpad read an app icon — not icon and label separately.
@@ -125,25 +125,35 @@ final class GridCellItem: NSCollectionViewItem {
         view.setAccessibilityLabel(name)
     }
 
-    func configureAsFolder(name: String, itemCount: Int, isSelected: Bool, iconSize: Double) {
-        // No async icon fetch for folders, but clear this so a pending
-        // app-icon task from this cell's *previous* life (if it was an app
-        // cell before being recycled into a folder cell) can never match.
-        currentRequestKey = nil
+    /// Renders as a Springboard-style folder: a composited preview tile of
+    /// (up to 4 of) the folder's own app icons, built by
+    /// `FolderIconComposer` — replaces the generic `folder.fill` glyph +
+    /// red count badge this used to show. The thumbnail is supplied by the
+    /// caller (`thumbnail`, possibly `nil` for "not ready yet" — see
+    /// `setFolderThumbnail`) rather than composited in here, since building
+    /// it requires each app icon from `IconCache`, which callers already
+    /// fetch asynchronously with their own cell-reuse guard (`requestKey`,
+    /// same pattern as `configureAsApp`'s `currentRequestKey`).
+    func configureAsFolder(name: String, isSelected: Bool, iconSize: Double, thumbnail: NSImage?, requestKey: String) {
+        currentRequestKey = requestKey
         applyIconSize(iconSize)
-        let symbolConfig = NSImage.SymbolConfiguration(pointSize: iconSize * 0.42, weight: .regular)
-        iconView.image = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: name)?
-            .withSymbolConfiguration(symbolConfig)
-        iconView.contentTintColor = .systemBlue
+        iconView.contentTintColor = nil
+        iconView.image = thumbnail ?? FolderIconComposer.placeholderTile(size: iconSize)
+        label.isHidden = false
         label.stringValue = name
-        countBadge.stringValue = "\(itemCount)"
-        countBadge.isHidden = false
-        countBadge.layer?.cornerRadius = 9
-        countBadge.layer?.backgroundColor = NSColor.systemRed.cgColor
         applySelection(isSelected)
         view.setAccessibilityElement(true)
         view.setAccessibilityRole(.button)
-        view.setAccessibilityLabel("\(name) folder, \(itemCount) items")
+        view.setAccessibilityLabel("\(name) folder")
+    }
+
+    /// Applies a folder thumbnail once `FolderIconComposer` finishes
+    /// compositing it asynchronously — callers must check
+    /// `currentRequestKey` against the key they captured at `configureAsFolder`
+    /// time first (see that method's doc comment and this class's
+    /// `currentRequestKey` doc comment for why).
+    func setFolderThumbnail(_ image: NSImage) {
+        iconView.image = image
     }
 
     /// A soft glass highlight (translucent white fill + thin bright edge)
@@ -183,7 +193,18 @@ final class GridCellItem: NSCollectionViewItem {
     /// is way bigger than the icon). `GridCollectionView` uses this to tell
     /// "really clicked the icon" from "clicked the gap around it," treating
     /// the latter as a background click.
+    ///
+    /// The label's own `frame` is pinned edge-to-edge across the full cell
+    /// width (see the leading/trailing constraints above), so unioning it
+    /// as-is would make a short app name's hit region span the entire
+    /// cell's width, not just the name's own rendered text — capped to the
+    /// label's actual rendered text width instead (falling back to the
+    /// icon's width for an empty/hidden label, e.g. `showsLabel: false`).
     var contentHitTestFrame: NSRect {
-        iconView.frame.union(label.frame)
+        let iconFrame = iconView.frame
+        let textWidth = min(label.attributedStringValue.size().width, label.frame.width)
+        let hitWidth = max(textWidth, iconFrame.width)
+        let labelRect = NSRect(x: label.frame.midX - hitWidth / 2, y: label.frame.minY, width: hitWidth, height: label.frame.height)
+        return iconFrame.union(labelRect)
     }
 }

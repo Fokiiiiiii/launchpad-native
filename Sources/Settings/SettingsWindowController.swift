@@ -38,8 +38,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// `windowWillClose`'s doc comment for why this is needed at all).
     private let onWillClose: () -> Void
     /// Built once, alongside the window, and kept alive for the controller's
-    /// lifetime — `showUninstallTab(for:)` needs to reach it even when the
-    /// window already exists and `show()` takes its early-return path.
+    /// lifetime.
     private var viewModel: SettingsViewModel?
 
     public init(
@@ -85,13 +84,6 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.window = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-    }
-
-    /// Opens Settings on the Uninstall tab with `bundleIdentifier`
-    /// preselected — the grid context menu's "Uninstall…" item routes here.
-    public func showUninstallTab(for bundleIdentifier: String) {
-        show()
-        viewModel?.preselectUninstallCandidate(bundleIdentifier: bundleIdentifier)
     }
 
     /// Keeps the NSWindow instance around (isReleasedWhenClosed = false) so

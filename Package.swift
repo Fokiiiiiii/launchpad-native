@@ -50,18 +50,13 @@ let package = Package(
         ),
         .target(
             name: "Settings",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Uninstall", "Localization"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Localization"],
             path: "Sources/Settings"
         ),
         .target(
             name: "WindowBrowser",
             dependencies: ["Diagnostics"],
             path: "Sources/WindowBrowser"
-        ),
-        .target(
-            name: "Uninstall",
-            dependencies: ["Diagnostics", "Catalog", "Persistence"],
-            path: "Sources/Uninstall"
         ),
         .target(
             name: "Onboarding",
@@ -85,11 +80,6 @@ let package = Package(
             name: "WindowBrowserProbe",
             dependencies: ["WindowBrowser"],
             path: "Tools/WindowBrowserProbe"
-        ),
-        .executableTarget(
-            name: "UninstallFixtureProbe",
-            dependencies: ["Uninstall", "Catalog"],
-            path: "Tools/UninstallFixtureProbe"
         ),
         .executableTarget(
             name: "PrivilegedHelperProbe",
@@ -137,11 +127,6 @@ let package = Package(
             name: "WindowBrowserTests",
             dependencies: ["WindowBrowser"],
             path: "Tests/WindowBrowserTests"
-        ),
-        .testTarget(
-            name: "UninstallTests",
-            dependencies: ["Uninstall", "Catalog"],
-            path: "Tests/UninstallTests"
         ),
         .testTarget(
             name: "OnboardingTests",

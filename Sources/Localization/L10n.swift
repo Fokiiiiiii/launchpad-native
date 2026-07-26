@@ -21,7 +21,6 @@ public enum L10n {
     public static var tabTriggers: String { string("settings.tab.triggers", "Triggers") }
     public static var tabSources: String { string("settings.tab.sources", "Sources") }
     public static var tabHidden: String { string("settings.tab.hidden", "Hidden Apps") }
-    public static var tabUninstall: String { string("settings.tab.uninstall", "Uninstall") }
     public static var tabAbout: String { string("settings.tab.about", "About") }
     public static var tabGeneral: String { string("settings.tab.general", "General") }
     public static var tabScreen: String { string("settings.tab.screen", "Screen") }
@@ -51,8 +50,12 @@ public enum L10n {
     public static var layoutPickerLabel: String { string("settings.grid.layout", "Layout") }
     public static var layoutModePaged: String { string("settings.grid.layout.paged", "Paged") }
     public static var layoutModeVerticalScroll: String { string("settings.grid.layout.verticalscroll", "Vertical Scroll") }
-    public static var applyButton: String { string("settings.apply", "Apply") }
     public static var sortByLabel: String { string("settings.grid.sortby", "Sort By") }
+    /// Neutral section header for the group containing Sort By, Reorganize,
+    /// and Hide Dock — previously reused `sortByLabel` for this header too,
+    /// which read oddly once Reorganize/Hide Dock (unrelated to sorting)
+    /// shared the same section.
+    public static var displaySectionHeader: String { string("settings.grid.display", "Display") }
     public static var sortModeCustom: String { string("settings.grid.sortby.custom", "Custom") }
     public static var sortModeName: String { string("settings.grid.sortby.name", "Name") }
     public static var sortModeDateAdded: String { string("settings.grid.sortby.dateadded", "Date Added") }
@@ -124,28 +127,7 @@ public enum L10n {
     public static var onboardingNextButton: String { string("onboarding.next", "Next") }
     public static var onboardingGetStartedButton: String { string("onboarding.getstarted", "Get Started") }
 
-    // MARK: Settings — Uninstall tab
-
-    public static var uninstallSelectPrompt: String { string("settings.uninstall.selectprompt", "Select an app to see what would be removed.") }
-    public static var uninstallNoItemsFound: String { string("settings.uninstall.noitemsfound", "No related files or registrations were found for this app.") }
-    public static var uninstallPreviewNotice: String { string("settings.uninstall.previewnotice", "This is a preview only — nothing is deleted or stopped yet.") }
-    public static var needsHelperLabel: String { string("settings.uninstall.needshelper", "needs helper") }
-    public static var saveDryRunReportButton: String { string("settings.uninstall.savedryrun", "Save Dry-Run Report") }
-    public static var moveToTrashButton: String { string("settings.uninstall.movetotrash", "Move Owned Items to Trash…") }
-    public static var uninstallSafetyNotice: String {
-        string(
-            "settings.uninstall.safetynotice",
-            "Only \"owned\" items are ever removed, and always to the Trash — never a permanent delete. Shared-risk, unknown, and helper-required items are shown for visibility only and are never touched."
-        )
-    }
-    public static func moveToTrashAlertTitle(_ count: Int) -> String {
-        String(format: string("settings.uninstall.movetotrashalert.title", "Move %d item(s) to Trash?"), count)
-    }
-    public static var moveToTrashConfirmButton: String { string("settings.uninstall.movetotrashalert.confirm", "Move to Trash") }
     public static var cancelButton: String { string("common.cancel", "Cancel") }
-    public static var classificationOwned: String { string("settings.uninstall.classification.owned", "owned") }
-    public static var classificationSharedRisk: String { string("settings.uninstall.classification.sharedrisk", "shared risk") }
-    public static var classificationUnknown: String { string("settings.uninstall.classification.unknown", "unknown") }
 
     // MARK: Settings — Hotkey recorder
 
@@ -165,8 +147,6 @@ public enum L10n {
     public static var menuHide: String { string("menu.hide", "Hide") }
     public static var menuRemoveFromFolder: String { string("menu.removefromfolder", "Remove from Folder") }
     public static var menuShowWindows: String { string("menu.showwindows", "Show Windows") }
-    public static var menuUninstall: String { string("menu.uninstall", "Uninstall\u{2026}") }
-    public static var menuUninstallTooltip: String { string("menu.uninstall.tooltip", "Preview what would be removed (Settings ▸ Uninstall). No files are deleted yet.") }
     public static var menuGetInfo: String { string("menu.getinfo", "Get Info") }
     public static var menuRenameFolder: String { string("menu.renamefolder", "Rename Folder") }
 

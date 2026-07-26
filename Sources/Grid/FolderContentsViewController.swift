@@ -50,9 +50,13 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         titleField.alignment = .center
 
         let layout = NSCollectionViewFlowLayout()
-        layout.itemSize = NSSize(width: 80, height: 96)
-        layout.minimumInteritemSpacing = 12
-        layout.minimumLineSpacing = 12
+        // Icon-only cells (no name label — see `configureAsApp`'s
+        // `showsLabel: false` below): a compact grid reading like real
+        // iOS/macOS Springboard folder contents, with the folder's own name
+        // shown once above via `titleField` instead of repeated per-cell.
+        layout.itemSize = NSSize(width: 64, height: 64)
+        layout.minimumInteritemSpacing = 16
+        layout.minimumLineSpacing = 16
         layout.sectionInset = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
 
         collectionView.collectionViewLayout = layout
@@ -150,13 +154,13 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
             // popover's cells are a compact 80x96pt, independent of the
             // user's main-grid icon size setting.
             let folderIconSize = 56.0
-            cell.configureAsApp(record: record, icon: NSImage(), isSelected: false, iconSize: folderIconSize)
+            cell.configureAsApp(record: record, icon: NSImage(), isSelected: false, iconSize: folderIconSize, showsLabel: false)
             let expectedKey = record.iconCacheKey
             Task { @MainActor in
                 let icon = await cache.icon(for: record)
                 // Same cell-reuse guard as GridViewController — see its comment.
                 guard cell.currentRequestKey == expectedKey else { return }
-                cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: folderIconSize)
+                cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: folderIconSize, showsLabel: false)
             }
         }
         return cell
@@ -192,8 +196,7 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
                 self.refresh()
             },
             getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
-            showWindows: nil, // Folder-internal items don't get the window browser shortcut yet; open the app itself first.
-            uninstall: nil // Same reasoning as showWindows: open the app itself first.
+            showWindows: nil // Folder-internal items don't get the window browser shortcut yet; open the app itself first.
         )
         return ContextMenuBuilder.menu(for: record, isInFolder: true, actions: actions)
     }
