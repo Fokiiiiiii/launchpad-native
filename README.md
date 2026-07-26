@@ -1596,6 +1596,131 @@ UI from the reference screenshots — this app is free/OSS and copies none
 of that. Settings' tab count/structure itself (still 5 tabs) was not
 changed beyond the cleanup above.
 
+## Folder redesign, Uninstall restored, App Icon picker, item-drag polish (2026-07-26)
+
+A new batch of reference screenshots (a different competing launcher,
+layout/interaction inspiration only) plus a theoretical spec document
+about Apple's real Home Screen drag mechanics prompted this round.
+Confirmed via AskUserQuestion up front: (1) bring back the Uninstall
+feature this project's previous round had fully removed, but with a new
+floating-panel design; (2) keep excluding any Pro/trial/membership UI
+from the reference (this app stays free/OSS); (3) reverse the previous
+round's "icon-only" folder popover decision back to labeled icons; (4)
+add a selectable app-icon picker.
+
+- **Folder icon: 2x2 → 3x3 mosaic.** `FolderIconComposer` now composites
+  up to 9 of a folder's app icons in a 3x3 grid (was 4 in 2x2), matching
+  real macOS Launchpad folder-icon conventions more closely.
+- **Folder popover reversed back to labeled icons, styled dark card,
+  dynamic size.** `FolderContentsViewController` shows app names under
+  each icon again (the "icon-only" change from the previous round is
+  undone per this round's explicit reference). The popover content now
+  sits on a dark glass card (new shared `Grid/GlassBackgroundHelper.swift`,
+  replacing what used to be two independent copies of the same glass-pill
+  logic) instead of bare `NSPopover` chrome, and `preferredContentSize` is
+  computed from the actual item count (wide, up to 7 columns, scrolling
+  beyond that) instead of a fixed 320×320 square. `NSPopover` itself is
+  kept rather than replaced with a custom window — its `.transient`
+  behavior already gives correct "outside click closes just the popover,
+  never the launcher" dismissal for free, a mechanism fixed twice in this
+  project's earlier history.
+- **Folder right-click menu gained Open + Ungroup.** Previously only
+  "Rename Folder". `GridModel.ungroupFolder(_:)` is the first
+  user-invokable folder dissolve (the existing `dissolveFolder`/
+  `isFolderEmpty` pair only ever fired automatically once a folder was
+  already empty) — it flattens the folder's contents in their existing
+  order and splices them back into the page at the folder's former
+  position.
+- **Settings visual polish + App Icon style picker.** Section headers
+  across every tab got a light color tint (blue/orange/purple/green/gray).
+  A new `AppIconStyle` enum (classic/monochrome/solid/diagonal, persisted
+  the same `decodeIfPresent`-with-default way as `sortMode`) backs a
+  4-thumbnail picker in the General tab — `classic` is the original design
+  unchanged; the other three are new original compositions (graphite
+  grid, flat 2x2, diagonal quincunx), never a reproduction of Apple's or
+  any competitor's icon. `Tools/IconGenerator` now takes an
+  `iconset`/`variants` subcommand — `variants` renders one 512×512 PNG per
+  style into `Resources/AppIconVariants/`, loaded at runtime via
+  `NSApp.applicationIconImage` (switching the on-disk bundle icon isn't
+  possible without re-signing an unsigned build). **Disclosed limitation**:
+  this app is `LSUIElement` (no persistent Dock icon during normal
+  operation), so the picker's real visible effect is mostly limited to
+  Finder/Get Info, Cmd+Tab, and the About tab's own preview — not a
+  Dock tile, which the Settings copy says explicitly rather than
+  overselling the feature.
+- **Uninstall restored, with a new floating-panel design.** The backend
+  (`Sources/Uninstall/`: read-only evidence collection, pure
+  classification, Trash-only/reversible execution, a permanent refusal to
+  touch root-owned files without a Privileged Helper this project already
+  concluded isn't feasible for an unsigned build) is restored verbatim
+  from before its removal — unchanged. The front end is new:
+  `UninstallPanelViewModel` synthesizes the app-bundle-itself row (the
+  restored `RemovalPlanner` never emits one) and categorizes items into
+  Application File/Cache/Preferences sections purely in the view model,
+  without touching the restored backend files. `DiskSizeEstimator` runs
+  off the main actor so opening the panel never blocks on walking a large
+  Caches directory. Entry point restored along the same shape as before
+  (grid right-click → "Uninstall…", SF Symbol `trash`) but terminating in
+  the new panel instead of a Settings tab.
+- **New shared outside-click-dismiss mechanism**, used by both Settings
+  (which previously had none — only its titlebar close button) and the
+  new Uninstall panel. Uses a *local* `NSEvent` monitor
+  (`OutsideClickDismissMonitor`), not the launcher's existing global one —
+  a global monitor only sees clicks destined for *other applications'*
+  windows, which structurally can't detect a click on the launcher's own
+  grid sitting behind a floating panel. Consuming the dismiss-triggering
+  click (returning `nil`) is what keeps it from also reaching
+  `BackgroundClickCatcherView` and hiding the launcher itself. Opening
+  either Settings or the Uninstall panel now closes the other first
+  (mutual exclusivity — two independent local monitors would otherwise
+  fight over the same click).
+- **Item-drag: 3 spec-compliance gaps closed**, found by comparing the
+  existing drag/reorder/folder/page-turn system (built across this
+  project's earlier "Round 10" and several bug-fix rounds since) against
+  the user-provided theoretical spec:
+  - **True hysteresis for reorder targeting**: the pointer must now cross
+    40% of the committed slot's own cell width past its center before a
+    new candidate is even considered, replacing a "raw nearest-slot change
+    restarts a debounce timer" stand-in that could still flicker right at
+    a cell boundary.
+  - **Edge-dwell "peek" preview**: dragging near a page edge now shows the
+    incoming page sliding in proportionally to pointer proximity *during*
+    the existing 0.45s dwell, before the turn commits — previously there
+    was zero feedback until the page suddenly snapped over. Reuses
+    `renderPageSnapshot`, the real-`NSWindow`-hosted offscreen renderer
+    already fixed twice in this file's history for the trackpad-swipe
+    path's own neighbor snapshot, rather than a new mechanism.
+  - **Velocity-aware spring handoff**: the reorder-preview shift and the
+    page-turn commit spring now estimate and hand off a relative velocity
+    (same convention the trackpad-swipe path's `endPageDrag` already used)
+    instead of always restarting from zero, avoiding a "hard cut" when a
+    spring re-targets mid-flight. The four one-shot springs (lift,
+    folder-highlight, drop/settle, cancel/revert) are untouched —
+    nothing is already in motion on those keypaths when they fire.
+
+**Verification**: `swift test` 95/95 (77 base + 18 restored Uninstall
+tests) after every section. Release build succeeds and installs cleanly.
+Real Accessibility-driven testing (`CGEventPost` clicks + direct
+Accessibility-tree queries) confirmed the Sort By submenu, folder popover
+layout, and Settings tab structure; the item-drag changes were verified
+via the existing real-event-driven debug hooks
+(`LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG=reorder|folder`, dispatched through
+`window.sendEvent`) and `log stream` — both paths settle correctly with
+no crashes or errors. Real `layout.json` was backed up before and
+restored after every round of testing; a "New Folder" ×2 pollution from
+an earlier point in the same working session was found and cleaned up
+during this round's verification, unrelated to this round's own changes.
+
+**Disclosed limitations**: the edge-peek's actual visual feel (smooth
+proportional slide, no hard cut at the velocity handoff) could not be
+screenshot-verified this round — an unrelated screen-capture mishap made
+further screenshot-based verification unsafe to continue partway through
+this round (see the accompanying session report) — log-based verification
+confirms the mechanism works correctly end-to-end, but the real-world
+"feel" needs the user's own hands-on confirmation. The folder popover's
+"no arrow" reference look can't be fully matched without a private API;
+a faint default-`NSPopover` bezel/arrow remains around the styled card.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
@@ -1621,9 +1746,10 @@ open "$SCRATCH/LaunchpadNative.app"
 
 See module boundaries and phase plan in `Sources/` as they land:
 `AppHost`, `Diagnostics`, `Catalog`, `Launcher`, `Grid`, `Persistence`,
-`Triggers`, `PrivateAPI`, `WindowBrowser`, `Settings`. (An `Uninstall`
-module existed for one round and was removed entirely — see the
-"UI overhaul + Uninstall removal" section above.)
+`Triggers`, `PrivateAPI`, `WindowBrowser`, `Settings`, `Uninstall`. (The
+`Uninstall` module was fully removed for one round, then restored with a
+new front-end design the round after — see "UI overhaul + Uninstall
+removal" and "Folder redesign, Uninstall restored, ..." above.)
 
 Private/undocumented system APIs (LaunchServices SPI, SkyLight,
 MultitouchSupport, low-level HID key handling) are used where no public
