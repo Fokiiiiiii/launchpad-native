@@ -66,6 +66,16 @@
 "menu.removefromfolder" = "フォルダから削除";
 "menu.showwindows" = "ウインドウを表示";
 "menu.getinfo" = "情報を見る";
+"menu.uninstall" = "アンインストール…";
+"menu.uninstall.tooltip" = "ゴミ箱に入れる前に、削除される内容を確認できます。";
+"uninstall.section.applicationfile" = "アプリケーションファイル";
+"uninstall.section.cache" = "キャッシュ";
+"uninstall.section.preferences" = "環境設定";
+"uninstall.selectall" = "すべて";
+"uninstall.cancel" = "キャンセル";
+"uninstall.movetotrash" = "ゴミ箱に入れる";
+"uninstall.needspermission" = "管理者権限が必要なためスキップ";
+"uninstall.computingsizes" = "計算中…";
 "menu.renamefolder" = "フォルダ名を変更";
 "menu.ungroupfolder" = "グループ解除";
 "grid.renamealert.title" = "名称変更";

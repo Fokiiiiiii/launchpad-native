@@ -66,6 +66,16 @@
 "menu.removefromfolder" = "Remove from Folder";
 "menu.showwindows" = "Show Windows";
 "menu.getinfo" = "Get Info";
+"menu.uninstall" = "Uninstall…";
+"menu.uninstall.tooltip" = "Review what would be removed before anything is trashed.";
+"uninstall.section.applicationfile" = "Application File";
+"uninstall.section.cache" = "Cache";
+"uninstall.section.preferences" = "Preferences";
+"uninstall.selectall" = "All";
+"uninstall.cancel" = "Cancel";
+"uninstall.movetotrash" = "Move to Trash";
+"uninstall.needspermission" = "needs admin permission — skipped";
+"uninstall.computingsizes" = "Calculating…";
 "menu.renamefolder" = "Rename Folder";
 "menu.ungroupfolder" = "Ungroup";
 "grid.renamealert.title" = "Rename";

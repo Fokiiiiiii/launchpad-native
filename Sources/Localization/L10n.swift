@@ -163,8 +163,21 @@ public enum L10n {
     public static var menuRemoveFromFolder: String { string("menu.removefromfolder", "Remove from Folder") }
     public static var menuShowWindows: String { string("menu.showwindows", "Show Windows") }
     public static var menuGetInfo: String { string("menu.getinfo", "Get Info") }
+    public static var menuUninstall: String { string("menu.uninstall", "Uninstall\u{2026}") }
+    public static var menuUninstallTooltip: String { string("menu.uninstall.tooltip", "Review what would be removed before anything is trashed.") }
     public static var menuRenameFolder: String { string("menu.renamefolder", "Rename Folder") }
     public static var menuUngroupFolder: String { string("menu.ungroupfolder", "Ungroup") }
+
+    // MARK: Uninstall panel
+
+    public static var uninstallSectionApplicationFile: String { string("uninstall.section.applicationfile", "Application File") }
+    public static var uninstallSectionCache: String { string("uninstall.section.cache", "Cache") }
+    public static var uninstallSectionPreferences: String { string("uninstall.section.preferences", "Preferences") }
+    public static var uninstallSelectAllLabel: String { string("uninstall.selectall", "All") }
+    public static var uninstallCancelButton: String { string("uninstall.cancel", "Cancel") }
+    public static var uninstallMoveToTrashButton: String { string("uninstall.movetotrash", "Move to Trash") }
+    public static var uninstallNeedsPermissionNotice: String { string("uninstall.needspermission", "needs admin permission — skipped") }
+    public static var uninstallComputingSizesLabel: String { string("uninstall.computingsizes", "Calculating…") }
 
     // MARK: Grid — rename alert, folders
 

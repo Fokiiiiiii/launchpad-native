@@ -18,6 +18,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private let onDidLaunch: () -> Void
     private let onDidCancel: () -> Void
     private let onOpenSettings: () -> Void
+    private let onRequestUninstall: (String) -> Void
 
     private let searchField = NSTextField()
     private let searchIcon = NSImageView()
@@ -30,7 +31,8 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         model: gridModel,
         iconCache: iconCache,
         onLaunch: { [weak self] record in self?.launch(record) },
-        onBackgroundClick: { [weak self] in self?.onDidCancel() }
+        onBackgroundClick: { [weak self] in self?.onDidCancel() },
+        onRequestUninstall: { [weak self] bundleIdentifier in self?.onRequestUninstall(bundleIdentifier) }
     )
 
     init(
@@ -39,7 +41,8 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         iconCache: IconCache,
         onDidLaunch: @escaping () -> Void,
         onDidCancel: @escaping () -> Void,
-        onOpenSettings: @escaping () -> Void
+        onOpenSettings: @escaping () -> Void,
+        onRequestUninstall: @escaping (String) -> Void = { _ in }
     ) {
         self.viewModel = viewModel
         self.gridModel = gridModel
@@ -47,6 +50,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         self.onDidLaunch = onDidLaunch
         self.onDidCancel = onDidCancel
         self.onOpenSettings = onOpenSettings
+        self.onRequestUninstall = onRequestUninstall
         super.init(nibName: nil, bundle: nil)
     }
 

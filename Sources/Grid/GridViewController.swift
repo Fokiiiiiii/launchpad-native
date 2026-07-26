@@ -48,6 +48,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private let iconCache: IconCache
     private let onLaunch: (ApplicationRecord) -> Void
     private let onBackgroundClick: () -> Void
+    private let onRequestUninstall: (String) -> Void
 
     private let collectionView = GridCollectionView()
     private let scrollView = NSScrollView()
@@ -88,12 +89,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         model: GridModel,
         iconCache: IconCache,
         onLaunch: @escaping (ApplicationRecord) -> Void,
-        onBackgroundClick: @escaping () -> Void
+        onBackgroundClick: @escaping () -> Void,
+        onRequestUninstall: @escaping (String) -> Void = { _ in }
     ) {
         self.model = model
         self.iconCache = iconCache
         self.onLaunch = onLaunch
         self.onBackgroundClick = onBackgroundClick
+        self.onRequestUninstall = onRequestUninstall
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -1034,7 +1037,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 hide: { [weak self] in self?.hideApp(record) },
                 removeFromFolder: nil,
                 getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
-                showWindows: { [weak self] in self?.showWindows(for: record, anchorIndexPath: indexPath) }
+                showWindows: { [weak self] in self?.showWindows(for: record, anchorIndexPath: indexPath) },
+                uninstall: { [weak self] in self?.onRequestUninstall(record.bundleIdentifier) }
             )
             return ContextMenuBuilder.menu(for: record, isInFolder: false, actions: actions)
         }

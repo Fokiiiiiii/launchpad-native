@@ -15,6 +15,7 @@ public enum ContextMenuBuilder {
         public var removeFromFolder: (() -> Void)?
         public var getInfo: () -> Void
         public var showWindows: (() -> Void)?
+        public var uninstall: (() -> Void)?
     }
 
     public static func menu(for record: ApplicationRecord, isInFolder: Bool, actions: Actions) -> NSMenu {
@@ -40,6 +41,15 @@ public enum ContextMenuBuilder {
         menu.addItem(.separator())
         if let showWindows = actions.showWindows {
             menu.addItem(makeItem(L10n.menuShowWindows, symbolName: "macwindow.on.rectangle", action: showWindows))
+        }
+
+        // System-protected apps (bundled with the OS) never get an Uninstall
+        // item at all — `RemovalPlanner` collapses to a single `.unknown`
+        // entry for those, so there's nothing useful the item could do.
+        if !record.isSystemProtected, let uninstall = actions.uninstall {
+            let item = makeItem(L10n.menuUninstall, symbolName: "trash", action: uninstall)
+            item.toolTip = L10n.menuUninstallTooltip
+            menu.addItem(item)
         }
 
         menu.addItem(.separator())

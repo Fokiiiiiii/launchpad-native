@@ -33,6 +33,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onDockVisibilityChanged: { [weak self] hideDock in self?.launcherWindowController.updateDockVisibilityPreference(hideDock) },
         onWillClose: { [weak self] in self?.launcherWindowController.reclaimKeyIfVisible() }
     )
+    /// Same floating-over-the-launcher mechanics as `settingsWindowController`
+    /// (level, outside-click dismiss) but rebuilt per target app rather than
+    /// a singleton-ish always-same-view window — see its own doc comment.
+    /// Opening either this or Settings closes the other first (mutual
+    /// exclusivity — simpler than solving general multi-panel coexistence
+    /// between two independent outside-click monitors, and matches the
+    /// reference design, which never shows both at once).
+    private lazy var uninstallPanelWindowController = UninstallPanelWindowController(iconCache: iconCache)
     /// Shown instead of the launcher on the very first cold start (see
     /// `OnboardingState`) — the catalog scan/FSEvents watching still run
     /// unconditionally in the background regardless, so by the time
@@ -63,7 +71,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DiagnosticsLog.appHost.info("LaunchpadNative resident host started")
 
         launcherWindowController.setOnOpenSettings { [weak self] in
-            self?.settingsWindowController.show()
+            guard let self else { return }
+            uninstallPanelWindowController.close()
+            settingsWindowController.show()
+        }
+
+        launcherWindowController.setOnRequestUninstall { [weak self] bundleIdentifier in
+            guard let self,
+                  let record = launcherWindowController.model.allRecords.first(where: { $0.bundleIdentifier == bundleIdentifier })
+            else { return }
+            settingsWindowController.close()
+            uninstallPanelWindowController.show(for: record, allRecords: launcherWindowController.model.allRecords)
         }
 
         Task {

@@ -18,6 +18,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private let iconCache: IconCache
     private var hasAttemptedLegacyImport = false
     private var onOpenSettings: (() -> Void)?
+    private var onRequestUninstall: ((String) -> Void)?
     /// Incremented on every show()/hide() call — a hide() animation's
     /// completion handler checks this before calling `orderOut`, so an
     /// interrupting show() (same-trigger reopen mid-close-animation, or the
@@ -50,6 +51,13 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// circular initializer dependency between the two.
     public func setOnOpenSettings(_ handler: @escaping () -> Void) {
         onOpenSettings = handler
+    }
+
+    /// Set once by the composition root, same reasoning as
+    /// `setOnOpenSettings` — avoids a circular initializer dependency with
+    /// the Uninstall panel window controller.
+    public func setOnRequestUninstall(_ handler: @escaping (String) -> Void) {
+        onRequestUninstall = handler
     }
 
     public func loadGridDocument() async {
@@ -346,6 +354,9 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
                 // reference apps where the grid stays visible behind an
                 // open preferences panel instead of disappearing.
                 self?.onOpenSettings?()
+            },
+            onRequestUninstall: { [weak self] bundleIdentifier in
+                self?.onRequestUninstall?(bundleIdentifier)
             }
         )
 

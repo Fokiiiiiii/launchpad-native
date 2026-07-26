@@ -4,9 +4,12 @@ import Grid
 import SwiftUI
 
 /// A normal (non-panel) window — unlike the launcher, Settings should behave
-/// like an ordinary Mac preferences window: it can be the key/main window,
-/// stays open across Spaces switches, and doesn't auto-dismiss on an
-/// outside click.
+/// like an ordinary Mac preferences window: it can be the key/main window
+/// and stays open across Spaces switches. It *does* auto-dismiss on a click
+/// outside its bounds (Round 12 §7, via `OutsideClickDismissMonitor`) —
+/// added on top of the titlebar close button, not instead of it — matching
+/// the reference design where clicking the still-visible launcher grid
+/// behind Settings closes just the panel, never the launcher itself.
 ///
 /// It does, however, float *above* the launcher rather than behind it:
 /// `LauncherWindowController` used to call `hide()` before ever opening
@@ -40,6 +43,10 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// Built once, alongside the window, and kept alive for the controller's
     /// lifetime.
     private var viewModel: SettingsViewModel?
+    /// Closes Settings on a click outside its bounds (Round 12 §7) — the
+    /// launcher itself must never react to that same click, see
+    /// `OutsideClickDismissMonitor`'s doc comment.
+    private var outsideClickMonitor: OutsideClickDismissMonitor?
 
     public init(
         model: GridModel,
@@ -68,7 +75,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentViewController: hosting)
         window.title = "LaunchpadNative Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 620, height: 560))
+        window.setContentSize(NSSize(width: 620, height: 600))
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
@@ -84,6 +91,10 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.window = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak window] in window?.close() }
+        monitor.start()
+        outsideClickMonitor = monitor
     }
 
     /// Keeps the NSWindow instance around (isReleasedWhenClosed = false) so
@@ -112,9 +123,18 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// to. Deferring to `DispatchQueue.main.async` lets `close()` finish
     /// completely first, so the reclaim has the last word.
     public func windowWillClose(_ notification: Notification) {
+        outsideClickMonitor?.stop()
+        outsideClickMonitor = nil
         DispatchQueue.main.async { [weak self] in
             self?.onWillClose()
         }
+    }
+
+    /// Closes Settings if it's open — a no-op otherwise. Used by the
+    /// composition root to enforce mutual exclusivity with the Uninstall
+    /// panel (Round 12 §7): opening one closes the other first.
+    public func close() {
+        window?.close()
     }
 
     /// Debug-only — see `AppDelegate`'s `LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM`
@@ -123,6 +143,6 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// Accessibility/GUI-scripting permission to actually click the close
     /// button.
     public func debugClose() {
-        window?.close()
+        close()
     }
 }
