@@ -1245,6 +1245,16 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         var reorderTimer: Timer?
         var folderTimer: Timer?
         var edgeTimer: Timer?
+        /// Round 12 §8b: the incoming-page preview shown while the pointer
+        /// dwells in the edge zone, before the dwell timer actually commits
+        /// a page turn. `nil` whenever the pointer isn't currently in an
+        /// edge zone.
+        var edgePeekImageView: NSImageView?
+        /// Last offset/timestamp applied to the peek — reused by §8c to
+        /// approximate a release velocity when the page-turn commit spring
+        /// re-targets a peek that's still easing.
+        var lastPeekOffset: CGFloat?
+        var lastPeekTime: CFTimeInterval?
         let generation: Int
 
         init(sourcePage: Int, sourceOriginalIndex: Int, draggedItem: LayoutItem, originalFrame: NSRect, grabOffset: NSPoint, generation: Int) {
@@ -1268,6 +1278,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private var pendingItemPress: (indexPath: IndexPath, startPoint: NSPoint)?
     private var activeItemDrag: ItemDragSession?
     private var itemDragGeneration = 0
+    /// Round 12 §8c: lightweight velocity approximation for
+    /// `animateLayerTranslation`'s re-targeted springs (reorder-preview
+    /// shift, item-drag page-turn) — keyed by layer identity so a cell
+    /// reused for a *different* record on a later drag never inherits a
+    /// stale velocity estimate. Cleared in `endItemDrag`/`revertItemDrag`.
+    private var lastAnimatedValueByLayer: [ObjectIdentifier: (x: CGFloat, xTime: CFTimeInterval, y: CGFloat, yTime: CFTimeInterval)] = [:]
 
     private static let itemDragThresholdDistance: CGFloat = 6
     private static let itemDragEdgeZoneWidth: CGFloat = 70
@@ -1275,6 +1291,17 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private static let itemDragFolderHoverDelay: TimeInterval = 0.5
     private static let itemDragReorderDebounce: TimeInterval = 0.12
     private static let itemDragFolderZoneInset: CGFloat = 0.2 // ~60% center region
+    /// Round 12 §8a: the pointer must cross this fraction of a cell's width
+    /// *past* the committed slot's own center before the candidate slot is
+    /// allowed to change at all — a real hysteresis band (spec 7.3) around
+    /// the current selection, replacing the old "any raw nearest-slot change
+    /// restarts the debounce timer" behavior, which could still flicker if
+    /// the pointer sat right on a cell boundary.
+    private static let itemDragHysteresisFraction: CGFloat = 0.4
+    /// Round 12 §8b: proportional "peek" of the incoming page shown while
+    /// dwelling in the edge zone, matching the user-provided spec's own
+    /// suggested formula (`previewOffset = -proximity * 30`).
+    private static let itemDragEdgePeekMaxOffset: CGFloat = 30
 
     private func handleItemMouseDown(indexPath: IndexPath, event: NSEvent) {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(indexPath.item) else { return }
@@ -1535,6 +1562,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         evaluateReorderCandidate(session: session, point: point)
         evaluateFolderCandidate(session: session, point: point)
         evaluateEdgeCandidate(session: session, point: point)
+        updateEdgePeek(session: session, point: point)
     }
 
     // MARK: Live reorder preview
@@ -1584,9 +1612,30 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         return point.x > closestFrame.midX ? closestNaturalPos + 1 : closestNaturalPos
     }
 
+    /// Round 12 §8a: real hysteresis around the *committed* slot, not just
+    /// the raw nearest-cell answer — the pointer must cross
+    /// `itemDragHysteresisFraction` of the committed slot's own cell width
+    /// past its center, in the direction of the raw candidate, before a new
+    /// candidate is even considered. The debounce timer below still runs on
+    /// top of that as a secondary safety net against rapid oscillation
+    /// right at the hysteresis boundary itself — it's cheap and this file's
+    /// own history (`insertionSlot`'s doc comment) already established it as
+    /// a reasonable stand-in, so it stays rather than being replaced.
     private func evaluateReorderCandidate(session: ItemDragSession, point: NSPoint) {
-        guard let rawSlot = insertionSlot(forPoint: point, excluding: session.sourceOriginalIndex),
-              rawSlot != session.pendingRawSlot else { return }
+        guard let rawSlot = insertionSlot(forPoint: point, excluding: session.sourceOriginalIndex) else { return }
+        guard rawSlot != session.candidateSlot else {
+            session.reorderTimer?.invalidate()
+            return
+        }
+        let committedFrame = frameForSlot(session.candidateSlot)
+        let threshold = max(committedFrame.width, 1) * Self.itemDragHysteresisFraction
+        let crossedRight = rawSlot > session.candidateSlot && point.x > committedFrame.midX + threshold
+        let crossedLeft = rawSlot < session.candidateSlot && point.x < committedFrame.midX - threshold
+        guard crossedRight || crossedLeft else {
+            session.reorderTimer?.invalidate()
+            return
+        }
+        guard rawSlot != session.pendingRawSlot else { return }
         session.pendingRawSlot = rawSlot
         session.reorderTimer?.invalidate()
         session.reorderTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragReorderDebounce, repeats: false) { [weak self, weak session] _ in
@@ -1621,14 +1670,47 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
+    /// Round 12 §8c: reads the layer's current presentation-value (already
+    /// correct for position-continuity on a mid-flight re-target — no
+    /// "jump") *and* now also approximates its current velocity by
+    /// comparing against the value recorded at the previous re-target on
+    /// this exact layer/keypath pair, handing that off as the new spring's
+    /// `initialVelocity` so a re-targeted reorder-preview shift doesn't
+    /// visually hard-cut to a standstill before easing toward the new slot
+    /// (apple-design §3's interruptibility rule). This is a coarse,
+    /// event-to-event average, not true instantaneous release velocity —
+    /// appropriate given every caller here is a discrete, event-driven
+    /// re-target (a candidate-slot change), not a continuously-scrubbing
+    /// gesture; see `commitPageTurnDuringDrag` for the other velocity-
+    /// handoff case, which reuses the edge-peek's own last-known offset/time
+    /// instead of this generic per-layer cache.
     private func animateLayerTranslation(_ layer: CALayer, toX dx: CGFloat, toY dy: CGFloat) {
         let presentationLayer = layer.presentation() ?? layer
         let currentX = (presentationLayer.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? 0
         let currentY = (presentationLayer.value(forKeyPath: "transform.translation.y") as? CGFloat) ?? 0
+        let now = CACurrentMediaTime()
+        let key = ObjectIdentifier(layer)
+        let previous = lastAnimatedValueByLayer[key]
+        let velocityX = Self.estimateVelocity(from: previous?.x, at: previous?.xTime, to: currentX, at: now)
+        let velocityY = Self.estimateVelocity(from: previous?.y, at: previous?.yTime, to: currentY, at: now)
+        lastAnimatedValueByLayer[key] = (currentX, now, currentY, now)
+
         layer.setValue(dx, forKeyPath: "transform.translation.x")
         layer.setValue(dy, forKeyPath: "transform.translation.y")
-        layer.add(Self.springAnimation(keyPath: "transform.translation.x", from: currentX, to: dx, damping: 0.86, response: 0.24), forKey: "reorderX")
-        layer.add(Self.springAnimation(keyPath: "transform.translation.y", from: currentY, to: dy, damping: 0.86, response: 0.24), forKey: "reorderY")
+        // `CASpringAnimation.initialVelocity` wants a value relative to the
+        // distance being traveled (same convention `endPageDrag`'s own
+        // `relativeVelocity` already uses for the trackpad-swipe path) —
+        // zero when there's no distance left to travel, to avoid dividing
+        // by a near-zero denominator.
+        let relativeVX = abs(dx - currentX) > 0.5 ? velocityX / (dx - currentX) : 0
+        let relativeVY = abs(dy - currentY) > 0.5 ? velocityY / (dy - currentY) : 0
+        layer.add(Self.springAnimation(keyPath: "transform.translation.x", from: currentX, to: dx, damping: 0.86, response: 0.24, initialVelocity: relativeVX), forKey: "reorderX")
+        layer.add(Self.springAnimation(keyPath: "transform.translation.y", from: currentY, to: dy, damping: 0.86, response: 0.24, initialVelocity: relativeVY), forKey: "reorderY")
+    }
+
+    private static func estimateVelocity(from previousValue: CGFloat?, at previousTime: CFTimeInterval?, to currentValue: CGFloat, at currentTime: CFTimeInterval) -> CGFloat {
+        guard let previousValue, let previousTime, currentTime - previousTime > 0.001, currentTime - previousTime < 1.0 else { return 0 }
+        return (currentValue - previousValue) / CGFloat(currentTime - previousTime)
     }
 
     private func resetItemTransform(_ view: NSView) {
@@ -1723,6 +1805,89 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
+    /// Round 12 §8b: continuous, non-animated (per apple-design §1 —
+    /// feedback lives *during* the interaction, not just at its end) preview
+    /// of the incoming page while the pointer dwells in an edge zone, before
+    /// `evaluateEdgeCandidate`'s dwell timer actually commits the turn.
+    /// Reuses `renderPageSnapshot` — the same real-`NSWindow`-hosted
+    /// offscreen renderer already proven safe for the trackpad-swipe page-
+    /// turn's own neighbor snapshot (fixed twice in this file's history:
+    /// once for a permanently-stuck-hidden live grid, once for a fully-
+    /// transparent bitmap from a collection view that was never actually
+    /// hosted in a real window) — rather than inventing a second snapshot
+    /// mechanism for this one.
+    private func updateEdgePeek(session: ItemDragSession, point: NSPoint) {
+        let width = max(collectionView.bounds.width, 1)
+        let zone = Self.itemDragEdgeZoneWidth
+        var proximity: CGFloat = 0
+        var direction = 0
+        if point.x < zone, currentPage > 0 {
+            direction = -1
+            proximity = Self.clamp01((zone - point.x) / zone)
+        } else if point.x > width - zone, currentPage < model.pages.count - 1 {
+            direction = 1
+            proximity = Self.clamp01((point.x - (width - zone)) / zone)
+        }
+        guard direction != 0 else {
+            clearEdgePeek(session: session)
+            return
+        }
+
+        if session.edgePeekImageView == nil {
+            guard let image = renderPageSnapshot(forPage: currentPage + direction, size: collectionView.bounds.size) else { return }
+            let xOffset = direction > 0 ? width : -width
+            // Same parent/frame convention as the trackpad-swipe path's own
+            // `dragNeighborImageView` (`updatePageDrag`) — added to `view`
+            // (not `collectionView`'s actual superview, the scroll view's
+            // internal clip view, which has its own scrolled coordinate
+            // space) positioned just above `scrollView`, sized from
+            // `scrollView.frame` rather than `collectionView.frame`.
+            let imageView = NSImageView(frame: NSRect(
+                x: scrollView.frame.origin.x + xOffset,
+                y: scrollView.frame.origin.y,
+                width: scrollView.frame.width,
+                height: scrollView.frame.height
+            ))
+            imageView.image = image
+            imageView.imageScaling = .scaleNone
+            imageView.wantsLayer = true
+            view.addSubview(imageView, positioned: .above, relativeTo: scrollView)
+            session.edgePeekImageView = imageView
+        }
+
+        let previewOffset = -proximity * Self.itemDragEdgePeekMaxOffset * CGFloat(direction)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        collectionView.wantsLayer = true
+        collectionView.layer?.setValue(previewOffset, forKeyPath: "transform.translation.x")
+        let peekOffset = previewOffset + (direction > 0 ? width : -width)
+        session.edgePeekImageView?.layer?.setValue(peekOffset, forKeyPath: "transform.translation.x")
+        CATransaction.commit()
+        session.lastPeekOffset = previewOffset
+        session.lastPeekTime = CACurrentMediaTime()
+    }
+
+    /// Springs the peek back out (not an instant snap) so backing out of the
+    /// edge zone before the dwell timer fires doesn't read as an abrupt cut
+    /// — this is deliberately the *only* place a bare peek offset is reset
+    /// without an accompanying commit, so it needs its own settle animation
+    /// (the page-turn commit path in `commitPageTurnDuringDrag` handles its
+    /// own transition instead of going through this).
+    private func clearEdgePeek(session: ItemDragSession) {
+        guard let peekImageView = session.edgePeekImageView else { return }
+        let lastOffset = session.lastPeekOffset ?? 0
+        collectionView.layer?.add(Self.springAnimation(keyPath: "transform.translation.x", from: lastOffset, to: 0, damping: 0.86, response: 0.24), forKey: "edgePeekRevert")
+        collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
+        peekImageView.removeFromSuperview()
+        session.edgePeekImageView = nil
+        session.lastPeekOffset = nil
+        session.lastPeekTime = nil
+    }
+
+    private static func clamp01(_ value: CGFloat) -> CGFloat {
+        min(max(value, 0), 1)
+    }
+
     private func commitPageTurnDuringDrag(session: ItemDragSession, direction: Int) {
         let targetPage = currentPage + direction
         guard model.pages.indices.contains(targetPage) else { return }
@@ -1736,14 +1901,49 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // re-evaluated" sequence in 9.4).
         for item in collectionView.visibleItems() { resetItemTransform(item.view) }
 
+        // Round 12 §8c: hand off the peek's own in-flight velocity to the
+        // commit spring, rather than starting fresh from zero — the peek
+        // (§8b) is very likely still easing when the dwell timer fires this,
+        // and a zero-velocity restart here is exactly the "hard cut" apple-
+        // design §3 warns against.
         let width = max(collectionView.bounds.width, 1)
         let offset: CGFloat = direction > 0 ? -width : width
+        let presentationX = (collectionView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? 0
+        let rawVelocity = Self.estimateVelocity(from: session.lastPeekOffset, at: session.lastPeekTime, to: presentationX, at: CACurrentMediaTime())
+        let relativeVelocity = abs(offset - presentationX) > 1 ? rawVelocity / (offset - presentationX) : 0
+        let peekImageView = session.edgePeekImageView
+        session.edgePeekImageView = nil // this function now owns the transition, not clearEdgePeek
+        session.lastPeekOffset = nil
+        session.lastPeekTime = nil
+
         collectionView.wantsLayer = true
-        collectionView.layer?.add(Self.springAnimation(keyPath: "transform.translation.x", from: 0, to: offset, damping: 1.0, response: 0.28), forKey: "itemDragPageTurnOut")
+        let spring = Self.springAnimation(keyPath: "transform.translation.x", from: presentationX, to: offset, damping: 1.0, response: 0.28, initialVelocity: relativeVelocity)
+        collectionView.layer?.add(spring, forKey: "itemDragPageTurnOut")
         collectionView.layer?.setValue(offset, forKeyPath: "transform.translation.x")
+        // The peek image (if one was already showing) rides out at the same
+        // damping/response/velocity — same motion "feel" — rather than
+        // being torn down abruptly. It needs its own `CASpringAnimation`
+        // instance (not the same one reused) since it's sitting a constant
+        // `±width` away from the collection view and therefore has its own
+        // `from`/`to` values, but velocity is a rate and is unaffected by
+        // that constant offset, so handing off the exact same
+        // `relativeVelocity` to both is correct.
+        if let peekImageView {
+            let peekOffsetConstant: CGFloat = direction > 0 ? width : -width
+            let peekCurrentX = (peekImageView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? (presentationX + peekOffsetConstant)
+            let peekTarget = offset + peekOffsetConstant
+            let peekSpring = Self.springAnimation(keyPath: "transform.translation.x", from: peekCurrentX, to: peekTarget, damping: 1.0, response: 0.28, initialVelocity: relativeVelocity)
+            peekImageView.layer?.add(peekSpring, forKey: "itemDragPageTurnOut")
+            peekImageView.layer?.setValue(peekTarget, forKeyPath: "transform.translation.x")
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) { [weak self] in
             Task { @MainActor in
+                // Torn down unconditionally, even if the guard below bails
+                // (stale/superseded drag) — this function already took
+                // ownership of `peekImageView` from `session` above, so
+                // nothing else will clean it up if this early-returns.
+                peekImageView?.removeFromSuperview()
                 guard let self, self.activeItemDrag === session, session.generation == self.itemDragGeneration else { return }
                 self.currentPage = targetPage
                 self.collectionView.reloadData()
@@ -1769,6 +1969,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func endItemDrag(session: ItemDragSession) {
         session.invalidateTimers()
         activeItemDrag = nil
+        clearEdgePeek(session: session)
+        lastAnimatedValueByLayer.removeAll()
 
         let hasFolderTarget = session.folderCandidateOriginalIndex != nil
         DiagnosticsLog.grid.notice("endItemDrag: committing reorder to slot \(session.candidateSlot, privacy: .public), folderTarget=\(hasFolderTarget, privacy: .public)")
@@ -1846,6 +2048,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func revertItemDrag(session: ItemDragSession) {
         session.invalidateTimers()
         activeItemDrag = nil
+        clearEdgePeek(session: session)
+        lastAnimatedValueByLayer.removeAll()
         // See endItemDrag's doc comment: reset before stopWobble(), not
         // after, so the reset's own transform write still has an active
         // animation on these layers to piggyback its repaint on.
