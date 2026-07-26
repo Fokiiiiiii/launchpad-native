@@ -1465,6 +1465,137 @@ still use the original design (a generic folder glyph + count badge,
 plain grid of labeled icons) rather than the reference's content-preview
 tile and label-free row.
 
+## UI overhaul + Uninstall removal (2026-07-26)
+
+A large batch of feedback (with reference screenshots from a competing
+paid launcher, layout/visual inspiration only — no branding, copy, or
+paywall gating copied) plus one Explore-agent audit surfaced a real
+structural bug and a long list of polish requests. Two decisions were
+confirmed with the user up front via AskUserQuestion: (1) remove the
+Uninstall feature from Settings entirely, including its backend module,
+not just hide the UI; (2) extend the "•••" quick menu with a Sort By
+submenu only (custom/name/date added/last used) — no other items from
+the reference image. Everything below was implemented across four
+parallel workstreams (Settings, search bar + menus, grid/folder
+rendering, page dots) plus one done directly first (Uninstall removal,
+since the others' diffs depend on its edits to shared files landing or
+being reconciled).
+
+- **Icon size setting was structurally almost a no-op.**
+  `GridViewController.currentIconSize` computed size mainly from grid
+  geometry (`0.55 * cellSize`), with the user's `iconSize` setting only
+  used as a `* 1.5` ceiling that almost never bound in practice. Fixed by
+  inverting the formula: `iconSize` is now the primary value, and cell
+  geometry (minus a fixed label allowance) is the safety ceiling that
+  prevents overflow. At the default grid this looks unchanged; at a
+  loose grid (e.g. 6 columns × 4 rows, 160pt setting) it now actually
+  reaches the requested size instead of silently capping around 105pt.
+- **Uninstall removed completely.** Not just the Settings tab UI —
+  `Sources/Uninstall/` (ownership evidence, removal planner/executor),
+  `Tools/UninstallFixtureProbe`, `Tests/UninstallTests`, the
+  `Scripts/build-uninstall-fixture.sh` fixture script, and the
+  `Package.swift` target definitions for all of it are gone. The
+  right-click menu's "Uninstall…" item and its `onRequestUninstall`
+  wiring through `GridViewController` → `LauncherViewController` →
+  `LauncherWindowController` → `AppDelegate` are removed too, along with
+  the debug-only `LAUNCHPAD_DEBUG_SHOW_UNINSTALL` hook. `swift test`
+  count dropped from 95 to 77 as a direct, expected result.
+- **Settings is now fully live — no Apply button anywhere.** Every
+  Settings control (columns, rows, icon size, layout mode, all trigger
+  toggles/hot corners/multitouch settings) went from staged
+  `@Published` properties committed by a manual "Apply" button to
+  `didSet`-driven immediate application. The one deliberate exception:
+  the hotkey recorder's key code and modifiers are *not* independently
+  reactive (a half-formed combo would register a broken global hotkey
+  mid-edit) — `HotkeyRecorderView` gained an `onCommit` callback that
+  fires once both are known, and that's the single commit point. The
+  icon-size slider updates the grid on every tick but debounces its
+  disk write by 0.3s so dragging doesn't hammer `layout.json`.
+- **Context menu (right-click on an app) now shows an SF Symbol per
+  item** — Open, Open New Instance, Show in Finder, Add to Dock, Rename,
+  Hide, Remove from Folder, Show Windows, Get Info, Rename Folder.
+  Verified with a real `CGEventPost` right-click + screenshot: every
+  item renders its icon correctly.
+- **"•••" quick menu gained a Sort By submenu** (Custom/Name/Date
+  Added/Last Used, reusing the existing `SortMode`/`applySortMode`
+  already backing the Settings picker) — confirmed present with all 4
+  entries via a direct Accessibility-tree query of the live menu, not
+  just a screenshot.
+- **Folder icons now show a real content-preview tile.** New
+  `FolderIconComposer` composites up to 4 of the folder's actual app
+  icons into a 2×2 rounded tile (`NSImage.lockFocus`-based, matching the
+  real iOS/macOS Springboard folder convention), replacing the old
+  generic `folder.fill` glyph + red count badge. Uses the same
+  stale-cell request-key guard as the existing async app-icon fetch to
+  avoid flashing a stale thumbnail into a reused/scrolled-away cell.
+- **Folder popover is icon-only now** — no per-item name label under
+  each app (the folder's own name is already shown once at the top of
+  the popover), tightened to a 64×64 grid. `configureAsApp` gained a
+  `showsLabel` parameter for this rather than a second code path.
+- **Oversized click/drag hit-test area fixed.** `GridCellItem.contentHitTestFrame`
+  used to include the label's full cell-width frame regardless of the
+  app name's actual rendered length, so short names (e.g. "TV") had a
+  hit target as wide as the whole cell. Now capped at the label's actual
+  rendered text width.
+- **Search icon's remaining visual misalignment fixed** — it previously
+  had no explicit width/height constraints (just intrinsic size) and no
+  optical-center correction; added an explicit 20×20 size plus a 1pt
+  `centerY` offset for the magnifying glass's off-center glyph shape.
+- **Trackpad page-swipe sensitivity increased**: `minimumEngageDistance`
+  15pt → 10pt (not lower — this file's own history includes a real
+  incident where too-low/no threshold caused stray-touch false triggers
+  that combined badly with a stuck drag overlay). The unrelated discrete
+  mouse-wheel cooldown (0.35s) was intentionally left unchanged — the
+  user's initial report of "sluggish transitions" turned out, after two
+  rounds of clarification, to mean the swipe *distance* threshold, not
+  the cooldown.
+- **Discrete page-transition animation shortened**: fade-out 0.14s→0.10s,
+  slide-out spring response 0.22→0.20, fade-in 0.20s→0.13, slide-in
+  spring response 0.3→0.24 (damping unchanged at 1.0 — no bounce, this
+  is a discrete jump, not a momentum-driven gesture). Total time-to-visible
+  drops from roughly 0.34s to roughly 0.23s.
+- **Page-indicator dot color resolution hardened defensively.** A dot
+  visibility complaint from an earlier round turned out — after careful
+  recalculation of the screen-space crop coordinates used to inspect it
+  — to likely have been a screenshot-cropping mistake on the verifier's
+  side rather than a real rendering bug (the dot was present, correctly
+  colored, just small and low-contrast). The defensive fix (resolving
+  `NSColor.labelColor`/`.tertiaryLabelColor` against `effectiveAppearance`
+  via `performAsCurrentDrawingAppearance`, re-run on
+  `viewDidMoveToWindow`/`viewDidChangeEffectiveAppearance`) is kept
+  regardless, since it's a correct hardening even though its necessity
+  couldn't be confirmed.
+
+**Verification.** `swift build`/`swift test` (77/77) and a release build
+all succeed. Real Accessibility-driven testing (`CGEventPost` clicks +
+real `screencapture`, plus direct Accessibility-tree queries via
+`osascript`/System Events for cases a screenshot crop could get wrong)
+confirmed: the right-click menu's SF Symbols, the quick menu's Sort By
+submenu (all 4 entries present in the live menu's AX tree), the folder
+popover's icon-only layout, and the Settings window's overlay
+presentation with the new 5-tab layout and no Apply button anywhere.
+Real `layout.json` was re-checked clean (`ゲーム`/`その他`, 5/10 items,
+matching the known-good baseline) before and after this round's
+interactive testing.
+
+**A real crash was found during this round's testing, unrelated to any
+of the above changes.** While repeatedly quitting and relaunching the
+app in quick succession (to recover the launcher window after it
+correctly auto-hid on losing app focus — by-design behavior, not a bug),
+the app crashed once with `EXC_BREAKPOINT`/`SIGTRAP` inside Apple's
+private `MultitouchSupport` framework (`mt_StopDequeueOfMultitouchDataFromDevice`
+→ `MTDeviceStop` → `__MTDeviceRelease` → `CFRelease`), consistent with an
+over-release of a multitouch device handle under rapid start/stop churn.
+This is pre-existing code (`MultitouchGestureTrigger`'s device lifecycle,
+untouched by this round) and was not reproduced under normal single-launch
+use — flagged here for awareness, not fixed in this round.
+
+**Not addressed this round** (explicitly out of scope, confirmed via
+AskUserQuestion): any Pro/paywall-style badge, membership, or activation
+UI from the reference screenshots — this app is free/OSS and copies none
+of that. Settings' tab count/structure itself (still 5 tabs) was not
+changed beyond the cleanup above.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
@@ -1489,9 +1620,10 @@ open "$SCRATCH/LaunchpadNative.app"
 ## Architecture
 
 See module boundaries and phase plan in `Sources/` as they land:
-`AppHost`, `Diagnostics`, and (in later phases) `Catalog`, `Launcher`, `Grid`,
-`Persistence`, `Triggers`, `PrivateAPI`, `WindowBrowser`, `Uninstall`,
-`Settings`.
+`AppHost`, `Diagnostics`, `Catalog`, `Launcher`, `Grid`, `Persistence`,
+`Triggers`, `PrivateAPI`, `WindowBrowser`, `Settings`. (An `Uninstall`
+module existed for one round and was removed entirely — see the
+"UI overhaul + Uninstall removal" section above.)
 
 Private/undocumented system APIs (LaunchServices SPI, SkyLight,
 MultitouchSupport, low-level HID key handling) are used where no public
