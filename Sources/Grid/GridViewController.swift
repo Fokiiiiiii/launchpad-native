@@ -481,10 +481,24 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// settling duration for visual accuracy, but `beginPageDrag`'s fixed
     /// `dragSafetyNetTimeout` fallback is the real safety net if that
     /// duration ever misbehaves.
+    /// Round 13 §G: fixed, not width-relative — "even the slightest
+    /// deliberate swipe" should commit regardless of screen size/column
+    /// count, and a fixed point value reads as more predictable/tunable
+    /// than a width fraction that changes with icon size. Comfortably above
+    /// `GridCollectionView.minimumEngageDistance` (10pt — the separate,
+    /// unrelated gate for "does this even count as a horizontal gesture at
+    /// all," checked before this function is ever reached), leaving real
+    /// room for a deliberate reversal to still land under the commit line.
+    /// `deltaX`/`velocity` here are already the gesture's *final* values at
+    /// release (not a stored peak), so reversing an in-progress swipe back
+    /// toward the original page already reads as a cancel for free — no
+    /// separate "was this reversed" logic is needed.
+    private static let pageDragCommitDistance: CGFloat = 48
+
     private func endPageDrag(deltaX: CGFloat, velocity: CGFloat) {
         let width = max(collectionView.bounds.width, 1)
         let hasNeighbor = dragNeighborImageView != nil
-        let distanceThreshold = width * 0.3
+        let distanceThreshold = Self.pageDragCommitDistance
         let flickVelocityThreshold: CGFloat = 400 // points/sec
 
         var commit = false
@@ -789,12 +803,21 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         DiagnosticsLog.launcher.info("debugSimulatePageDrag: starting at page \(startPage, privacy: .public), commit=\(commit, privacy: .public)")
         beginPageDrag()
         let width = max(collectionView.bounds.width, 1)
-        let targetFraction: CGFloat = commit ? 0.5 : 0.05
+        // Round 13 §G: `endPageDrag`'s commit threshold became a fixed
+        // ~48pt (was `width * 0.3`) — the abort case must stay a small
+        // fixed delta clearly *below* that new threshold regardless of
+        // screen width; the old `width * 0.05` fraction would now exceed 48pt
+        // on any normal-sized screen and flip this "should abort" simulation
+        // into incorrectly committing. The commit case can stay width-
+        // relative since half the page width always clears 48pt.
+        let commitTargetDeltaX: CGFloat = -width * 0.5
+        let abortTargetDeltaX: CGFloat = -20
+        let targetDeltaX = commit ? commitTargetDeltaX : abortTargetDeltaX
         let steps = 10
         for step in 1...steps {
-            updatePageDrag(deltaX: -width * targetFraction * CGFloat(step) / CGFloat(steps))
+            updatePageDrag(deltaX: targetDeltaX * CGFloat(step) / CGFloat(steps))
         }
-        endPageDrag(deltaX: -width * targetFraction, velocity: commit ? -900 : 0)
+        endPageDrag(deltaX: targetDeltaX, velocity: commit ? -900 : 0)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
