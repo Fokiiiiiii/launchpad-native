@@ -162,6 +162,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+            // Debug-only (Round 13 §E): clicks the search field for real,
+            // then dispatches real synthetic keyDown events per character —
+            // exercises the real field editor's layout, unlike
+            // `LAUNCHPAD_DEBUG_SEARCH_QUERY` above (which bypasses the
+            // field editor entirely) — to diagnose "検索欄が入力時だけ
+            // おかしい". Combine with `LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING=1`
+            // to also log the field editor's geometry at each keystroke.
+            if let text = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_TYPE_SEARCH_FIELD"], !text.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    self?.launcherWindowController.debugSimulateSearchFieldTyping(text)
+                }
+            }
+
             // Custom sources (2.13) are only known once the document has
             // loaded, so the scanner is created here rather than at
             // declaration time.

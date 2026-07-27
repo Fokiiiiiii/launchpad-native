@@ -114,6 +114,18 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             attributes: [.kern: -0.4, .foregroundColor: NSColor.placeholderTextColor]
         )
         searchField.font = .systemFont(ofSize: 20, weight: .regular)
+        // Round 13 §E: confirmed via real measurement (`log stream` with
+        // `LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING=1`) that without this, the
+        // field editor's typed text falls back to `.controlTextColor` — a
+        // flat, non-vibrancy-aware color meant for opaque controls, not
+        // the translucent glass search bar it actually sits on. The
+        // placeholder above already got this right via its explicit
+        // `.placeholderTextColor`; `GridCellItem`'s app-name labels
+        // (`Sources/Grid/GridCellItem.swift`) establish `.labelColor` as
+        // this codebase's convention for legible text over glass/blur
+        // materials — this was the one place that convention wasn't
+        // followed, and is the root cause of "入力時だけ検索の文字がおかしい".
+        searchField.textColor = .labelColor
         searchField.isBordered = false
         searchField.drawsBackground = false
         searchField.focusRingType = .none
@@ -324,6 +336,52 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         DiagnosticsLog.launcher.info("debugSimulateSearchFieldClick: after sendEvent, firstResponder=\(String(describing: window.firstResponder), privacy: .public), windowIsVisible=\(window.isVisible, privacy: .public), windowIsKey=\(window.isKeyWindow, privacy: .public)")
     }
 
+    /// Round 13 §E debug-only entry point (`LAUNCHPAD_DEBUG_TYPE_SEARCH_FIELD`,
+    /// wired in `AppDelegate`) — `debugSetSearchQuery` sets `stringValue`
+    /// directly and never attaches a real field editor, so it can't
+    /// reproduce "検索欄が入力時だけおかしい" (only shows up while a real
+    /// field editor is actively receiving characters). Focuses the field
+    /// via `makeFirstResponder` (the same real API `viewDidAppear` already
+    /// uses, not the synthetic click hook — see note below) to establish
+    /// a real field editor, then dispatches real synthetic keyDown events
+    /// per character so the field editor's layout is exercised exactly as
+    /// it would be by a user typing.
+    ///
+    /// Deliberately does NOT reuse `debugSimulateSearchFieldClick`: while
+    /// diagnosing this bug, that hook was found to hang indefinitely after
+    /// dispatching its synthetic mouseDown — the process stays alive but
+    /// never logs its "after sendEvent" line and stops responding. Root
+    /// cause not yet investigated (likely `NSTextView.mouseDown`'s internal
+    /// tracking loop blocking on a real subsequent event that the
+    /// synchronously-issued synthetic mouseUp can't satisfy via
+    /// `sendEvent`), and is a separate pre-existing issue from this
+    /// Round's search-field-during-typing bug — flagged for follow-up, not
+    /// fixed here to keep this diagnosis unblocked.
+    func debugSimulateSearchFieldTyping(_ text: String) {
+        guard let window = view.window else {
+            DiagnosticsLog.launcher.info("debugSimulateSearchFieldTyping: no window")
+            return
+        }
+        window.makeFirstResponder(searchField)
+        for character in text {
+            let characters = String(character)
+            guard let keyDown = NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber,
+                context: nil,
+                characters: characters,
+                charactersIgnoringModifiers: characters,
+                isARepeat: false,
+                keyCode: 0
+            ) else { continue }
+            window.sendEvent(keyDown)
+        }
+        logSearchFieldEditingGeometryIfEnabled(context: "afterDebugTyping")
+    }
+
     func reloadGrid() {
         gridViewController.reload()
         applySearchResultsLayoutMetrics()
@@ -462,11 +520,30 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     func controlTextDidBeginEditing(_ obj: Notification) {
         if let fieldEditor = obj.userInfo?["NSFieldEditor"] as? NSTextView {
             fieldEditor.typingAttributes[.kern] = -0.4
+            logSearchFieldEditingGeometryIfEnabled(context: "didBeginEditing")
         }
     }
 
     func controlTextDidChange(_ obj: Notification) {
         applyQuery(searchField.stringValue)
+        logSearchFieldEditingGeometryIfEnabled(context: "didChange")
+    }
+
+    /// Round 13 §E: diagnoses "検索欄が入力時だけおかしい" — `SearchFieldCell
+    /// .drawingRect(forBounds:)` only governs the non-editing display
+    /// (placeholder/committed text); while a real field editor `NSTextView`
+    /// is attached during active typing, its own `textContainerInset` is a
+    /// separate value this override never touches. Logs both sides so the
+    /// mismatch (if any) shows up in `log stream` instead of being guessed
+    /// at — gated behind `LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING` since this
+    /// fires on every keystroke.
+    private func logSearchFieldEditingGeometryIfEnabled(context: String) {
+        guard ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING"] == "1" else { return }
+        let fieldEditor = view.window?.fieldEditor(false, for: searchField) as? NSTextView
+        let cellDrawingRect = (searchField.cell as? SearchFieldCell)?.drawingRect(forBounds: searchField.bounds)
+        DiagnosticsLog.launcher.info("""
+            searchFieldEditingGeometry[\(context, privacy: .public)]: fieldEditor.frame=\(String(describing: fieldEditor?.frame), privacy: .public), fieldEditor.textContainerInset=\(String(describing: fieldEditor?.textContainerInset), privacy: .public), cellDrawingRect=\(String(describing: cellDrawingRect), privacy: .public), searchField.bounds=\(String(describing: self.searchField.bounds), privacy: .public), searchField.textColor=\(String(describing: self.searchField.textColor), privacy: .public), fieldEditor.textColor=\(String(describing: fieldEditor?.textColor), privacy: .public), fieldEditor.typingAttributes=\(String(describing: fieldEditor?.typingAttributes), privacy: .public), fieldEditor.string=\(String(describing: fieldEditor?.string), privacy: .public)
+            """)
     }
 
     private func applyQuery(_ query: String) {
