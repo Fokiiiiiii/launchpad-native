@@ -1170,16 +1170,36 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             guard let record = model.record(for: id) else { return cell }
             let cache = iconCache
             let displayName = model.displayName(for: record)
-            cell.configureAsApp(record: record, icon: NSImage(), isSelected: isSelected, iconSize: iconSize, displayName: displayName)
             let expectedKey = record.iconCacheKey
-            Task { @MainActor in
-                let icon = await cache.icon(for: record)
-                // The cell may have been recycled for a different record by
-                // the time this fetch completes (reloadData() fires on
-                // every grid-settings Apply and search keystroke) — only
-                // apply if it's still showing what we started fetching for.
-                guard cell.currentRequestKey == expectedKey else { return }
-                cell.configureAsApp(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize, displayName: displayName)
+            // Round 13 §F: diagnosed "ページ移動後にアプリアイコンが一瞬
+            // ちらつく/消える" — this cell used to *always* configure with a
+            // blank `NSImage()` first and only pick up the real icon once
+            // the `Task` below completed, even when `cache` already had the
+            // icon warm in memory (`prefetchAdjacentPageIcons()` normally
+            // ensures this for a page reached via a normal swipe/jump).
+            // Entering `Task { @MainActor in ... }` always defers to a
+            // later run-loop turn no matter how fast the awaited work
+            // resolves, so every `jumpToPage` reload guaranteed at least one
+            // rendered frame of blank icons before — this is the flicker.
+            // Mirrors `SnapshotDataSource`'s existing synchronous
+            // `cachedIconIfAvailable` peek (used for the drag-neighbor
+            // snapshot) — falling back to the async path only on a genuine
+            // cache miss.
+            if let cachedIcon = cache.cachedIconIfAvailable(for: record) {
+                DiagnosticsLog.grid.debug("itemForRepresentedObjectAt: icon cache hit for \(record.bundleIdentifier, privacy: .public)")
+                cell.configureAsApp(record: record, icon: cachedIcon, isSelected: isSelected, iconSize: iconSize, displayName: displayName)
+            } else {
+                DiagnosticsLog.grid.debug("itemForRepresentedObjectAt: icon cache miss for \(record.bundleIdentifier, privacy: .public), fetching async")
+                cell.configureAsApp(record: record, icon: NSImage(), isSelected: isSelected, iconSize: iconSize, displayName: displayName)
+                Task { @MainActor in
+                    let icon = await cache.icon(for: record)
+                    // The cell may have been recycled for a different record by
+                    // the time this fetch completes (reloadData() fires on
+                    // every grid-settings Apply and search keystroke) — only
+                    // apply if it's still showing what we started fetching for.
+                    guard cell.currentRequestKey == expectedKey else { return }
+                    cell.configureAsApp(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize, displayName: displayName)
+                }
             }
         case .folder(let folderID):
             let folder = model.folders[folderID]
