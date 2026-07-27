@@ -19,6 +19,12 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private var hasAttemptedLegacyImport = false
     private var onOpenSettings: (() -> Void)?
     private var onRequestUninstall: ((String) -> Void)?
+    /// Round 13 §A: fired from `hide()` (see its own doc comment for why
+    /// that single insertion point covers every path that can hide the
+    /// launcher) so Settings/the Uninstall panel can close themselves
+    /// whenever the launcher itself goes away — neither should ever be
+    /// visible while the launcher isn't.
+    private var onDidHide: (() -> Void)?
     /// Incremented on every show()/hide() call — a hide() animation's
     /// completion handler checks this before calling `orderOut`, so an
     /// interrupting show() (same-trigger reopen mid-close-animation, or the
@@ -36,8 +42,16 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// outside-click monitor kept seeing a stale `false` while the window
     /// was still genuinely on screen, so clicking outside silently did
     /// nothing). `NSWindow.isVisible` is always the ground truth.
-    private var isVisible: Bool {
+    public var isVisible: Bool {
         window?.isVisible ?? false
+    }
+
+    /// Round 13 §A: lets Settings/the Uninstall panel center themselves on
+    /// whichever screen the launcher is actually showing on, instead of
+    /// `NSWindow.center()`'s default (the main screen, which has no
+    /// relationship to the launcher on a multi-display setup).
+    public var currentScreen: NSScreen? {
+        window?.screen
     }
 
     public init(iconCache: IconCache, layoutStore: LayoutStore) {
@@ -58,6 +72,12 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// the Uninstall panel window controller.
     public func setOnRequestUninstall(_ handler: @escaping (String) -> Void) {
         onRequestUninstall = handler
+    }
+
+    /// Set once by the composition root, same reasoning as
+    /// `setOnOpenSettings`/`setOnRequestUninstall`.
+    public func setOnDidHide(_ handler: @escaping () -> Void) {
+        onDidHide = handler
     }
 
     public func loadGridDocument() async {
@@ -241,6 +261,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
 
     public func hide() {
         guard let window, window.isVisible else { return }
+        onDidHide?()
         NSApp.presentationOptions.remove(.autoHideMenuBar)
         animationGeneration += 1
         let generation = animationGeneration

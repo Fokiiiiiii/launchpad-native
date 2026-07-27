@@ -79,6 +79,7 @@ public enum L10n {
 
     public static var quickMenuAccessibilityLabel: String { string("launcher.quickmenu.accessibility", "View options") }
     public static var openSettingsMenuItem: String { string("launcher.quickmenu.opensettings", "Open Settings…") }
+    public static var closePanelAccessibilityLabel: String { string("panel.close.accessibility", "Close") }
 
     // MARK: Settings — Triggers tab
 

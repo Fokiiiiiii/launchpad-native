@@ -24,7 +24,7 @@ import SwiftUI
 /// the launcher is currently in.
 @MainActor
 public final class SettingsWindowController: NSObject, NSWindowDelegate {
-    private var window: NSWindow?
+    private var window: DismissableWindow?
     private let model: GridModel
     /// Re-applies trigger settings to the live `TriggerCoordinator` and
     /// returns whether F4 actually activated — so the Triggers tab can tell
@@ -47,6 +47,9 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// launcher itself must never react to that same click, see
     /// `OutsideClickDismissMonitor`'s doc comment.
     private var outsideClickMonitor: OutsideClickDismissMonitor?
+    /// Round 13 §A: set by `closeWithoutKeyReclaim()` right before closing
+    /// — see that method's doc comment for the race it exists to avoid.
+    private var suppressNextWillCloseReclaim = false
 
     public init(
         model: GridModel,
@@ -61,8 +64,16 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         super.init()
     }
 
-    public func show() {
+    /// - Parameter screen: the launcher's own current screen (Round 13 §A)
+    ///   — Settings centers on it instead of `NSWindow.center()`'s main-
+    ///   screen default, which has no relationship to where the launcher
+    ///   itself is actually showing on a multi-display setup. Recomputed
+    ///   on *every* call, even when the window already exists — otherwise a
+    ///   kept-alive Settings window reopens at a stale position if the
+    ///   launcher moved to a different screen since it was last shown.
+    public func show(on screen: NSScreen?) {
         if let window {
+            positionWindow(window, on: screen)
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -71,14 +82,28 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         let viewModel = SettingsViewModel(model: model, onTriggerSettingsChanged: onTriggerSettingsChanged, onDockVisibilityChanged: onDockVisibilityChanged)
         viewModel.refreshF4Status()
         self.viewModel = viewModel
-        let hosting = NSHostingController(rootView: SettingsView(viewModel: viewModel))
-        let window = NSWindow(contentViewController: hosting)
-        window.title = "LaunchpadNative Settings"
-        window.styleMask = [.titled, .closable, .miniaturizable]
+        let hosting = NSHostingController(rootView: SettingsView(viewModel: viewModel, onClose: { [weak self] in self?.close() }))
+        let window = DismissableWindow(contentViewController: hosting)
+        window.onCancel = { [weak self] in self?.close() }
+        // Round 13 §A: no native chrome at all — matches the reference
+        // design's borderless floating-card look. `.titled` is kept (not
+        // `.borderless`) since `.fullSizeContentView` needs it to behave
+        // sensibly, but the titlebar itself is made fully transparent/
+        // titleless and every standard button is force-hidden — a
+        // transparent titlebar alone still leaves the traffic-light buttons
+        // visible, it only hides the bar's background.
+        window.title = ""
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.standardWindowButton(.closeButton)?.isHidden = true
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+        window.isMovableByWindowBackground = true
         window.setContentSize(NSSize(width: 620, height: 600))
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.center()
+        positionWindow(window, on: screen)
         // One level above the Dock — and therefore above `LauncherWindow`
         // (`dockLevel - 1`) too — so Settings renders in front of the still-
         // visible launcher grid instead of behind it. `.canJoinAllSpaces`/
@@ -95,6 +120,19 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak window] in window?.close() }
         monitor.start()
         outsideClickMonitor = monitor
+    }
+
+    private func positionWindow(_ window: NSWindow, on screen: NSScreen?) {
+        guard let screen else {
+            window.center()
+            return
+        }
+        let target = screen.visibleFrame
+        let origin = NSPoint(
+            x: target.midX - window.frame.width / 2,
+            y: target.midY - window.frame.height / 2
+        )
+        window.setFrameOrigin(origin)
     }
 
     /// Keeps the NSWindow instance around (isReleasedWhenClosed = false) so
@@ -125,6 +163,9 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     public func windowWillClose(_ notification: Notification) {
         outsideClickMonitor?.stop()
         outsideClickMonitor = nil
+        let shouldReclaim = !suppressNextWillCloseReclaim
+        suppressNextWillCloseReclaim = false
+        guard shouldReclaim else { return }
         DispatchQueue.main.async { [weak self] in
             self?.onWillClose()
         }
@@ -134,6 +175,23 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// composition root to enforce mutual exclusivity with the Uninstall
     /// panel (Round 12 §7): opening one closes the other first.
     public func close() {
+        window?.close()
+    }
+
+    /// Round 13 §A: used specifically when the *launcher itself* is hiding
+    /// (`LauncherWindowController.onDidHide`) — `hide()` fades the launcher
+    /// out over ~0.3s and only calls `orderOut` (flipping `isVisible` to
+    /// `false`) once that completes, but `windowWillClose`'s `onWillClose`
+    /// fires on the *next run-loop turn*, well before that fade finishes.
+    /// A plain `close()` here would call `reclaimKeyIfVisible()` while the
+    /// launcher's `window.isVisible` is still `true` — if the launcher is
+    /// hiding because the user switched to a *different* app, this would
+    /// force-reactivate LaunchpadNative and steal focus back moments after
+    /// the user deliberately switched away. There's nothing to reclaim onto
+    /// in this case anyway (the launcher is also on its way out), so this
+    /// entry point skips the handshake entirely.
+    public func closeWithoutKeyReclaim() {
+        suppressNextWillCloseReclaim = true
         window?.close()
     }
 

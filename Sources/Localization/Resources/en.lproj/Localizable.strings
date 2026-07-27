@@ -19,6 +19,7 @@
 "settings.grid.layout.verticalscroll" = "Vertical Scroll";
 "launcher.quickmenu.accessibility" = "View options";
 "launcher.quickmenu.opensettings" = "Open Settings…";
+"panel.close.accessibility" = "Close";
 "settings.grid.sortby" = "Sort By";
 "settings.grid.sortby.custom" = "Custom";
 "settings.grid.sortby.name" = "Name";

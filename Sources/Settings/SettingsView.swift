@@ -5,19 +5,31 @@ import SwiftUI
 
 public struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
+    let onClose: () -> Void
 
-    public init(viewModel: SettingsViewModel) {
+    public init(viewModel: SettingsViewModel, onClose: @escaping () -> Void = {}) {
         self.viewModel = viewModel
+        self.onClose = onClose
     }
 
     public var body: some View {
-        TabView(selection: $viewModel.selectedTab) {
-            generalTab.tabItem { Label(L10n.tabGeneral, systemImage: "gearshape") }.tag(SettingsTab.general)
-            screenTab.tabItem { Label(L10n.tabScreen, systemImage: "macwindow") }.tag(SettingsTab.screen)
-            appsTab.tabItem { Label(L10n.tabApps, systemImage: "app.badge") }.tag(SettingsTab.apps)
-            advancedTab.tabItem { Label(L10n.tabAdvanced, systemImage: "slider.horizontal.3") }.tag(SettingsTab.advanced)
-            aboutTab.tabItem { Label(L10n.tabAbout, systemImage: "info.circle") }.tag(SettingsTab.about)
+        ZStack(alignment: .topTrailing) {
+            TabView(selection: $viewModel.selectedTab) {
+                generalTab.tabItem { Label(L10n.tabGeneral, systemImage: "gearshape") }.tag(SettingsTab.general)
+                screenTab.tabItem { Label(L10n.tabScreen, systemImage: "macwindow") }.tag(SettingsTab.screen)
+                appsTab.tabItem { Label(L10n.tabApps, systemImage: "app.badge") }.tag(SettingsTab.apps)
+                advancedTab.tabItem { Label(L10n.tabAdvanced, systemImage: "slider.horizontal.3") }.tag(SettingsTab.advanced)
+                aboutTab.tabItem { Label(L10n.tabAbout, systemImage: "info.circle") }.tag(SettingsTab.about)
+            }
+            // Round 13 §A: the window's native titlebar/traffic-lights are
+            // now fully hidden (see `SettingsWindowController`) to match the
+            // reference's borderless floating-card look — this in-content
+            // affordance is the only remaining *discoverable* way to close
+            // Settings beyond clicking outside or pressing Escape.
+            PanelCloseButton(action: onClose)
+                .padding(12)
         }
+        .background(.regularMaterial)
         .frame(width: 620, height: 600)
     }
 

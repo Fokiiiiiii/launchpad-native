@@ -40,7 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// exclusivity — simpler than solving general multi-panel coexistence
     /// between two independent outside-click monitors, and matches the
     /// reference design, which never shows both at once).
-    private lazy var uninstallPanelWindowController = UninstallPanelWindowController(iconCache: iconCache)
+    private lazy var uninstallPanelWindowController = UninstallPanelWindowController(
+        iconCache: iconCache,
+        onWillClose: { [weak self] in self?.launcherWindowController.reclaimKeyIfVisible() }
+    )
     /// Shown instead of the launcher on the very first cold start (see
     /// `OnboardingState`) — the catalog scan/FSEvents watching still run
     /// unconditionally in the background regardless, so by the time
@@ -71,17 +74,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DiagnosticsLog.appHost.info("LaunchpadNative resident host started")
 
         launcherWindowController.setOnOpenSettings { [weak self] in
-            guard let self else { return }
+            guard let self, launcherWindowController.isVisible else { return }
             uninstallPanelWindowController.close()
-            settingsWindowController.show()
+            settingsWindowController.show(on: launcherWindowController.currentScreen)
         }
 
         launcherWindowController.setOnRequestUninstall { [weak self] bundleIdentifier in
-            guard let self,
+            guard let self, launcherWindowController.isVisible,
                   let record = launcherWindowController.model.allRecords.first(where: { $0.bundleIdentifier == bundleIdentifier })
             else { return }
             settingsWindowController.close()
-            uninstallPanelWindowController.show(for: record, allRecords: launcherWindowController.model.allRecords)
+            uninstallPanelWindowController.show(for: record, allRecords: launcherWindowController.model.allRecords, on: launcherWindowController.currentScreen)
+        }
+
+        // Round 13 §A: neither panel should ever stay visible once the
+        // launcher itself hides — `closeWithoutKeyReclaim()` (not plain
+        // `close()`) since there's nothing to reclaim key status onto here
+        // and a plain `close()` could steal focus back while the launcher
+        // is still mid-fade (see that method's doc comment).
+        launcherWindowController.setOnDidHide { [weak self] in
+            guard let self else { return }
+            settingsWindowController.closeWithoutKeyReclaim()
+            uninstallPanelWindowController.closeWithoutKeyReclaim()
         }
 
         Task {
@@ -209,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // for this, since nothing here simulates an actual mouse click.
         if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                self?.settingsWindowController.show()
+                self?.settingsWindowController.show(on: self?.launcherWindowController.currentScreen)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                     self?.settingsWindowController.debugClose()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in

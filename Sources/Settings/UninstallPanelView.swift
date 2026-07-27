@@ -14,57 +14,72 @@ struct UninstallPanelView: View {
     let onConfirm: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(UninstallPanelViewModel.SectionKind.allCases, id: \.self) { kind in
-                        if let rows = viewModel.rowsBySection[kind], !rows.isEmpty {
-                            sectionView(kind: kind, rows: rows)
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(UninstallPanelViewModel.SectionKind.allCases, id: \.self) { kind in
+                            if let rows = viewModel.rowsBySection[kind], !rows.isEmpty {
+                                sectionView(kind: kind, rows: rows)
+                            }
                         }
                     }
+                    .padding(16)
                 }
-                .padding(16)
+                Divider()
+                footer
             }
-            Divider()
-            footer
+            // Round 13 §A: the window's native titlebar/traffic-lights are
+            // now fully hidden — this is the only remaining discoverable
+            // way to close the panel beyond outside-click/Escape.
+            PanelCloseButton(action: onCancel)
+                .padding(12)
         }
-        .frame(width: 420, height: 480)
+        .background(.regularMaterial)
+        .frame(width: 420, height: 500)
     }
 
     private var header: some View {
         HStack(spacing: 12) {
             Image(nsImage: appIcon ?? NSImage())
                 .resizable()
-                .frame(width: 48, height: 48)
-            VStack(alignment: .leading, spacing: 2) {
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(radius: 4, y: 2)
+            VStack(alignment: .leading, spacing: 3) {
                 Text(viewModel.record.displayName)
-                    .font(.headline)
+                    .font(.title3.weight(.semibold))
                 if viewModel.isComputingSizes {
                     Text(L10n.uninstallComputingSizesLabel)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
                     Text(viewModel.totalSizeText)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }
             Spacer()
         }
-        .padding(16)
+        // Leading trailing padding matches PanelCloseButton's own inset so
+        // the app name never sits underneath it.
+        .padding(.init(top: 20, leading: 20, bottom: 16, trailing: 44))
     }
 
     private func sectionView(kind: UninstallPanelViewModel.SectionKind, rows: [UninstallPanelViewModel.Row]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(sectionTitle(kind))
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-            ForEach(rows) { row in
-                rowView(row)
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(rows) { row in
+                    rowView(row)
+                }
             }
+            .padding(.top, 4)
+        } label: {
+            Label(sectionTitle(kind), systemImage: sectionSymbol(kind))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.blue)
         }
     }
 
@@ -111,9 +126,15 @@ struct UninstallPanelView: View {
             .toggleStyle(.checkbox)
             Spacer()
             Button(L10n.uninstallCancelButton, action: onCancel)
-            Button(role: .destructive, action: onConfirm) {
+                .buttonStyle(.bordered)
+                .keyboardShortcut(.cancelAction)
+            Button(action: onConfirm) {
                 Text(L10n.uninstallMoveToTrashButton)
             }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            // Deliberately no `.keyboardShortcut(.defaultAction)` — an
+            // accidental Return keypress must never trigger a Trash move.
         }
         .padding(16)
     }
@@ -123,6 +144,14 @@ struct UninstallPanelView: View {
         case .applicationFile: L10n.uninstallSectionApplicationFile
         case .cache: L10n.uninstallSectionCache
         case .preferences: L10n.uninstallSectionPreferences
+        }
+    }
+
+    private func sectionSymbol(_ kind: UninstallPanelViewModel.SectionKind) -> String {
+        switch kind {
+        case .applicationFile: "app.fill"
+        case .cache: "externaldrive.fill"
+        case .preferences: "gearshape.fill"
         }
     }
 }

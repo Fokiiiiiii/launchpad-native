@@ -19,6 +19,7 @@
 "settings.grid.layout.verticalscroll" = "縦スクロール";
 "launcher.quickmenu.accessibility" = "表示オプション";
 "launcher.quickmenu.opensettings" = "設定を開く…";
+"panel.close.accessibility" = "閉じる";
 "settings.grid.sortby" = "並べ替え";
 "settings.grid.sortby.custom" = "カスタム";
 "settings.grid.sortby.name" = "名前順";
