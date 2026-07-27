@@ -1721,6 +1721,158 @@ confirms the mechanism works correctly end-to-end, but the real-world
 "no arrow" reference look can't be fully matched without a private API;
 a faint default-`NSPopover` bezel/arrow remains around the styled card.
 
+## Settings/Uninstall chrome removal, launcher-tied visibility, search-field and icon-flicker fixes, swipe sensitivity (2026-07-27)
+
+Following the previous round's Uninstall/folder redesign, a dense batch
+of follow-up complaints arrived: a screenshot of Settings' native
+titlebar (traffic-light buttons + title text) with "remove this," a
+request to bring the Uninstall panel's look closer to the earlier
+reference photo, better window positioning, "only show Settings/Uninstall
+while the launcher is visible," "find a path via Accessibility permission
+for 4/5-finger gestures without user setup — one must exist," plus
+several more issues surfaced mid-turn: the slightest sideways swipe
+should commit a page turn (a deliberate reversal may still cancel it,
+that's fine), the search field's text looks wrong only while actively
+typing, app icons flicker/disappear for a moment after a page
+transition, and gestures should avoid conflicting with real Apple
+gestures.
+
+- **Settings/Uninstall windows: chrome removed, positioned relative to
+  the launcher's screen, tied to launcher visibility.** Both windows now
+  set `.titled, .closable, .fullSizeContentView` + `titlebarAppearsTransparent`
+  + explicit `standardWindowButton(...)?.isHidden = true` for all three
+  traffic lights — transparent titlebar alone only hides the bar's
+  background, not the buttons themselves. A new shared `DismissableWindow`
+  (`onCancel` + `cancelOperation` override, mirroring `LauncherWindow`'s
+  existing Escape-to-close) replaces the native close button; a small
+  `xmark` button was added to each SwiftUI view's top corner for
+  discoverability, prioritizing usability over exactly matching the
+  reference photo's chrome-free look. Both windows now center on
+  `LauncherWindowController.currentScreen` (a new public accessor) instead
+  of `NSWindow.center()`'s main-screen default, recomputed every time
+  `show()` is called — correct behavior on a multi-display setup where the
+  launcher isn't necessarily on the main screen. A new `onDidHide` hook on
+  `LauncherWindowController`, fired from the single choke point at the top
+  of `hide()`, closes both panels whenever the launcher itself hides
+  (covers all 9 code paths that can hide it, since they all funnel through
+  that one method).
+- **Key-reclaim race fixed.** `hide()`'s fade-out means `window.isVisible`
+  stays `true` for ~0.3s after hiding starts, but `windowWillClose`'s
+  deferred reclaim handshake (fixed in an earlier round so the search
+  field doesn't go dead after a panel closes) fires on the very next
+  run-loop turn — meaning a panel closed *because* the launcher is hiding
+  could still steal focus back right after the user switched to a
+  different app. Fixed via a new `closeWithoutKeyReclaim()` on both
+  controllers (skips the reclaim handshake), used specifically by the
+  new launcher-hide-triggered close path.
+- **Uninstall panel's missing key-reclaim handshake fixed.** Unlike
+  Settings, `UninstallPanelWindowController` never had an `onWillClose`
+  callback at all — a latent instance of this exact project's recurring
+  "search field goes dead after a floating panel closes" bug class,
+  simply never triggered before because nothing had exercised that path.
+  Now wired identically to Settings.
+- **Uninstall panel visual redesign**, no logic changes
+  (`UninstallPanelViewModel` untouched): app icon enlarged to 64×64 with
+  rounded corners + shadow, section headers become `Label`s with SF
+  Symbols in a colored accent, each section wrapped in a `GroupBox`, "Move
+  to Trash" uses `.borderedProminent` + red tint with no default-action
+  keyboard shortcut (an accidental Return keypress must never trigger a
+  Trash move), Cancel uses `.bordered` + the actual cancel shortcut.
+- **Accessibility-based multi-finger gesture path: investigated and
+  found not to exist.** The premise behind "find an Accessibility-permission
+  path for 4/5-finger gestures" doesn't hold up technically. The current
+  `MultitouchGestureTrigger` (private `MultitouchSupport.framework` via
+  dlopen/dlsym) already requires **zero** permissions — no Accessibility,
+  no Input Monitoring, confirmed by code inspection, the onboarding copy,
+  and this project's own `ReverseEngineering/Contracts/multitouch.md`.
+  Public `NSEvent` gesture APIs can't discriminate exact finger count (the
+  OS only hands apps an already-interpreted semantic gesture), and
+  `NSTouch`/`touchesBegan` only deliver to the key/frontmost window's own
+  views — structurally incompatible with a background trigger. In short:
+  the existing implementation already meets the actual goal (no user
+  setup required); there is no alternative, permission-gated path to
+  switch to.
+- **Gesture conflict with real Apple gestures: cannot be fully eliminated
+  at the app level, disclosed rather than silently promised.**
+  `MTRegisterContactFrameCallback` is a passive observer running parallel
+  to the OS's own gesture recognition (Mission Control, Show Desktop,
+  Launchpad) — it cannot intercept or block that pipeline. The existing
+  `gestureConflictHint` warning + "open Trackpad settings" button remains
+  the practical ceiling; only the user disabling the conflicting System
+  Settings gesture fully prevents the conflict.
+- **Search field text color fixed (root-caused via real measurement, not
+  guesswork).** Diagnostic logging (`LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING=1`)
+  compared the field editor's actual frame/`textContainerInset` against
+  `SearchFieldCell.drawingRect`'s computed rect — the originally suspected
+  mismatch didn't hold up; both agreed exactly. The log also showed
+  `searchField.textColor` had never been explicitly set, falling back to
+  `.controlTextColor` — a flat, non-vibrancy-aware color meant for opaque
+  controls, not the translucent glass search bar it sits on. The
+  placeholder already used `.placeholderTextColor` correctly;
+  `GridCellItem`'s app-name labels already establish `.labelColor` as this
+  codebase's convention for legible text over glass materials — the
+  search field's typed text was the one place that convention wasn't
+  followed. A new debug hook (`LAUNCHPAD_DEBUG_TYPE_SEARCH_FIELD`) focuses
+  the field via `makeFirstResponder` and dispatches real synthetic keyDown
+  events per character, since the existing `debugSetSearchQuery` bypasses
+  the field editor entirely and can't reproduce editing-only bugs.
+  **Incidental finding**: the pre-existing `debugSimulateSearchFieldClick`
+  hook was found to hang indefinitely after its synthetic mouseDown
+  (likely `NSTextView`'s internal tracking loop blocking on a real
+  subsequent event a synchronous `sendEvent(mouseUp)` can't satisfy) —
+  unrelated to this bug, flagged for future follow-up, not fixed here.
+- **Icon flicker after page transition fixed (confirmed via log, not
+  guesswork).** Diagnostic cache hit/miss logging in
+  `itemForRepresentedObjectAt` revealed the actual structural cause: every
+  cell configured with a blank `NSImage()` first and only picked up the
+  real icon once a `Task { @MainActor in await cache.icon(for:) ... }`
+  completed — entering a `Task` always defers to a later run-loop turn no
+  matter how fast the awaited work resolves, so *every* page transition
+  guaranteed at least one rendered blank frame, even for a page
+  `prefetchAdjacentPageIcons()` had already fully warmed. Fixed by trying
+  `IconCache.cachedIconIfAvailable` synchronously first — the same
+  pattern `SnapshotDataSource` (the drag-peek overlay) already used —
+  falling back to the blank+async path only on a genuine cache miss.
+  Verified via `log stream`: jumping to a freshly-prefetched page now logs
+  a cache hit for every icon with no intervening blank frame; a
+  never-before-seen page still correctly falls back to the async path.
+- **Swipe page-turn commit threshold lowered to a fixed 48pt.**
+  `endPageDrag`'s commit distance was `width * 0.3` — several hundred
+  points on a typical launcher window, requiring a large deliberate drag
+  before a trackpad swipe committed. Now a fixed `pageDragCommitDistance =
+  48`, comfortably above `GridCollectionView.minimumEngageDistance` (10pt,
+  the separate "does this even count as a horizontal gesture" gate),
+  regardless of screen size or column count. Confirmed the existing
+  `endPageDrag` design already gives "a deliberate reversal cancels for
+  free" — `deltaX`/`velocity` are the gesture's *final* values at release,
+  not a stored peak, so no additional reversal-detection logic was needed.
+  `debugSimulatePageDrag`'s abort-path simulation (previously
+  `width * 0.05`, which would now exceed the new fixed threshold on any
+  normal screen and flip "should abort" into committing) was changed to a
+  fixed `-20pt` delta.
+
+**Verification**: `swift test` 95/95 after every section. Release build
+succeeds and installs cleanly. §E and §F were diagnosed with real
+diagnostic logging gated behind debug env vars and confirmed via `log
+stream` before any fix was written, per this project's established
+"root-cause via evidence" discipline — both originally-hypothesized
+causes turned out to be wrong on measurement, and the actual causes were
+found instead. §G's threshold change was verified via
+`LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG=commit|abort` + `log stream`: commit
+correctly lands on the next page, abort correctly stays put. Real
+`layout.json` was backed up before and restored after every round of
+testing.
+
+**Disclosed limitations**: the window chrome removal, positioning, and
+Uninstall panel's new look are all visual judgments that need the user's
+own hands-on confirmation — this session's screenshot tooling remains
+unreliable for this app's own windows (see the previous round's
+disclosed screen-capture incident). §C (gesture permissions) and §D
+(gesture conflicts) involved no code changes beyond what's described
+above — the user's original premises for both didn't hold up technically,
+and that's stated plainly here rather than reinterpreted into a
+change that wasn't actually made.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
