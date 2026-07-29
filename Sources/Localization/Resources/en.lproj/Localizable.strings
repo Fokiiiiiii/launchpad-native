@@ -52,6 +52,8 @@
 "settings.triggers.openprivacysettings" = "Open Privacy Settings…";
 "settings.triggers.gestureconflicthint" = "This gesture may conflict with macOS's own Launchpad/Mission Control trackpad gestures. If it feels unreliable, open Trackpad settings and disable the matching system gesture.";
 "settings.triggers.opentrackpadsettings" = "Open Trackpad Settings…";
+"settings.triggers.gestureconflictpreventiontoggle" = "Auto-disable macOS's conflicting gesture";
+"settings.triggers.gestureconflictpreventionactivehint" = "LaunchpadNative has told macOS to turn off its matching pinch gesture. A logout (or restart) may be required before this fully takes effect — you can still check System Settings › Trackpad to confirm.";
 "settings.sources.remove" = "Remove";
 "settings.sources.addfolder" = "Add Folder…";
 "settings.sources.chooseFolderPanelMessage" = "Choose a folder to scan for applications";

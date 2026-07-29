@@ -178,7 +178,25 @@ public struct CustomSourceConfig: Codable, Sendable, Hashable {
 /// `multitouchFingerCount` was added after this struct already had real
 /// saved data on disk, and a synthesized decoder would fail closed on any
 /// `layout.json` missing that key.
-public struct TriggerSettings: Codable, Sendable, Hashable {
+/// A snapshot of what this app overwrote in another app's own trackpad
+/// preference domains (`com.apple.AppleMultitouchTrackpad`/
+/// `com.apple.driver.AppleBluetoothMultitouch.trackpad`) to disable a
+/// conflicting system pinch gesture — see `Triggers.ConflictingGestureManager`.
+/// `values`' entries being `nil` (i.e. the dictionary's optional Int value,
+/// not a missing key) means "this domain didn't have the key set at all
+/// before" — distinct from `0` ("existed, was already off") — so restoring
+/// can put back the exact prior state rather than assuming a default.
+public struct GestureConflictBackup: Codable, Sendable, Equatable {
+    public var fingerCount: Int
+    public var values: [String: Int?]
+
+    public init(fingerCount: Int, values: [String: Int?]) {
+        self.fingerCount = fingerCount
+        self.values = values
+    }
+}
+
+public struct TriggerSettings: Codable, Sendable, Equatable {
     public var hotkeyEnabled: Bool
     public var hotkeyKeyCode: UInt16?
     public var hotkeyModifierFlags: UInt
@@ -190,6 +208,13 @@ public struct TriggerSettings: Codable, Sendable, Hashable {
     /// selectable option per explicit user request; see
     /// `PinchGestureRecognizer`'s doc comment for the history).
     public var multitouchFingerCount: Int
+    /// Whether this app should keep macOS's own conflicting trackpad pinch
+    /// gesture (for whichever finger count is currently configured) forced
+    /// off — see `Triggers.ConflictingGestureManager`. `gestureConflictBackup`
+    /// is the corresponding restore-point, non-nil exactly while this is
+    /// actively applied.
+    public var gestureConflictPreventionEnabled: Bool
+    public var gestureConflictBackup: GestureConflictBackup?
 
     public init(
         hotkeyEnabled: Bool,
@@ -199,7 +224,9 @@ public struct TriggerSettings: Codable, Sendable, Hashable {
         f4Enabled: Bool,
         multitouchGestureEnabled: Bool,
         multitouchSensitivity: Double,
-        multitouchFingerCount: Int
+        multitouchFingerCount: Int,
+        gestureConflictPreventionEnabled: Bool,
+        gestureConflictBackup: GestureConflictBackup?
     ) {
         self.hotkeyEnabled = hotkeyEnabled
         self.hotkeyKeyCode = hotkeyKeyCode
@@ -209,10 +236,12 @@ public struct TriggerSettings: Codable, Sendable, Hashable {
         self.multitouchGestureEnabled = multitouchGestureEnabled
         self.multitouchSensitivity = multitouchSensitivity
         self.multitouchFingerCount = multitouchFingerCount
+        self.gestureConflictPreventionEnabled = gestureConflictPreventionEnabled
+        self.gestureConflictBackup = gestureConflictBackup
     }
 
     private enum CodingKeys: String, CodingKey {
-        case hotkeyEnabled, hotkeyKeyCode, hotkeyModifierFlags, hotCornersEnabled, f4Enabled, multitouchGestureEnabled, multitouchSensitivity, multitouchFingerCount
+        case hotkeyEnabled, hotkeyKeyCode, hotkeyModifierFlags, hotCornersEnabled, f4Enabled, multitouchGestureEnabled, multitouchSensitivity, multitouchFingerCount, gestureConflictPreventionEnabled, gestureConflictBackup
     }
 
     public init(from decoder: Decoder) throws {
@@ -225,6 +254,8 @@ public struct TriggerSettings: Codable, Sendable, Hashable {
         multitouchGestureEnabled = try container.decode(Bool.self, forKey: .multitouchGestureEnabled)
         multitouchSensitivity = try container.decode(Double.self, forKey: .multitouchSensitivity)
         multitouchFingerCount = try container.decodeIfPresent(Int.self, forKey: .multitouchFingerCount) ?? 4
+        gestureConflictPreventionEnabled = try container.decodeIfPresent(Bool.self, forKey: .gestureConflictPreventionEnabled) ?? false
+        gestureConflictBackup = try container.decodeIfPresent(GestureConflictBackup.self, forKey: .gestureConflictBackup)
     }
 
     // hotCornersEnabled defaults with bottomRight on: real hands-on testing
@@ -254,7 +285,9 @@ public struct TriggerSettings: Codable, Sendable, Hashable {
         f4Enabled: true,
         multitouchGestureEnabled: false,
         multitouchSensitivity: 0.5,
-        multitouchFingerCount: 4
+        multitouchFingerCount: 4,
+        gestureConflictPreventionEnabled: false,
+        gestureConflictBackup: nil
     )
 }
 

@@ -267,6 +267,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DiagnosticsLog.triggers.info(
             "Triggers applied: hotkey=\(report.hotkeyRegistered, privacy: .public) f4=\(report.f4Active, privacy: .public) multitouch=\(report.multitouchActive, privacy: .public)"
         )
+        if report.gestureConflictUpdate != .unchanged {
+            // Re-read a fresh copy rather than reusing the possibly
+            // debug-mutated `settings` above — LAUNCHPAD_DEBUG_ALL_TRIGGERS
+            // must never get permanently written back to the real
+            // on-disk document.
+            var persisted = launcherWindowController.triggerSettings
+            switch report.gestureConflictUpdate {
+            case .unchanged: break
+            case .cleared: persisted.gestureConflictBackup = nil
+            case .updated(let backup): persisted.gestureConflictBackup = backup
+            }
+            launcherWindowController.model.updateTriggerSettings(persisted)
+            Task { await launcherWindowController.model.save() }
+        }
         return report.f4Active
     }
 

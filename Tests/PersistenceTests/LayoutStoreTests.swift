@@ -93,6 +93,8 @@ import Testing
     json["gridSettings"] = gridSettings
     var triggerSettings = json["triggerSettings"] as! [String: Any]
     triggerSettings.removeValue(forKey: "multitouchFingerCount")
+    triggerSettings.removeValue(forKey: "gestureConflictPreventionEnabled")
+    triggerSettings.removeValue(forKey: "gestureConflictBackup")
     json["triggerSettings"] = triggerSettings
     let oldSchemaData = try JSONSerialization.data(withJSONObject: json)
 
@@ -106,6 +108,8 @@ import Testing
     #expect(loaded.hideDockWhileLauncherOpen == false)
     #expect(loaded.gridSettings.sortMode == .custom)
     #expect(loaded.triggerSettings.multitouchFingerCount == 4)
+    #expect(loaded.triggerSettings.gestureConflictPreventionEnabled == false)
+    #expect(loaded.triggerSettings.gestureConflictBackup == nil)
     #expect(loaded.dateAddedByID.isEmpty)
     #expect(loaded.lastUsedByID.isEmpty)
 }

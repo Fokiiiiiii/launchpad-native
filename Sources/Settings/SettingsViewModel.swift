@@ -154,6 +154,18 @@ public final class SettingsViewModel: ObservableObject {
             applyTriggerSettings()
         }
     }
+    /// See `Triggers.ConflictingGestureManager`'s doc comment — writes a
+    /// plain CFPreferences value to macOS's own trackpad preference
+    /// domains, no Accessibility permission involved. `applyTriggerSettings`
+    /// -> `onTriggerSettingsChanged` -> `TriggerCoordinator.apply(_:)` is
+    /// what actually performs the disable/restore; this property only
+    /// records the user's intent.
+    @Published public var gestureConflictPreventionEnabled: Bool {
+        didSet {
+            guard gestureConflictPreventionEnabled != oldValue else { return }
+            applyTriggerSettings()
+        }
+    }
 
     @Published public var customSources: [CustomSourceConfig]
     @Published public var hiddenApps: [(identifier: StableAppIdentifier, name: String)]
@@ -184,6 +196,7 @@ public final class SettingsViewModel: ObservableObject {
         multitouchEnabled = triggers.multitouchGestureEnabled
         multitouchSensitivity = triggers.multitouchSensitivity
         multitouchFingerCount = triggers.multitouchFingerCount
+        gestureConflictPreventionEnabled = triggers.gestureConflictPreventionEnabled
 
         customSources = model.customSources
         hiddenApps = model.hiddenApplicationIdentifiers.compactMap { identifier in
@@ -231,6 +244,7 @@ public final class SettingsViewModel: ObservableObject {
         triggers.multitouchGestureEnabled = multitouchEnabled
         triggers.multitouchSensitivity = multitouchSensitivity
         triggers.multitouchFingerCount = multitouchFingerCount
+        triggers.gestureConflictPreventionEnabled = gestureConflictPreventionEnabled
         model.updateTriggerSettings(triggers)
         persist()
         f4Active = onTriggerSettingsChanged()

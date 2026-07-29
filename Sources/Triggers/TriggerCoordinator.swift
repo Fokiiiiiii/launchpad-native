@@ -5,6 +5,17 @@ public struct TriggerActivationReport: Sendable {
     public var hotkeyRegistered: Bool
     public var f4Active: Bool
     public var multitouchActive: Bool
+    public var gestureConflictUpdate: GestureConflictUpdate = .unchanged
+
+    /// What `apply(_:)` did (if anything) to `TriggerSettings.gestureConflictBackup`
+    /// — the caller must persist this back to disk (see `AppDelegate`'s
+    /// doc comment on why it re-reads a fresh settings copy for this
+    /// rather than reusing a possibly debug-mutated one).
+    public enum GestureConflictUpdate: Sendable, Equatable {
+        case unchanged
+        case cleared
+        case updated(GestureConflictBackup)
+    }
 }
 
 /// Applies `TriggerSettings` to the four trigger mechanisms and forwards
@@ -57,7 +68,33 @@ public final class TriggerCoordinator {
             multitouchActive = multitouch.start()
         }
 
-        return TriggerActivationReport(hotkeyRegistered: hotkeyRegistered, f4Active: f4Active, multitouchActive: multitouchActive)
+        var gestureConflictUpdate: TriggerActivationReport.GestureConflictUpdate = .unchanged
+        let transition = ConflictingGestureManager.decideTransition(
+            enabled: settings.gestureConflictPreventionEnabled,
+            desiredFingerCount: settings.multitouchFingerCount,
+            existingBackup: settings.gestureConflictBackup
+        )
+        switch transition {
+        case .none:
+            break
+        case .disable(let fingerCount, let restoringFirst):
+            if let restoringFirst {
+                ConflictingGestureManager.restore(restoringFirst)
+            }
+            if let newBackup = ConflictingGestureManager.disable(fingerCount: fingerCount) {
+                gestureConflictUpdate = .updated(newBackup)
+            }
+        case .restore(let backup):
+            ConflictingGestureManager.restore(backup)
+            gestureConflictUpdate = .cleared
+        }
+
+        return TriggerActivationReport(
+            hotkeyRegistered: hotkeyRegistered,
+            f4Active: f4Active,
+            multitouchActive: multitouchActive,
+            gestureConflictUpdate: gestureConflictUpdate
+        )
     }
 
     public func stopAll() {

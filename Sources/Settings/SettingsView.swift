@@ -159,6 +159,9 @@ public struct SettingsView: View {
                         .accessibilityLabel(L10n.gestureSensitivityAccessibilityLabel)
                 }
                 if viewModel.multitouchEnabled {
+                    Toggle(isOn: $viewModel.gestureConflictPreventionEnabled) {
+                        Label(L10n.gestureConflictPreventionToggleLabel, systemImage: "shield.lefthalf.filled")
+                    }
                     gestureConflictHint
                 }
             } header: {
@@ -236,13 +239,18 @@ public struct SettingsView: View {
     /// the system's own trackpad gesture assignments), since real hands-on
     /// testing found this gesture collides with macOS's own default
     /// Launchpad/Mission Control trackpad assignment often enough that a
-    /// standing warning is more honest than a one-time toggle.
+    /// standing warning is more honest than a one-time toggle. Switches to
+    /// a success-styled message once the auto-prevention toggle above is
+    /// on — worded carefully ("has told macOS," not "has disabled") since
+    /// whether the OS actually stops recognizing the gesture without a
+    /// logout is a disclosed, unverified uncertainty (see
+    /// `Triggers.ConflictingGestureManager`'s doc comment).
     private var gestureConflictHint: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+            Image(systemName: viewModel.gestureConflictPreventionEnabled ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(viewModel.gestureConflictPreventionEnabled ? .green : .orange)
             VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.gestureConflictHint)
+                Text(viewModel.gestureConflictPreventionEnabled ? L10n.gestureConflictPreventionActiveHint : L10n.gestureConflictHint)
                     .font(.caption)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(L10n.openTrackpadSettingsButton) {

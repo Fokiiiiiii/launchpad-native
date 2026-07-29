@@ -106,6 +106,13 @@ public enum L10n {
         )
     }
     public static var openTrackpadSettingsButton: String { string("settings.triggers.opentrackpadsettings", "Open Trackpad Settings…") }
+    public static var gestureConflictPreventionToggleLabel: String { string("settings.triggers.gestureconflictpreventiontoggle", "Auto-disable macOS's conflicting gesture") }
+    public static var gestureConflictPreventionActiveHint: String {
+        string(
+            "settings.triggers.gestureconflictpreventionactivehint",
+            "LaunchpadNative has told macOS to turn off its matching pinch gesture. A logout (or restart) may be required before this fully takes effect — you can still check System Settings › Trackpad to confirm."
+        )
+    }
 
     // MARK: Settings — Sources tab
 
