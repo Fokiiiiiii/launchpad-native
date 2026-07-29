@@ -1,8 +1,8 @@
 import AppKit
 import Catalog
 
-/// One grid cell: either an app (icon + label) or a folder (a composited
-/// 2x2 preview tile of the folder's own contents, built by
+/// One grid cell: either an app (icon + label) or a folder (a composited,
+/// count-adaptive preview tile of the folder's own contents, built by
 /// `FolderIconComposer`, + name). Both are visually similar on purpose —
 /// apps and folders live in the same grid and should read as siblings.
 final class GridCellItem: NSCollectionViewItem {
@@ -126,10 +126,13 @@ final class GridCellItem: NSCollectionViewItem {
     }
 
     /// Renders as a Springboard-style folder: a composited preview tile of
-    /// (up to 4 of) the folder's own app icons, built by
-    /// `FolderIconComposer` — replaces the generic `folder.fill` glyph +
-    /// red count badge this used to show. The thumbnail is supplied by the
-    /// caller (`thumbnail`, possibly `nil` for "not ready yet" — see
+    /// up to 9 of the folder's own app icons, arranged in a grid shape that
+    /// adapts to the folder's actual app count (see
+    /// `FolderIconComposer.gridShape(forIconCount:)`) — replaces the
+    /// generic `folder.fill` glyph + red count badge this app used before
+    /// Round 12, and Round 12's own fixed-3x3-regardless-of-count layout
+    /// before Round 14. The thumbnail is supplied by the caller
+    /// (`thumbnail`, possibly `nil` for "not ready yet" — see
     /// `setFolderThumbnail`) rather than composited in here, since building
     /// it requires each app icon from `IconCache`, which callers already
     /// fetch asynchronously with their own cell-reuse guard (`requestKey`,
