@@ -1206,20 +1206,28 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             let folder = model.folders[folderID]
             let name = folder?.name ?? L10n.defaultFolderName
             let key = "folder:\(folderID.value)"
-            cell.configureAsFolder(name: name, isSelected: isSelected, iconSize: iconSize, thumbnail: nil, requestKey: key)
-            if let folder {
-                let records: [ApplicationRecord] = folder.pages.flatMap { $0 }.compactMap { item in
-                    guard case .app(let id) = item else { return nil }
-                    return model.record(for: id)
-                }
+            let previews: [ApplicationRecord] = folder?.pages.flatMap { $0 }.compactMap { item in
+                guard case .app(let id) = item else { return nil }
+                return model.record(for: id)
+            }.prefix(9).map { $0 } ?? []
+            // Peek at whatever's already warm in IconCache so the very
+            // first frame isn't all-placeholder for a folder the user has
+            // already looked at — real icons for anything not yet cached
+            // arrive moments later via the async fetch below.
+            let warmIcons = previews.compactMap { iconCache.cachedIconIfAvailable(for: $0) }
+            cell.configureAsFolder(name: name, isSelected: isSelected, iconSize: iconSize, icons: warmIcons, requestKey: key)
+            if !previews.isEmpty {
                 let cache = iconCache
                 Task { @MainActor in
-                    let image = await FolderIconComposer.makeThumbnail(records: records, iconCache: cache, size: iconSize)
+                    var icons: [NSImage] = []
+                    for record in previews {
+                        icons.append(await cache.icon(for: record))
+                    }
                     // Same cell-reuse guard as the app case above — the cell
                     // may have been recycled for a different folder (or an
-                    // app) by the time the composite finishes.
+                    // app) by the time these fetches complete.
                     guard cell.currentRequestKey == key else { return }
-                    cell.setFolderThumbnail(image)
+                    cell.setFolderIcons(icons)
                 }
             }
         }
@@ -2196,19 +2204,19 @@ private final class SnapshotDataSource: NSObject, NSCollectionViewDataSource {
         case .folder(let folderID):
             let folder = model.folders[folderID]
             let name = folder?.name ?? L10n.defaultFolderName
-            // Synchronous, cache-only thumbnail: this data source only
-            // renders one offscreen snapshot bitmap with no async work in
-            // between (see this type's doc comment and `IconCache.icon`'s
+            // Synchronous, cache-only icons: this data source only renders
+            // one offscreen snapshot bitmap with no async work in between
+            // (see this type's doc comment and `IconCache.icon`'s
             // `cachedIconIfAvailable` counterpart used for the app case
-            // above) — an async composite here would resolve after the
+            // above) — an async fetch here would resolve after the
             // snapshot's already been captured and the temp collection view
             // torn down.
             let records: [ApplicationRecord] = folder?.pages.flatMap { $0 }.compactMap { item in
                 guard case .app(let id) = item else { return nil }
                 return model.record(for: id)
             } ?? []
-            let thumbnail = FolderIconComposer.makeThumbnailSync(records: records, iconCache: iconCache, size: iconSize)
-            cell.configureAsFolder(name: name, isSelected: false, iconSize: iconSize, thumbnail: thumbnail, requestKey: "folder:\(folderID.value)")
+            let icons = records.prefix(9).compactMap { iconCache.cachedIconIfAvailable(for: $0) }
+            cell.configureAsFolder(name: name, isSelected: false, iconSize: iconSize, icons: icons, requestKey: "folder:\(folderID.value)")
         }
         return cell
     }
