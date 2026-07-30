@@ -1873,6 +1873,96 @@ above — the user's original premises for both didn't hold up technically,
 and that's stated plainly here rather than reinterpreted into a
 change that wasn't actually made.
 
+## Folder mosaic + gesture auto-disable, then a "Tessera" reference redesign saga (2026-07-31)
+
+Two independent efforts, in order:
+
+**Adaptive folder-icon mosaic + gesture auto-disable.** The closed folder
+icon composed a fixed 3×3 grid regardless of item count, leaving unfilled
+slots as bare translucent squares for any folder with under 9 items, and
+its flat white fill read as "cheap." `FolderIconComposer.gridShape(forIconCount:)`
+now picks `(1,1)`/`(2,1)`/`(2,2)`/`(3,2)`/`(3,3)` by count, each row
+centered; the background gained a subtle top-to-bottom gradient + hairline
+top highlight. Separately, the user re-raised "surely a competitor achieves
+zero-conflict multi-finger gestures via Accessibility" — investigation
+(three sources: Apple docs, a BetterTouchTool dev's own writeup, GestureFire's
+README) confirmed no app can intercept the OS's own gesture pipeline, but
+also turned up a real, permission-free lever: `TrackpadFourFingerPinchGesture`/
+`TrackpadFiveFingerPinchGesture` in `com.apple.AppleMultitouchTrackpad`/
+`com.apple.driver.AppleBluetoothMultitouch.trackpad` are ordinary
+`CFPreferences` keys, no Accessibility grant required. New
+`Triggers.ConflictingGestureManager` writes/restores exactly those two keys
+(never the swipe keys) with an explicit backup-of-prior-value type
+(`GestureConflictBackup`, distinguishing "key didn't exist" from "key was
+0") wired through a new Settings toggle. Disclosed plainly: whether this
+takes effect without logout, and what "0" actually means, are described by
+outside sources only — not confirmed by toggling and observing this
+session, since there's no physical trackpad to test with here.
+
+**The "Tessera" redesign saga.** The user sent a ZIP of a SwiftUI design
+reference ("Tessera") with an explicit instruction — *use the zip's own
+implementation directly, not just its numbers* — followed by a long back-
+and-forth of screenshots and corrections (closed folder icon looked
+"huge"/had an unwanted shadow; opened-folder presentation had to become a
+full-screen dimmed take-over, not an anchored popover; a screenshot
+initially assumed to be this app turned out to be a different, actually-
+installed competitor app, `/Applications/LaunchOS.app`, running as a login
+item — a real environmental confound worth knowing about if a future
+screenshot looks unfamiliar; the opened-folder panel was stuck at a narrow
+3 columns instead of the reference's fixed 7). Applying the lesson learned
+from the closed icon (hosting the reference's actual view code beats
+re-deriving its numbers into AppKit/Core Graphics) a second time, to the
+*opened* folder:
+
+- **`FolderIconView`** (`Sources/Grid/FolderIconView.swift`) hosts the
+  reference's own `AppTile`/`FolderThumbnail` SwiftUI code via
+  `NSHostingView` inside `GridCellItem`, replacing the deleted
+  `FolderIconComposer` Core Graphics bitmap composer entirely. True
+  continuous-corner ("squircle") clipping only exists in SwiftUI's
+  `RoundedRectangle(style: .continuous)` — `NSBezierPath`/`CALayer.cornerCurve`
+  get close but aren't the same curve, confirmed by rendering both to PNG
+  via a temporary `ImageRenderer`-based test and comparing.
+- **The opened-folder panel** (`FolderContentsViewController`) is no
+  longer an `NSCollectionView` at all — it now hosts
+  `FolderOverlayGridContent`/`FolderOverlayTileView`
+  (`Sources/Grid/FolderOverlayTileView.swift`), adapted directly from the
+  reference's `FolderOverlay`/`AppTile`: a `LazyVGrid` with an always-fixed
+  column count (fixing the 3-column bug — width no longer depends on item
+  count, only row count does), the same squircle ratio, top-light overlay,
+  hairline stroke, and hover-lift/press-scale driven by the reference's own
+  `TSAnimation.snappy` spring. Presentation itself became a full-bounds
+  dimming `NSView` backdrop (`FolderOverlayBackdropView`, Escape/click-to-
+  dismiss) instead of an `NSPopover`, per the explicit "全画面で表示" ask —
+  the existing `FolderContentsViewController` (click-to-launch, context
+  menu) was kept as a subview so none of its already-hardened AppKit
+  interaction code had to be re-risked.
+- Two more direct fixes landed in the same pass: the white selection
+  ring (`GridCellItem.applySelection`) was being painted on every mouse
+  click, not just keyboard arrow-key browsing, per a screenshot showing it
+  around a clicked Preview icon — a new `keyboardSelectionActive` flag
+  gates it to the keyboard path only. And the Settings icon-size slider was
+  removed entirely (`GridSettings.iconSize` deleted from the schema) per
+  explicit request — icon size is now purely `GridViewController.currentIconSize`,
+  a fixed function of the grid's own row/column cell geometry.
+
+**Known, disclosed gap**: physical drag-out-of-folder isn't implemented in
+the new SwiftUI-hosted grid this pass — "Remove from Folder" via right-click
+is the current path for taking an app out of a folder.
+
+**Verification**: `swift build`/`swift test` (106/106) after every step.
+`FolderOverlayGridContent` and the squircle-corner claim were both checked
+via a temporary `ImageRenderer`-rendered PNG (never committed, deleted
+after inspection) before touching the real app. Release builds launch
+clean (`log stream`, no errors); `LAUNCHPAD_DEBUG_OPEN_FIRST_FOLDER=1`
+opens a real folder from real `layout.json` data with no crash. Real
+`layout.json` was backed up before and diffed (by page/folder count, not
+raw `diff`, since JSON key ordering is non-deterministic) after every
+risky run — unchanged throughout (4 pages, 4 folders). **Not yet
+verified**: real hands-on feel (click-to-launch, hover/press, context
+menu, the gesture auto-disable actually silencing the OS gesture) needs
+the user's own hardware — this remains a standing, disclosed limit of
+this session's environment, not a claim of full verification.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
