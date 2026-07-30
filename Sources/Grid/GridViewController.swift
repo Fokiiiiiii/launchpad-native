@@ -986,6 +986,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             model: model,
             folderID: folderID,
             iconCache: iconCache,
+            iconSize: currentIconSize,
             onLaunch: { [weak self] record in
                 self?.openFolderPopover?.close()
                 self?.onLaunch(record)

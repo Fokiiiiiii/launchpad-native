@@ -25,47 +25,6 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
     )
 }
 
-@Test func gridShapeForZeroIconsFallsBackToOneByOne() {
-    let shape = FolderIconComposer.gridShape(forIconCount: 0)
-    #expect(shape.columns == 1 && shape.rows == 1)
-}
-
-@Test func gridShapeForOneIconIsOneByOne() {
-    let shape = FolderIconComposer.gridShape(forIconCount: 1)
-    #expect(shape.columns == 1 && shape.rows == 1)
-}
-
-@Test func gridShapeForTwoIconsIsTwoByOne() {
-    let shape = FolderIconComposer.gridShape(forIconCount: 2)
-    #expect(shape.columns == 2 && shape.rows == 1)
-}
-
-@Test func gridShapeForThreeAndFourIconsIsTwoByTwo() {
-    for count in [3, 4] {
-        let shape = FolderIconComposer.gridShape(forIconCount: count)
-        #expect(shape.columns == 2 && shape.rows == 2)
-    }
-}
-
-@Test func gridShapeForFiveAndSixIconsIsThreeByTwo() {
-    for count in [5, 6] {
-        let shape = FolderIconComposer.gridShape(forIconCount: count)
-        #expect(shape.columns == 3 && shape.rows == 2)
-    }
-}
-
-@Test func gridShapeForSevenToNineIconsIsThreeByThree() {
-    for count in [7, 8, 9] {
-        let shape = FolderIconComposer.gridShape(forIconCount: count)
-        #expect(shape.columns == 3 && shape.rows == 3)
-    }
-}
-
-@Test func gridShapeForMoreThanNineIconsStillCapsAtThreeByThree() {
-    let shape = FolderIconComposer.gridShape(forIconCount: 12)
-    #expect(shape.columns == 3 && shape.rows == 3)
-}
-
 @Test @MainActor func makeThumbnailSyncProducesTileSizedImageForRepresentativeCounts() {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }

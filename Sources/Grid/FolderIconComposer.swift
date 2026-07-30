@@ -1,26 +1,31 @@
 import AppKit
 import Catalog
 
-/// Composites up to 9 of a folder's actual app icons into a preview tile
-/// whose internal grid shape adapts to the actual icon count (1x1 through
-/// 3x3 — see `gridShape(forIconCount:)`), matching real macOS/iOS folder
-/// icon conventions — replaces the generic `folder.fill` glyph + count
-/// badge this app used before Round 12, and Round 12's own fixed-3x3-
-/// regardless-of-count layout before Round 14.
+/// Composites up to 9 of a folder's actual app icons into a fixed 3x3
+/// preview tile, matching real macOS Launchpad folder icon conventions —
+/// replaces the generic `folder.fill` glyph + count badge this app used
+/// before Round 12, Round 12's own hand-drawn-corner mosaic, and Round 14's
+/// count-adaptive-shape attempt, in favor of a precise design reference
+/// ("Tessera") the user supplied directly: always a 3x3 grid (unfilled
+/// slots get a faint placeholder tile, never left blank/uneven), a flat
+/// translucent background (no gradient/highlight-stroke baked in here —
+/// see below), and a true continuous-corner ("squircle") outer shape.
+///
+/// The outer squircle clip is deliberately NOT drawn in this bitmap —
+/// `NSBezierPath` has no continuous-corner-curve support (unlike SwiftUI's
+/// `RoundedRectangle(style: .continuous)` or `CALayer.cornerCurve`), so a
+/// hand-drawn rounded-rect here would never match a real macOS app icon's
+/// actual corner curve. Instead this draws a plain square tile, and
+/// `GridCellItem` clips the whole `iconView` (both this bitmap and real
+/// app icons) with `CALayer.cornerCurve = .continuous` — a true squircle,
+/// applied once, shared by every icon in the grid.
 enum FolderIconComposer {
     @MainActor
     static func makeThumbnail(records: [ApplicationRecord], iconCache: IconCache, size: CGFloat) async -> NSImage {
         let previews = Array(records.prefix(9))
-        let shape = gridShape(forIconCount: previews.count)
-        // Fetch at the actual per-icon draw resolution (derived from the
-        // adaptive shape) rather than a fixed /3 — a 2x2 folder's mini-icons
-        // render at roughly tileSize/2, so fetching at /3 would upscale a
-        // smaller cached bitmap and undo the legibility win of fewer slots.
-        let divisor = max(shape.columns, shape.rows)
-        let fetchSize = max(size / CGFloat(divisor), 24)
         var icons: [NSImage] = []
         for record in previews {
-            icons.append(await iconCache.icon(for: record, size: fetchSize))
+            icons.append(await iconCache.icon(for: record, size: max(size / 3, 24)))
         }
         return draw(icons: icons, tileSize: size)
     }
@@ -44,84 +49,58 @@ enum FolderIconComposer {
         draw(icons: [], tileSize: size)
     }
 
-    /// Pure, no I/O — maps how many app icons a folder actually has to the
-    /// (columns, rows) mosaic shape it should render as. Real macOS/iOS
-    /// folder-preview convention: fewer apps get a denser, larger-icon
-    /// arrangement instead of a fixed 3x3 with blank trailing slots (the
-    /// direct cause of a real user report that folders with fewer than 9
-    /// apps looked "uneven"). `internal` (not `private`) so
-    /// `Tests/GridTests` can exercise it directly via `@testable import`.
-    static func gridShape(forIconCount count: Int) -> (columns: Int, rows: Int) {
-        switch max(count, 0) {
-        case 0, 1: return (1, 1)
-        case 2: return (2, 1)
-        case 3, 4: return (2, 2)
-        case 5, 6: return (3, 2)
-        default: return (3, 3) // 7...9 (callers already cap at 9 via .prefix(9))
-        }
-    }
-
     static func draw(icons: [NSImage], tileSize: CGFloat) -> NSImage {
         let image = NSImage(size: NSSize(width: tileSize, height: tileSize))
         image.lockFocus()
         defer { image.unlockFocus() }
         let rect = NSRect(x: 0, y: 0, width: tileSize, height: tileSize)
-        let corner = tileSize * 0.22
-        let background = NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner)
-        background.addClip()
 
-        // A subtle top-to-bottom gradient + thin top-edge highlight instead
-        // of a flat static fill — a real user found the old flat white
-        // overlay "looks cheap" (背景が安っぽく見える). Matches this app's
-        // established glass visual language (search bar, page control,
-        // folder popover) and apple-design's material guidance ("a bright
-        // top edge reads as light catching the material").
+        // Flat, restrained fill — no gradient, no separate highlight stroke.
+        // A real user found an earlier gradient+bright-stroke treatment here
+        // looked fake/"AI生成っぽい"; the reference design's own folder tile
+        // is just a plain 13%-white fill, full stop.
+        NSColor.white.withAlphaComponent(0.13).setFill()
+        rect.fill()
+
+        // A very subtle top-to-center light falloff — shared by every icon
+        // in the grid (see `GridCellItem`), not a folder-specific highlight.
+        // Reads as "light catching the material," never a hard edge/border.
         let gradient = NSGradient(colors: [
-            NSColor.white.withAlphaComponent(0.30),
-            NSColor.white.withAlphaComponent(0.14)
+            NSColor.white.withAlphaComponent(0.16),
+            NSColor.clear
         ])
-        gradient?.draw(from: NSPoint(x: rect.midX, y: rect.maxY), to: NSPoint(x: rect.midX, y: rect.minY))
+        gradient?.draw(from: NSPoint(x: rect.midX, y: rect.maxY), to: NSPoint(x: rect.midX, y: rect.midY))
 
-        let highlightInset = corner * 0.6
-        let highlightLineWidth = max(1, tileSize * 0.012)
-        let topHighlight = NSBezierPath()
-        topHighlight.lineCapStyle = .round
-        topHighlight.lineWidth = highlightLineWidth
-        topHighlight.move(to: NSPoint(x: rect.minX + highlightInset, y: rect.maxY - highlightLineWidth))
-        topHighlight.line(to: NSPoint(x: rect.maxX - highlightInset, y: rect.maxY - highlightLineWidth))
-        NSColor.white.withAlphaComponent(0.45).setStroke()
-        topHighlight.stroke()
-
-        // Adaptive mosaic: shape depends on actual icon count, not a fixed
-        // 3x3 — see `gridShape(forIconCount:)`'s doc comment.
-        let shape = gridShape(forIconCount: icons.count)
-        let pad = tileSize * 0.10
-        let gap = tileSize * 0.06
-        let availableWidth = tileSize - pad * 2 - gap * CGFloat(shape.columns - 1)
-        let availableHeight = tileSize - pad * 2 - gap * CGFloat(shape.rows - 1)
-        let side = min(availableWidth / CGFloat(shape.columns), availableHeight / CGFloat(shape.rows))
-        let gridHeight = CGFloat(shape.rows) * side + CGFloat(shape.rows - 1) * gap
-        let originY = (tileSize - gridHeight) / 2
-
-        var index = 0
-        var remaining = icons.count
-        for row in 0..<shape.rows {
-            let countInRow = min(shape.columns, remaining)
-            remaining -= countInRow
-            guard countInRow > 0 else { continue }
-            // Centers a partial last row under the full tile width (e.g. 5
-            // icons in a 3x2 shape: row 0 has 3, row 1 has 2, centered)
-            // rather than left-aligning it under the first N columns.
-            let rowWidth = CGFloat(countInRow) * side + CGFloat(countInRow - 1) * gap
-            let rowOriginX = (tileSize - rowWidth) / 2
-            let y = originY + CGFloat(shape.rows - 1 - row) * (side + gap) // AppKit y-up: flip row->y
-            for col in 0..<countInRow {
-                guard index < icons.count else { break }
-                let x = rowOriginX + CGFloat(col) * (side + gap)
-                icons[index].draw(in: NSRect(x: x, y: y, width: side, height: side), from: .zero, operation: .sourceOver, fraction: 1.0)
-                index += 1
+        // Always a 3x3 grid regardless of actual count — real Launchpad
+        // folder icons never resize their internal layout; unfilled slots
+        // get a barely-visible placeholder tile instead of being left blank,
+        // which is what actually caused the earlier "uneven" look (a
+        // half-empty grid with the raw background showing through), not the
+        // fixed shape itself.
+        let pad = tileSize * 0.13
+        let gap = tileSize * 0.055
+        let side = (tileSize - pad * 2 - gap * 2) / 3
+        let cornerRadius = tileSize * 0.05
+        for index in 0..<9 {
+            let row = index / 3 // 0 = top row, reading order (left-to-right, top-to-bottom)
+            let col = index % 3
+            let x = pad + CGFloat(col) * (side + gap)
+            let y = pad + CGFloat(2 - row) * (side + gap) // AppKit y-up: flip row->y
+            let cellRect = NSRect(x: x, y: y, width: side, height: side)
+            if index < icons.count {
+                icons[index].draw(in: cellRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+            } else {
+                NSBezierPath(roundedRect: cellRect, xRadius: cornerRadius, yRadius: cornerRadius)
+                    .fill(withColor: NSColor.white.withAlphaComponent(0.06))
             }
         }
         return image
+    }
+}
+
+private extension NSBezierPath {
+    func fill(withColor color: NSColor) {
+        color.setFill()
+        fill()
     }
 }

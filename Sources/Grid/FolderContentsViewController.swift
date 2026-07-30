@@ -18,14 +18,16 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
     private let titleField = NSTextField(labelWithString: "")
     private let collectionView = GridCollectionView()
     private var pendingClickIndexPath: IndexPath?
-    // Icon (56pt) + top/bottom padding + a 2-line label needs ~96pt of cell
-    // height once labels are shown again (see §3 of Round 12's plan — this
-    // reverses the earlier "icon-only" decision). Width is a bit wider than
-    // the icon itself so the label has room to breathe before truncating.
-    private static let itemWidth: CGFloat = 80
-    private static let itemHeight: CGFloat = 96
+    /// The main grid's own current icon size (`GridViewController.currentIconSize`)
+    /// — a real design reference the user supplied directly asked for
+    /// "内部アイコンが通常サイズの配置へ広がる" (contained icons expand to
+    /// their normal size when the folder opens), which a fixed 56pt
+    /// regardless of the grid's actual configured size did not satisfy.
+    private let iconSize: Double
     private static let cellSpacing: CGFloat = 16
     private static let maxColumns = 7
+    private var itemWidth: CGFloat { CGFloat(iconSize) + 24 }
+    private var itemHeight: CGFloat { CGFloat(iconSize) + 40 }
 
     /// Flattened (folderPage, folderIndex, item) so context-menu "Remove from
     /// Folder" can address the exact underlying position.
@@ -35,12 +37,14 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         model: GridModel,
         folderID: FolderID,
         iconCache: IconCache,
+        iconSize: Double,
         onLaunch: @escaping (ApplicationRecord) -> Void,
         onItemDraggedOut: @escaping (Int, Int) -> Void
     ) {
         self.model = model
         self.folderID = folderID
         self.iconCache = iconCache
+        self.iconSize = iconSize
         self.onLaunch = onLaunch
         self.onItemDraggedOut = onItemDraggedOut
         super.init(nibName: nil, bundle: nil)
@@ -61,8 +65,12 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         // already gives correct "outside click closes just the popover,
         // never the launcher" dismissal for free — a thin sliver of the
         // popover's own default bezel/arrow remains around this card since
-        // there's no public API to fully suppress it.
-        let background = GlassBackgroundHelper.makeBackground(cornerRadius: 20, dark: true)
+        // there's no public API to fully suppress it. Corner radius (34)
+        // matches the "Tessera" design reference's own folder panel exactly
+        // — a generous, simple rounded card, no extra dividers/section
+        // headers beyond the title (matches the user's explicit
+        // "シンプルな角丸パネル...上部にグループ名だけ" request).
+        let background = GlassBackgroundHelper.makeBackground(cornerRadius: 34, dark: true)
         background.translatesAutoresizingMaskIntoConstraints = false
 
         titleField.translatesAutoresizingMaskIntoConstraints = false
@@ -70,7 +78,7 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         titleField.alignment = .center
 
         let layout = NSCollectionViewFlowLayout()
-        layout.itemSize = NSSize(width: Self.itemWidth, height: Self.itemHeight)
+        layout.itemSize = NSSize(width: itemWidth, height: itemHeight)
         layout.minimumInteritemSpacing = Self.cellSpacing
         layout.minimumLineSpacing = Self.cellSpacing
         layout.sectionInset = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
@@ -144,8 +152,8 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         let itemCount = max(flattenedItems.count, 1)
         let columns = max(1, min(Self.maxColumns, Int(ceil(sqrt(Double(itemCount) * 1.6)))))
         let rows = max(1, Int(ceil(Double(itemCount) / Double(columns))))
-        let cellWidth = Self.itemWidth + Self.cellSpacing
-        let cellHeight = Self.itemHeight + Self.cellSpacing
+        let cellWidth = itemWidth + Self.cellSpacing
+        let cellHeight = itemHeight + Self.cellSpacing
         let width = min(CGFloat(columns) * cellWidth + 24, 640)
         let height = min(CGFloat(rows) * cellHeight + 60, 480)
         preferredContentSize = NSSize(width: max(width, 240), height: max(height, 180))
@@ -181,17 +189,13 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         let entry = flattenedItems[indexPath.item]
         if case .app(let id) = entry.item, let record = model.record(for: id) {
             let cache = iconCache
-            // Fixed, smaller than the main grid's iconSize: the folder
-            // popover's cells are a compact 80x96pt, independent of the
-            // user's main-grid icon size setting.
-            let folderIconSize = 56.0
-            cell.configureAsApp(record: record, icon: NSImage(), isSelected: false, iconSize: folderIconSize)
+            cell.configureAsApp(record: record, icon: NSImage(), isSelected: false, iconSize: iconSize)
             let expectedKey = record.iconCacheKey
             Task { @MainActor in
                 let icon = await cache.icon(for: record)
                 // Same cell-reuse guard as GridViewController — see its comment.
                 guard cell.currentRequestKey == expectedKey else { return }
-                cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: folderIconSize)
+                cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: iconSize)
             }
         }
         return cell

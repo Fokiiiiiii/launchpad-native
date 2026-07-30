@@ -1,8 +1,8 @@
 import AppKit
 import Catalog
 
-/// One grid cell: either an app (icon + label) or a folder (a composited,
-/// count-adaptive preview tile of the folder's own contents, built by
+/// One grid cell: either an app (icon + label) or a folder (a composited
+/// 3x3 preview tile of the folder's own contents, built by
 /// `FolderIconComposer`, + name). Both are visually similar on purpose —
 /// apps and folders live in the same grid and should read as siblings.
 final class GridCellItem: NSCollectionViewItem {
@@ -29,6 +29,17 @@ final class GridCellItem: NSCollectionViewItem {
 
         iconView.translatesAutoresizingMaskIntoConstraints = false
         iconView.imageScaling = .scaleProportionallyUpOrDown
+        // True continuous corner ("squircle"), matching real macOS app icon
+        // shape exactly — `NSBezierPath` has no continuous-corner-curve
+        // support, so this can only be achieved via `CALayer.cornerCurve`,
+        // applied once here and shared by both real app icons (already
+        // squircle-masked in their own asset — this clip is a visual no-op
+        // for them) and `FolderIconComposer`'s composited bitmap (which
+        // deliberately draws a plain square and relies on this clip for its
+        // outer shape — see that type's doc comment).
+        iconView.wantsLayer = true
+        iconView.layer?.cornerCurve = .continuous
+        iconView.layer?.masksToBounds = true
 
         label.translatesAutoresizingMaskIntoConstraints = false
         label.alignment = .center
@@ -94,6 +105,28 @@ final class GridCellItem: NSCollectionViewItem {
         let clamped = CGFloat(size)
         iconWidthConstraint?.constant = clamped
         iconHeightConstraint?.constant = clamped
+        // 0.236 matches real macOS app icon corner-radius-to-width ratio
+        // (the exact value supplied in the "Tessera" design reference,
+        // derived from Apple's own icon grid) — recomputed per size change
+        // since the corner curve must track the icon's actual current
+        // width, not a size set at cell-creation time.
+        iconView.layer?.cornerRadius = clamped * 0.236
+    }
+
+    /// A thin, low-opacity all-around border — "わずかな明暗差だけで輪郭を
+    /// 出す" (a subtle light/dark difference for definition, not an obvious
+    /// outer line) — folder tiles only. `CALayer.borderWidth`/`borderColor`
+    /// automatically trace whatever `cornerCurve`/`cornerRadius` is set on
+    /// the same layer, so this always matches the squircle clip exactly —
+    /// unlike a border baked into `FolderIconComposer`'s flat-square bitmap,
+    /// which would visibly mismatch the outer clip at the rounded corners.
+    /// Real app icons don't get this — their own baked-in artwork already
+    /// has whatever edge definition it needs, and adding a new border to
+    /// every app icon in the grid would be a far bigger, unrequested visual
+    /// change than fixing the folder tile specifically asked about.
+    private func applyFolderBorder(_ isFolder: Bool) {
+        iconView.layer?.borderWidth = isFolder ? 0.5 : 0
+        iconView.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
     }
 
     /// - Parameter showsLabel: When `false`, hides and empties the name
@@ -108,6 +141,7 @@ final class GridCellItem: NSCollectionViewItem {
     func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, displayName: String? = nil, showsLabel: Bool = true) {
         currentRequestKey = record.iconCacheKey
         applyIconSize(iconSize)
+        applyFolderBorder(false)
         iconView.image = icon
         let name = displayName ?? record.displayName
         if showsLabel {
@@ -125,13 +159,10 @@ final class GridCellItem: NSCollectionViewItem {
         view.setAccessibilityLabel(name)
     }
 
-    /// Renders as a Springboard-style folder: a composited preview tile of
-    /// up to 9 of the folder's own app icons, arranged in a grid shape that
-    /// adapts to the folder's actual app count (see
-    /// `FolderIconComposer.gridShape(forIconCount:)`) — replaces the
-    /// generic `folder.fill` glyph + red count badge this app used before
-    /// Round 12, and Round 12's own fixed-3x3-regardless-of-count layout
-    /// before Round 14. The thumbnail is supplied by the caller
+    /// Renders as a Springboard-style folder: a composited 3x3 preview tile
+    /// of the folder's own app icons, built by `FolderIconComposer` —
+    /// replaces the generic `folder.fill` glyph + red count badge this app
+    /// used before Round 12. The thumbnail is supplied by the caller
     /// (`thumbnail`, possibly `nil` for "not ready yet" — see
     /// `setFolderThumbnail`) rather than composited in here, since building
     /// it requires each app icon from `IconCache`, which callers already
@@ -140,6 +171,7 @@ final class GridCellItem: NSCollectionViewItem {
     func configureAsFolder(name: String, isSelected: Bool, iconSize: Double, thumbnail: NSImage?, requestKey: String) {
         currentRequestKey = requestKey
         applyIconSize(iconSize)
+        applyFolderBorder(true)
         iconView.contentTintColor = nil
         iconView.image = thumbnail ?? FolderIconComposer.placeholderTile(size: iconSize)
         label.isHidden = false
