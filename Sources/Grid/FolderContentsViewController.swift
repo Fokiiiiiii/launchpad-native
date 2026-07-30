@@ -24,7 +24,10 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
     /// their normal size when the folder opens), which a fixed 56pt
     /// regardless of the grid's actual configured size did not satisfy.
     private let iconSize: Double
-    private static let cellSpacing: CGFloat = 16
+    /// Matches the "Tessera" design reference's `LazyVGrid(..., spacing: 26)`
+    /// exactly — the previous 16pt was an invented value, not taken from
+    /// the reference.
+    private static let cellSpacing: CGFloat = 26
     private static let maxColumns = 7
     private var itemWidth: CGFloat { CGFloat(iconSize) + 24 }
     private var itemHeight: CGFloat { CGFloat(iconSize) + 40 }
@@ -74,14 +77,20 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         background.translatesAutoresizingMaskIntoConstraints = false
 
         titleField.translatesAutoresizingMaskIntoConstraints = false
-        titleField.font = .systemFont(ofSize: 15, weight: .semibold)
+        // 21pt regular weight — the reference's own
+        // `Text(folder.name).font(.system(size: TSLayout.folderTitleSize))`
+        // has no explicit weight (defaults to regular); the previous 15pt
+        // semibold was an invented value, not taken from the reference.
+        titleField.font = .systemFont(ofSize: 21, weight: .regular)
         titleField.alignment = .center
 
         let layout = NSCollectionViewFlowLayout()
         layout.itemSize = NSSize(width: itemWidth, height: itemHeight)
         layout.minimumInteritemSpacing = Self.cellSpacing
         layout.minimumLineSpacing = Self.cellSpacing
-        layout.sectionInset = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+        // Matches the reference's grid padding
+        // (`.padding(.horizontal, 22).padding(.vertical, 34)`) exactly.
+        layout.sectionInset = NSEdgeInsets(top: 34, left: 22, bottom: 34, right: 22)
 
         collectionView.collectionViewLayout = layout
         collectionView.dataSource = self
@@ -154,8 +163,11 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         let rows = max(1, Int(ceil(Double(itemCount) / Double(columns))))
         let cellWidth = itemWidth + Self.cellSpacing
         let cellHeight = itemHeight + Self.cellSpacing
-        let width = min(CGFloat(columns) * cellWidth + 24, 640)
-        let height = min(CGFloat(rows) * cellHeight + 60, 480)
+        // Horizontal/vertical section inset (22/34, matching the reference)
+        // plus the title field's own area above the grid (21pt font + its
+        // top padding/gap constraints) and the scroll view's bottom inset.
+        let width = min(CGFloat(columns) * cellWidth + 44, 640)
+        let height = min(CGFloat(rows) * cellHeight + 68 + 70, 480)
         preferredContentSize = NSSize(width: max(width, 240), height: max(height, 180))
     }
 
