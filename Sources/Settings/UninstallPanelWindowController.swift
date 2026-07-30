@@ -145,4 +145,10 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
             self?.onWillClose()
         }
     }
+
+    /// See `SettingsWindowController.windowDidBecomeKey`'s doc comment — same
+    /// fix, same reasoning, applies identically to this panel.
+    public func windowDidBecomeKey(_ notification: Notification) {
+        NSApp.presentationOptions.insert(.autoHideMenuBar)
+    }
 }

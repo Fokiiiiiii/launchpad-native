@@ -171,6 +171,21 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Real, confirmed bug (a user screenshot showed the real macOS menu bar
+    /// sitting over the launcher while Settings was open): `LauncherWindowController.show()`
+    /// sets `NSApp.presentationOptions.insert(.autoHideMenuBar)` once, but
+    /// that bit gets silently dropped by AppKit the moment a *different*,
+    /// ordinary `.titled` window (this one) becomes key — `collectionBehavior`'s
+    /// `.fullScreenAuxiliary` lets this window appear *alongside* a
+    /// full-screen-style presentation, but doesn't itself preserve the
+    /// "auto-hide menu bar" application-wide state across a key-window
+    /// change. Re-asserting it on every `windowDidBecomeKey` (not just once
+    /// in `show()`) is what actually keeps the menu bar hidden while this
+    /// panel has focus.
+    public func windowDidBecomeKey(_ notification: Notification) {
+        NSApp.presentationOptions.insert(.autoHideMenuBar)
+    }
+
     /// Closes Settings if it's open — a no-op otherwise. Used by the
     /// composition root to enforce mutual exclusivity with the Uninstall
     /// panel (Round 12 §7): opening one closes the other first.
