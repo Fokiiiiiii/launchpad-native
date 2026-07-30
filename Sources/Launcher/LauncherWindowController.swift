@@ -439,6 +439,25 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// lands outside this window's frame while it's visible closes it,
     /// independent of key-window bookkeeping.
     private var outsideClickMonitor: Any?
+    /// Real, confirmed gap in the click monitor above: a real screenshot
+    /// showed the launcher grid still fully visible with the *system menu
+    /// bar reading a completely different app's name* — meaning the
+    /// launcher stayed on screen while some other app was frontmost.
+    /// `outsideClickMonitor` only catches a *mouse click* landing outside
+    /// the window; switching apps via Cmd+Tab, Mission Control, Spotlight,
+    /// or clicking a Dock icon reassigns "frontmost app" without any click
+    /// this window (or even this process) ever observes. `NSWorkspace`'s
+    /// `didActivateApplicationNotification` is the one reliable, app-switch-
+    /// method-agnostic signal for "some other app just became frontmost" —
+    /// this app's own `.autoHideMenuBar` presentation option only ever
+    /// applies while *this* app is the frontmost one, so as soon as another
+    /// app activates, that app's menu bar takes over regardless of what
+    /// this window's own level/collectionBehavior/presentationOptions say.
+    /// The fix is to hide the launcher the instant that happens, matching
+    /// real Launchpad/Mission Control's own behavior (losing focus dismisses
+    /// the overlay) — not to keep trying to suppress a menu bar this app no
+    /// longer has any say over.
+    private var appActivationObserver: Any?
 
     private func startOutsideClickMonitorIfNeeded() {
         guard outsideClickMonitor == nil else { return }
@@ -449,6 +468,20 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             self.hide()
         }
         DiagnosticsLog.launcher.info("outsideClickMonitor installed: \(self.outsideClickMonitor != nil, privacy: .public)")
+
+        guard appActivationObserver == nil else { return }
+        appActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self else { return }
+            let activatedApp = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            let isThisApp = activatedApp?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+            DiagnosticsLog.launcher.info("appActivationObserver fired: activatedBundleID=\(activatedApp?.bundleIdentifier ?? "?", privacy: .public), isThisApp=\(isThisApp, privacy: .public), isVisible=\(self.isVisible, privacy: .public)")
+            guard self.isVisible, !isThisApp else { return }
+            self.hide()
+        }
     }
 
     /// "ポインタまたはアクティブウインドウが存在するディスプレイ" — the
