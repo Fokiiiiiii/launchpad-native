@@ -53,6 +53,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private let collectionView = GridCollectionView()
     private let scrollView = NSScrollView()
     private let pageControl = PageControlView()
+    private var pageControlBottomConstraint: NSLayoutConstraint?
     private let layout = PagedGridLayout()
 
     private var currentPage = 0
@@ -157,6 +158,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         root.addSubview(scrollView)
         root.addSubview(pageControl)
+        let pageControlBottom = pageControl.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24)
+        self.pageControlBottomConstraint = pageControlBottom
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: root.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -164,13 +167,41 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             scrollView.bottomAnchor.constraint(equalTo: pageControl.topAnchor, constant: -8),
 
             pageControl.centerXAnchor.constraint(equalTo: root.centerXAnchor),
-            pageControl.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24),
+            pageControlBottom,
             pageControl.widthAnchor.constraint(equalToConstant: 240),
             pageControl.heightAnchor.constraint(equalToConstant: 32)
         ])
 
         view = root
         model.onChange = { [weak self] in self?.reload() }
+    }
+
+    public override func viewDidAppear() {
+        super.viewDidAppear()
+        updatePageControlBottomMargin()
+    }
+
+    /// Real, confirmed bug (a user screenshot showed no page dots at all,
+    /// on a 4-page grid): `LauncherWindow` deliberately spans the screen's
+    /// full `frame` (not `visibleFrame`) so the real system Dock — a
+    /// separate, higher-window-level surface — can render on top of it
+    /// (Round 4 §14). But this view's own `pageControl` was pinned a fixed
+    /// 24pt above *this view's* bottom edge, which is the *screen's* bottom
+    /// edge — with the Dock actually on screen (not auto-hidden), that fixed
+    /// 24pt margin sits well underneath the Dock's own real height, so the
+    /// dots were being drawn but immediately covered up. `NSScreen.visibleFrame`
+    /// is the public, always-current source of truth for how much of the
+    /// screen's bottom the Dock is actually reserving right now (0 if
+    /// auto-hidden, its real height otherwise) — recomputed here (not just
+    /// once) since the Dock's size/auto-hide setting, or the screen itself,
+    /// can change while the launcher stays open across `show()` calls.
+    private func updatePageControlBottomMargin() {
+        guard let screen = view.window?.screen else { return }
+        let dockReservedHeight = max(screen.visibleFrame.minY - screen.frame.minY, 0)
+        pageControlBottomConstraint?.constant = -(dockReservedHeight + 24)
+        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_GRID_LAYOUT"] == "1" {
+            DiagnosticsLog.grid.info("updatePageControlBottomMargin: screen.frame=\(String(describing: screen.frame), privacy: .public), screen.visibleFrame=\(String(describing: screen.visibleFrame), privacy: .public), dockReservedHeight=\(dockReservedHeight, privacy: .public)")
+        }
     }
 
     public func reload() {
