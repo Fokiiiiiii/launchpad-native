@@ -20,22 +20,29 @@ struct FolderIconView: View {
     let icons: [NSImage]
     let size: CGFloat
 
-    private var corner: CGFloat { size * 0.236 }
-    private var cellGap: CGFloat { size * 0.055 }
-    private var cellCorner: CGFloat { size * 0.05 }
-    private var pad: CGFloat { size * 0.13 }
+    /// Real macOS app icons (`.icns` assets fetched via `NSWorkspace`) have
+    /// their own visible margin baked in — Apple's icon canvas leaves
+    /// breathing room around the glyph rather than filling the full square
+    /// edge-to-edge. A folder tile drawn edge-to-edge at the *same*
+    /// bounding-box size as a neighboring app icon therefore reads as
+    /// visibly bigger/heavier by contrast, even though the two cells'
+    /// actual Auto Layout frames are pixel-identical (confirmed via debug
+    /// frame logging) — a real user's side-by-side screenshot of a real
+    /// app icon next to a folder confirmed exactly this. Insetting the
+    /// whole visible tile mimics that natural margin.
+    private var visibleSize: CGFloat { size * 0.86 }
+    private var corner: CGFloat { visibleSize * 0.236 }
+    private var cellGap: CGFloat { visibleSize * 0.055 }
+    private var cellCorner: CGFloat { visibleSize * 0.05 }
+    private var pad: CGFloat { visibleSize * 0.13 }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
         // No fill behind the tile at all — a real user found the filled
         // background (plus the top-highlight gradient this used to also
         // draw over the whole tile) read as an unwanted "shadow" over the
-        // app-less padding/gaps, and made the folder look conspicuously
-        // bigger/heavier than neighboring app icons even at the exact same
-        // pixel dimensions (confirmed via debug frame logging — the outer
-        // frame matches an app icon's exactly; the perceived size
-        // difference was purely from this fill's visual weight). Only the
-        // real icon cells and a hairline outer stroke remain.
+        // app-less padding/gaps. Only the real icon cells and a hairline
+        // outer stroke remain.
         Grid(horizontalSpacing: cellGap, verticalSpacing: cellGap) {
             ForEach(0..<3, id: \.self) { row in
                 GridRow {
@@ -47,9 +54,10 @@ struct FolderIconView: View {
             }
         }
         .padding(pad)
-        .frame(width: size, height: size)
+        .frame(width: visibleSize, height: visibleSize)
         .clipShape(shape)
         .overlay(shape.strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+        .frame(width: size, height: size)
     }
 
     @ViewBuilder
