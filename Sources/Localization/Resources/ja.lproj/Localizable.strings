@@ -12,8 +12,6 @@
 "settings.about.opensource" = "オープンソース、サードパーティ依存なし。";
 "settings.grid.columns" = "列数: %d";
 "settings.grid.rows" = "行数: %d";
-"settings.grid.iconsize" = "アイコンサイズ: %dpt";
-"settings.grid.iconsize.accessibility" = "アイコンサイズ";
 "settings.grid.layout" = "レイアウト";
 "settings.grid.layout.paged" = "ページ形式";
 "settings.grid.layout.verticalscroll" = "縦スクロール";

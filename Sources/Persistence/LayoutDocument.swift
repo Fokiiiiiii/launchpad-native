@@ -78,7 +78,6 @@ public enum AppIconStyle: String, Codable, Sendable, CaseIterable {
 public struct GridSettings: Codable, Sendable, Hashable {
     public var columns: Int
     public var rows: Int
-    public var iconSize: Double
     public var horizontalSpacing: Double
     public var verticalSpacing: Double
     public var labelVisible: Bool
@@ -90,7 +89,6 @@ public struct GridSettings: Codable, Sendable, Hashable {
     public init(
         columns: Int,
         rows: Int,
-        iconSize: Double,
         horizontalSpacing: Double,
         verticalSpacing: Double,
         labelVisible: Bool,
@@ -101,7 +99,6 @@ public struct GridSettings: Codable, Sendable, Hashable {
     ) {
         self.columns = columns
         self.rows = rows
-        self.iconSize = iconSize
         self.horizontalSpacing = horizontalSpacing
         self.verticalSpacing = verticalSpacing
         self.labelVisible = labelVisible
@@ -112,14 +109,13 @@ public struct GridSettings: Codable, Sendable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case columns, rows, iconSize, horizontalSpacing, verticalSpacing, labelVisible, labelLineCount, pageMargins, folderGridSize, sortMode
+        case columns, rows, horizontalSpacing, verticalSpacing, labelVisible, labelLineCount, pageMargins, folderGridSize, sortMode
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         columns = try container.decode(Int.self, forKey: .columns)
         rows = try container.decode(Int.self, forKey: .rows)
-        iconSize = try container.decode(Double.self, forKey: .iconSize)
         horizontalSpacing = try container.decode(Double.self, forKey: .horizontalSpacing)
         verticalSpacing = try container.decode(Double.self, forKey: .verticalSpacing)
         labelVisible = try container.decode(Bool.self, forKey: .labelVisible)
@@ -132,7 +128,6 @@ public struct GridSettings: Codable, Sendable, Hashable {
     public static let `default` = GridSettings(
         columns: 7,
         rows: 5,
-        iconSize: 96,
         horizontalSpacing: 24,
         verticalSpacing: 32,
         labelVisible: true,

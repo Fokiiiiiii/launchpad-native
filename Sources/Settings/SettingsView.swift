@@ -56,11 +56,6 @@ public struct SettingsView: View {
                 Stepper(value: $viewModel.rows, in: 2...8) {
                     Label(L10n.rowsLabel(viewModel.rows), systemImage: "rectangle.grid.1x2")
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(L10n.iconSizeLabel(Int(viewModel.iconSize)), systemImage: "app.badge")
-                    Slider(value: $viewModel.iconSize, in: 48...160)
-                        .accessibilityLabel(L10n.iconSizeAccessibilityLabel)
-                }
             } header: {
                 Label(L10n.tabGrid, systemImage: "square.grid.3x3.fill")
                     .foregroundStyle(.blue)

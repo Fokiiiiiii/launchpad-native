@@ -43,10 +43,6 @@ public enum L10n {
     public static func rowsLabel(_ n: Int) -> String {
         String(format: string("settings.grid.rows", "Rows: %d"), n)
     }
-    public static func iconSizeLabel(_ n: Int) -> String {
-        String(format: string("settings.grid.iconsize", "Icon size: %dpt"), n)
-    }
-    public static var iconSizeAccessibilityLabel: String { string("settings.grid.iconsize.accessibility", "Icon size") }
     public static var layoutPickerLabel: String { string("settings.grid.layout", "Layout") }
     public static var layoutModePaged: String { string("settings.grid.layout.paged", "Paged") }
     public static var layoutModeVerticalScroll: String { string("settings.grid.layout.verticalscroll", "Vertical Scroll") }

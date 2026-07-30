@@ -28,7 +28,6 @@ public final class SettingsViewModel: ObservableObject {
     private let model: GridModel
     private let onTriggerSettingsChanged: () -> Bool
     private let onDockVisibilityChanged: (Bool) -> Void
-    private var iconSizePersistWorkItem: DispatchWorkItem?
 
     @Published public var selectedTab: SettingsTab = .general
     @Published public var columns: Int {
@@ -43,18 +42,6 @@ public final class SettingsViewModel: ObservableObject {
             guard rows != oldValue else { return }
             applyGridDimensions()
             persist()
-        }
-    }
-    /// Live-applies on every slider tick (so dragging visibly resizes the
-    /// grid immediately), but debounces the disk write ~0.3s after the
-    /// user stops moving it — a continuous slider drag firing dozens of
-    /// `didSet`s a second shouldn't turn into dozens of `layout.json`
-    /// writes a second.
-    @Published public var iconSize: Double {
-        didSet {
-            guard iconSize != oldValue else { return }
-            applyGridDimensions()
-            scheduleIconSizePersist()
         }
     }
     @Published public var layoutMode: LayoutMode {
@@ -178,7 +165,6 @@ public final class SettingsViewModel: ObservableObject {
         let grid = model.gridSettings
         columns = grid.columns
         rows = grid.rows
-        iconSize = grid.iconSize
         layoutMode = model.layoutMode
         sortMode = grid.sortMode
         hideDockWhileLauncherOpen = model.hideDockWhileLauncherOpen
@@ -209,15 +195,7 @@ public final class SettingsViewModel: ObservableObject {
         var grid = model.gridSettings
         grid.columns = columns
         grid.rows = rows
-        grid.iconSize = iconSize
         model.updateGridSettings(grid)
-    }
-
-    private func scheduleIconSizePersist() {
-        iconSizePersistWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in self?.persist() }
-        iconSizePersistWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: workItem)
     }
 
     /// Repacks every page tightly under the *current* grid settings — a

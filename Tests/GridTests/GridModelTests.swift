@@ -456,10 +456,10 @@ private func makeModel(directory: URL) -> GridModel {
     await model.loadDocument()
     #expect(model.pages.map(\.count) == [10, 8], "sanity check: loaded arrangement is as saved")
 
-    // Change only iconSize — columns/rows (and therefore capacity) stay
-    // the same.
+    // Change only horizontalSpacing — columns/rows (and therefore capacity)
+    // stay the same.
     var updated = model.gridSettings
-    updated.iconSize = updated.iconSize + 8
+    updated.horizontalSpacing = updated.horizontalSpacing + 8
     model.updateGridSettings(updated)
 
     #expect(model.pages.map(\.count) == [10, 8], "capacity-unchanged settings update must not repack pages")

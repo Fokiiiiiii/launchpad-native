@@ -12,8 +12,6 @@
 "settings.about.opensource" = "Open source, no third-party dependencies.";
 "settings.grid.columns" = "Columns: %d";
 "settings.grid.rows" = "Rows: %d";
-"settings.grid.iconsize" = "Icon size: %dpt";
-"settings.grid.iconsize.accessibility" = "Icon size";
 "settings.grid.layout" = "Layout";
 "settings.grid.layout.paged" = "Paged";
 "settings.grid.layout.verticalscroll" = "Vertical Scroll";
