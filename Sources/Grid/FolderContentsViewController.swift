@@ -2,12 +2,16 @@ import AppKit
 import Catalog
 import Persistence
 
-/// Shown in a transient `NSPopover` when a folder is opened. Folder-internal
-/// paging (`Folder.pages`) is flattened to one scrollable list here — the
-/// data model still tracks per-page ordering (needed for legacy import
-/// fidelity), but a folder rarely holds enough items to need its own paging
-/// UI, so this is a deliberate Phase 4 simplification, not a data loss.
-final class FolderContentsViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate, NSPopoverDelegate {
+/// Shown inside a full-screen dimming backdrop when a folder is opened
+/// (`GridViewController.openFolder`/`FolderOverlayBackdropView`) — this
+/// controller only owns its own content (title + collection view + glass
+/// card background); the full-screen take-over presentation is entirely
+/// the caller's concern. Folder-internal paging (`Folder.pages`) is
+/// flattened to one scrollable list here — the data model still tracks
+/// per-page ordering (needed for legacy import fidelity), but a folder
+/// rarely holds enough items to need its own paging UI, so this is a
+/// deliberate Phase 4 simplification, not a data loss.
+final class FolderContentsViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate {
     private let itemIdentifier = NSUserInterfaceItemIdentifier("FolderCellItem")
     private let model: GridModel
     private let folderID: FolderID
@@ -247,13 +251,5 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
             uninstall: nil // Same reasoning as showWindows: open the app itself first.
         )
         return ContextMenuBuilder.menu(for: record, isInFolder: true, actions: actions)
-    }
-
-    // MARK: NSPopoverDelegate
-
-    func popoverDidClose(_ notification: Notification) {
-        // Nothing to persist here directly — GridModel mutations already
-        // save themselves; this exists so future folder-specific cleanup
-        // (e.g. auto-collapsing an emptied folder's popover) has a hook.
     }
 }

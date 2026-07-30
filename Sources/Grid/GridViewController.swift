@@ -56,7 +56,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private let layout = PagedGridLayout()
 
     private var currentPage = 0
-    private var openFolderPopover: NSPopover?
+    private var folderOverlayBackdrop: FolderOverlayBackdropView?
     private let windowThumbnailService = WindowThumbnailService()
 
     // MARK: Drag-tracked page paging state (see `beginPageDrag`)
@@ -826,6 +826,28 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
+    /// Debug-only (`LAUNCHPAD_DEBUG_OPEN_FIRST_FOLDER`, wired in
+    /// `AppDelegate`) — opens the first folder found on the current page,
+    /// exercising the exact same `openFolder` path a real click on a
+    /// folder icon takes (`activate(at:)` calls it directly; this just
+    /// skips finding the folder via a real click). Verifies the new
+    /// full-screen overlay's view hierarchy/constraints/animation build
+    /// without crashing — real click-to-dismiss-on-backdrop and drag-out-
+    /// of-folder still need the user's own hands-on confirmation, since
+    /// those depend on real event delivery this session can't fully drive.
+    public func debugOpenFirstFolder() {
+        guard model.pages.indices.contains(currentPage) else { return }
+        guard let index = model.pages[currentPage].firstIndex(where: {
+            if case .folder = $0 { return true }
+            return false
+        }), case .folder(let folderID) = model.pages[currentPage][index] else {
+            DiagnosticsLog.launcher.info("debugOpenFirstFolder: no folder on page \(self.currentPage, privacy: .public)")
+            return
+        }
+        DiagnosticsLog.launcher.info("debugOpenFirstFolder: opening folder at index \(index, privacy: .public)")
+        openFolder(folderID, anchorIndexPath: IndexPath(item: index, section: 0))
+    }
+
     /// Debug-only — this session has no Accessibility/GUI-scripting
     /// permission, so a real mouse-down/drag/mouse-up on an icon can't be
     /// performed to verify the item-drag state machine end-to-end. Drives
@@ -977,10 +999,21 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
+    /// Full-screen dimmed take-over, matching the user-supplied "Tessera"
+    /// design reference's own `FolderOverlay` exactly (explicit request:
+    /// "フォルダ名の中身は全画面で表示されるzipのやつにして") — a small
+    /// anchored `NSPopover` (this project's prior, safer choice) was
+    /// rejected as not matching. Deliberately keeps `FolderContentsViewController`
+    /// and all of its already-proven AppKit interaction code (click-to-
+    /// launch, right-click context menu, drag-out-to-remove) completely
+    /// unchanged — only the *presentation container* changes, from an
+    /// anchored popover to a full-bounds dimming backdrop with the same
+    /// content view centered within it. This avoids re-risking interaction
+    /// logic that's already been fixed multiple times in this project's
+    /// history for a purely visual change.
     private func openFolder(_ folderID: FolderID, anchorIndexPath: IndexPath) {
         let start = DispatchTime.now()
-        guard let folder = model.folders[folderID],
-              let cell = collectionView.item(at: anchorIndexPath) else { return }
+        guard model.folders[folderID] != nil else { return }
 
         let folderVC = FolderContentsViewController(
             model: model,
@@ -988,7 +1021,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             iconCache: iconCache,
             iconSize: currentIconSize,
             onLaunch: { [weak self] record in
-                self?.openFolderPopover?.close()
+                self?.closeFolderOverlay()
                 self?.onLaunch(record)
             },
             onItemDraggedOut: { [weak self] folderPage, folderIndex in
@@ -997,20 +1030,55 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 Task { await self.model.save() }
             }
         )
-        let popover = NSPopover()
-        popover.contentViewController = folderVC
-        popover.behavior = .transient
-        popover.animates = true
-        // Real, confirmed bug: `contentSize` here had no effect —
-        // `FolderContentsViewController.preferredContentSize` (which
-        // Auto-Layout-based view controllers must use instead) is what
-        // actually sizes the popover now. See that class's doc comment.
-        popover.delegate = folderVC
-        openFolderPopover = popover
-        _ = folder // silence unused-in-release warnings if folder gains more fields later
-        popover.show(relativeTo: cell.view.bounds, of: cell.view, preferredEdge: .maxY)
+        folderVC.loadViewIfNeeded()
+
+        let backdrop = FolderOverlayBackdropView()
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        backdrop.wantsLayer = true
+        backdrop.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        backdrop.onDismiss = { [weak self] in self?.closeFolderOverlay() }
+
+        let panel = folderVC.view
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        backdrop.addSubview(panel)
+        view.addSubview(backdrop)
+
+        let size = folderVC.preferredContentSize
+        NSLayoutConstraint.activate([
+            backdrop.topAnchor.constraint(equalTo: view.topAnchor),
+            backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            panel.centerXAnchor.constraint(equalTo: backdrop.centerXAnchor),
+            panel.topAnchor.constraint(equalTo: backdrop.topAnchor, constant: 48),
+            panel.widthAnchor.constraint(equalToConstant: size.width),
+            panel.heightAnchor.constraint(equalToConstant: size.height)
+        ])
+
+        folderOverlayBackdrop?.removeFromSuperview()
+        folderOverlayBackdrop = backdrop
+        view.window?.makeFirstResponder(backdrop)
+
+        backdrop.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            backdrop.animator().alphaValue = 1
+        }
+
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
-        DiagnosticsLog.launcher.info("folder transition: build+show popover took \(ms, privacy: .public)ms")
+        DiagnosticsLog.launcher.info("folder transition: build+show full-screen overlay took \(ms, privacy: .public)ms")
+    }
+
+    private func closeFolderOverlay() {
+        guard let backdrop = folderOverlayBackdrop else { return }
+        folderOverlayBackdrop = nil
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.14
+            backdrop.animator().alphaValue = 0
+        }, completionHandler: {
+            backdrop.removeFromSuperview()
+        })
     }
 
     private func showWindows(for record: ApplicationRecord, anchorIndexPath: IndexPath) {
@@ -2219,5 +2287,30 @@ private final class SnapshotDataSource: NSObject, NSCollectionViewDataSource {
             cell.configureAsFolder(name: name, isSelected: false, iconSize: iconSize, icons: icons, requestKey: "folder:\(folderID.value)")
         }
         return cell
+    }
+}
+
+/// Full-bounds dimming backdrop for the opened-folder overlay (see
+/// `GridViewController.openFolder`'s doc comment). Clicking anywhere on
+/// the backdrop itself dismisses — clicks on the folder panel (a subview
+/// added on top) never reach here at all, since AppKit hit-tests subviews
+/// before their parent, so the panel's own click-to-launch/context-menu
+/// handling is completely unaffected. Also intercepts Escape
+/// (`cancelOperation`, standard AppKit convention for the Escape key) so
+/// it closes just the folder overlay rather than propagating up to the
+/// launcher window's own Escape-hides-the-whole-launcher handling — this
+/// view must be made first responder when shown for that interception to
+/// actually happen (see the call site).
+private final class FolderOverlayBackdropView: NSView {
+    var onDismiss: (() -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        onDismiss?()
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        onDismiss?()
     }
 }

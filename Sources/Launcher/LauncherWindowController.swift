@@ -109,6 +109,12 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         viewController?.debugSimulatePageDrag(commit: commit)
     }
 
+    /// Debug-only — see `GridViewController.debugOpenFirstFolder`'s doc
+    /// comment for why this exists.
+    public func debugOpenFirstFolder() {
+        viewController?.debugOpenFirstFolder()
+    }
+
     /// Debug-only — see `GridViewController.debugSimulateItemDrag`'s doc
     /// comment for why this exists.
     public func debugSimulateItemDrag(mode: String) {

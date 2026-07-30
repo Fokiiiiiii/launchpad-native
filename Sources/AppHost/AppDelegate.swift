@@ -217,6 +217,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 launcherWindowController.debugSimulateItemDrag(mode: mode)
             }
 
+            // Debug-only: opens the first folder found on the current page,
+            // exercising the new full-screen overlay's view construction
+            // without needing a real click.
+            if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_OPEN_FIRST_FOLDER"] == "1" {
+                launcherWindowController.debugOpenFirstFolder()
+            }
+
             for await update in await scanner.updates() {
                 launcherWindowController.updateRecords(update.records)
             }

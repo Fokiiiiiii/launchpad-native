@@ -394,6 +394,13 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         gridViewController.debugSimulatePageDrag(commit: commit)
     }
 
+    /// Debug-only entry point (`LAUNCHPAD_DEBUG_OPEN_FIRST_FOLDER`, wired
+    /// in `AppDelegate`) — see `GridViewController.debugOpenFirstFolder`'s
+    /// doc comment for why this exists.
+    func debugOpenFirstFolder() {
+        gridViewController.debugOpenFirstFolder()
+    }
+
     /// Debug-only entry point (`LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG`, wired
     /// in `AppDelegate`) — see `GridViewController.debugSimulateItemDrag`'s
     /// doc comment for why this exists.
