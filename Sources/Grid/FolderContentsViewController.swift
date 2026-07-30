@@ -1,18 +1,29 @@
 import AppKit
 import Catalog
 import Persistence
+import SwiftUI
 
 /// Shown inside a full-screen dimming backdrop when a folder is opened
 /// (`GridViewController.openFolder`/`FolderOverlayBackdropView`) — this
-/// controller only owns its own content (title + collection view + glass
-/// card background); the full-screen take-over presentation is entirely
-/// the caller's concern. Folder-internal paging (`Folder.pages`) is
-/// flattened to one scrollable list here — the data model still tracks
-/// per-page ordering (needed for legacy import fidelity), but a folder
-/// rarely holds enough items to need its own paging UI, so this is a
-/// deliberate Phase 4 simplification, not a data loss.
-final class FolderContentsViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate {
-    private let itemIdentifier = NSUserInterfaceItemIdentifier("FolderCellItem")
+/// controller only owns its own content (title + tile grid + glass card
+/// background); the full-screen take-over presentation is entirely the
+/// caller's concern. Folder-internal paging (`Folder.pages`) is flattened to
+/// one scrollable list here — the data model still tracks per-page ordering
+/// (needed for legacy import fidelity), but a folder rarely holds enough
+/// items to need its own paging UI, so this is a deliberate simplification,
+/// not a data loss.
+///
+/// The tile grid itself is real SwiftUI (`FolderOverlayGridContent`/
+/// `FolderOverlayTileView`, hosted via `NSHostingView`), directly adapted
+/// from the user-supplied "Tessera" design reference's own `FolderOverlay`/
+/// `AppTile` — not a hand-translated AppKit/`NSCollectionView` reinterpretation
+/// of its numbers. This follows the same lesson already applied to the
+/// closed folder icon (`FolderIconView`): tuning AppKit geometry to
+/// *approximate* the reference repeatedly fell short of the user's explicit
+/// "寸分違わず同じものにできないの？" (can't you make it exactly,
+/// pixel-for-pixel identical to the reference?) ask, whereas hosting the
+/// reference's actual view code is identical by construction.
+final class FolderContentsViewController: NSViewController {
     private let model: GridModel
     private let folderID: FolderID
     private let iconCache: IconCache
@@ -20,31 +31,48 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
     private let onItemDraggedOut: (Int, Int) -> Void
 
     private let titleField = NSTextField(labelWithString: "")
-    private let collectionView = GridCollectionView()
-    private var pendingClickIndexPath: IndexPath?
+    private let gridModel = FolderOverlayGridModel()
     /// The main grid's own current icon size (`GridViewController.currentIconSize`)
     /// — a real design reference the user supplied directly asked for
     /// "内部アイコンが通常サイズの配置へ広がる" (contained icons expand to
     /// their normal size when the folder opens), which a fixed 56pt
     /// regardless of the grid's actual configured size did not satisfy.
     private let iconSize: Double
+    /// The main grid's own column count (`GridSettings.columns`) — a real
+    /// screenshot of a genuinely different app (confirmed by the user;
+    /// its "その他" folder held system utilities that don't match this
+    /// app's own data at all) showed the opened folder always using the
+    /// *same* fixed column count as the closed grid itself, with rows
+    /// growing/shrinking to fit — not a variable column count computed
+    /// from the item count (this file's previous `sqrt(itemCount * 1.6)`
+    /// heuristic), which the reference never does
+    /// (`LazyVGrid(columns: Array(repeating: ..., count: metrics.columns))`
+    /// — always exactly `metrics.columns`).
+    private let columns: Int
     /// Matches the "Tessera" design reference's `LazyVGrid(..., spacing: 26)`
     /// exactly — the previous 16pt was an invented value, not taken from
     /// the reference.
     private static let cellSpacing: CGFloat = 26
-    private static let maxColumns = 7
     private var itemWidth: CGFloat { CGFloat(iconSize) + 24 }
     private var itemHeight: CGFloat { CGFloat(iconSize) + 40 }
 
-    /// Flattened (folderPage, folderIndex, item) so context-menu "Remove from
-    /// Folder" can address the exact underlying position.
+    /// Flattened (folderPage, folderIndex, item) so "Remove from Folder" can
+    /// address the exact underlying position.
     private var flattenedItems: [(page: Int, index: Int, item: LayoutItem)] = []
+    /// Bumped on every `refresh()`; guards a still-in-flight async icon
+    /// fetch from writing into `gridModel.tiles` after a *later* refresh
+    /// has already replaced the array (same purpose as the
+    /// `currentRequestKey` guard `GridCellItem` uses for cell reuse, but
+    /// keyed to this controller's own single shared tile array instead of
+    /// per-cell identity).
+    private var refreshGeneration = 0
 
     init(
         model: GridModel,
         folderID: FolderID,
         iconCache: IconCache,
         iconSize: Double,
+        columns: Int,
         onLaunch: @escaping (ApplicationRecord) -> Void,
         onItemDraggedOut: @escaping (Int, Int) -> Void
     ) {
@@ -52,6 +80,7 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
         self.folderID = folderID
         self.iconCache = iconCache
         self.iconSize = iconSize
+        self.columns = max(columns, 1)
         self.onLaunch = onLaunch
         self.onItemDraggedOut = onItemDraggedOut
         super.init(nibName: nil, bundle: nil)
@@ -63,67 +92,26 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
     override func loadView() {
         let root = NSView()
 
-        // Dark, styled card background (Round 12 §3) — a decorative sibling
-        // behind the title/collection view, matching the reference's
-        // self-contained floating "Utilities"-style card rather than the
-        // bare, unstyled default NSPopover chrome this used to rely on.
-        // `NSPopover` itself is deliberately kept (not replaced with a
-        // custom borderless NSWindow) since its `.transient` behavior
-        // already gives correct "outside click closes just the popover,
-        // never the launcher" dismissal for free — a thin sliver of the
-        // popover's own default bezel/arrow remains around this card since
-        // there's no public API to fully suppress it. Corner radius (34)
-        // matches the "Tessera" design reference's own folder panel exactly
-        // — a generous, simple rounded card, no extra dividers/section
-        // headers beyond the title (matches the user's explicit
-        // "シンプルな角丸パネル...上部にグループ名だけ" request).
+        // Dark, styled card background — a decorative sibling behind the
+        // title/grid, matching the reference's self-contained floating
+        // card. Corner radius (34) matches the "Tessera" design reference's
+        // own folder panel exactly.
         let background = GlassBackgroundHelper.makeBackground(cornerRadius: 34, dark: true)
         background.translatesAutoresizingMaskIntoConstraints = false
 
         titleField.translatesAutoresizingMaskIntoConstraints = false
         // 21pt regular weight — the reference's own
         // `Text(folder.name).font(.system(size: TSLayout.folderTitleSize))`
-        // has no explicit weight (defaults to regular); the previous 15pt
-        // semibold was an invented value, not taken from the reference.
+        // has no explicit weight (defaults to regular).
         titleField.font = .systemFont(ofSize: 21, weight: .regular)
         titleField.alignment = .center
 
-        let layout = NSCollectionViewFlowLayout()
-        layout.itemSize = NSSize(width: itemWidth, height: itemHeight)
-        layout.minimumInteritemSpacing = Self.cellSpacing
-        layout.minimumLineSpacing = Self.cellSpacing
-        // Matches the reference's grid padding
-        // (`.padding(.horizontal, 22).padding(.vertical, 34)`) exactly.
-        layout.sectionInset = NSEdgeInsets(top: 34, left: 22, bottom: 34, right: 22)
-
-        collectionView.collectionViewLayout = layout
-        collectionView.dataSource = self
-        collectionView.delegate = self
-        collectionView.register(GridCellItem.self, forItemWithIdentifier: itemIdentifier)
-        collectionView.isSelectable = true
-        collectionView.backgroundColors = [.clear]
-        collectionView.menuProvider = { [weak self] indexPath in self?.contextMenu(for: indexPath) }
-        // Real, confirmed bug: `GridCollectionView`'s `mouseDown` override
-        // never calls `super.mouseDown(with:)` for a content hit (see that
-        // class's doc comment) — it only calls `onItemMouseDown`, which this
-        // controller never wired up. That silently broke clicking an app
-        // inside an opened folder (no click ever reached
-        // `didSelectItemsAt`), on top of `didSelectItemsAt` itself never
-        // firing for the same reason. Wired here with the simplest
-        // click-only handling this view needs — no drag/reorder/folder-
-        // creation machinery, since a folder's contents are a flat list.
-        collectionView.onItemMouseDown = { [weak self] indexPath, _ in
-            self?.pendingClickIndexPath = indexPath
-        }
-        collectionView.onItemMouseUp = { [weak self] _ in
-            guard let self, let indexPath = self.pendingClickIndexPath else { return }
-            self.pendingClickIndexPath = nil
-            self.collectionView(self.collectionView, didSelectItemsAt: [indexPath])
-        }
+        let hosting = NSHostingView(rootView: FolderOverlayGridContent(model: gridModel, columns: columns, iconSize: CGFloat(iconSize)))
+        hosting.translatesAutoresizingMaskIntoConstraints = false
 
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = collectionView
+        scrollView.documentView = hosting
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
 
@@ -143,27 +131,28 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
             scrollView.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10)
+            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+
+            hosting.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            hosting.topAnchor.constraint(equalTo: scrollView.topAnchor)
         ])
         view = root
-        // Real, confirmed bug: `NSPopover.contentSize` (set by the caller in
-        // `GridViewController.openFolder`) has no effect once the content
-        // view controller's view uses Auto Layout (documented Apple
-        // behavior) — this view has no explicit size constraints of its own
-        // otherwise, so Auto Layout collapsed it to whatever minimum size
-        // its children could shrink to, which is why the popover appeared
-        // stuck at roughly the size of the folder icon itself instead of
-        // actually opening. `preferredContentSize` is the mechanism that
-        // *does* work for an Auto Layout view controller.
+        // `NSPopover.contentSize`/the caller's own size constraints have no
+        // effect once the content view controller's view uses Auto Layout
+        // (documented Apple behavior) — `preferredContentSize` is the
+        // mechanism that actually works for an Auto Layout view controller.
         refresh()
     }
 
-    /// Computes `preferredContentSize` from the actual item count — a wide
-    /// (up to 7 columns), scrollable card rather than the old fixed 320x320
-    /// square, matching the reference's wide "Utilities"-style folder.
+    /// Computes `preferredContentSize` from the fixed `columns` count (the
+    /// main grid's own column count — see that property's doc comment for
+    /// why this isn't a per-item-count heuristic) — width is therefore
+    /// always the same regardless of how many apps the folder holds; only
+    /// the row count (hence height, up to the 480pt/scrolling cap) grows
+    /// or shrinks with the actual item count.
     private func updatePreferredContentSize() {
         let itemCount = max(flattenedItems.count, 1)
-        let columns = max(1, min(Self.maxColumns, Int(ceil(sqrt(Double(itemCount) * 1.6)))))
         let rows = max(1, Int(ceil(Double(itemCount) / Double(columns))))
         let cellWidth = itemWidth + Self.cellSpacing
         let cellHeight = itemHeight + Self.cellSpacing
@@ -186,70 +175,42 @@ final class FolderContentsViewController: NSViewController, NSCollectionViewData
             }
         }
         updatePreferredContentSize()
-        collectionView.reloadData()
-    }
 
-    // MARK: NSCollectionViewDataSource
+        refreshGeneration += 1
+        let generation = refreshGeneration
+        let cache = iconCache
 
-    func numberOfSections(in collectionView: NSCollectionView) -> Int { 1 }
-
-    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
-        flattenedItems.count
-    }
-
-    func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
-        guard let cell = collectionView.makeItem(withIdentifier: itemIdentifier, for: indexPath) as? GridCellItem,
-              flattenedItems.indices.contains(indexPath.item) else {
-            return NSCollectionViewItem()
-        }
-        let entry = flattenedItems[indexPath.item]
-        if case .app(let id) = entry.item, let record = model.record(for: id) {
-            let cache = iconCache
-            cell.configureAsApp(record: record, icon: NSImage(), isSelected: false, iconSize: iconSize)
-            let expectedKey = record.iconCacheKey
-            Task { @MainActor in
-                let icon = await cache.icon(for: record)
-                // Same cell-reuse guard as GridViewController — see its comment.
-                guard cell.currentRequestKey == expectedKey else { return }
-                cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: iconSize)
+        var tiles: [FolderOverlayTile] = []
+        for entry in flattenedItems {
+            guard case .app(let id) = entry.item, let record = model.record(for: id) else { continue }
+            let tileID = record.iconCacheKey
+            let cachedIcon = cache.cachedIconIfAvailable(for: record)
+            tiles.append(FolderOverlayTile(
+                id: tileID,
+                name: model.displayName(for: record),
+                icon: cachedIcon,
+                onLaunch: { [weak self] in self?.onLaunch(record) },
+                onOpenNewInstance: record.canOpenNewInstance ? { [weak self] in
+                    self?.model.recordLaunch(for: record.id)
+                    Task { await self?.model.save() }
+                    AppLauncher.launch(record, createsNewInstance: true)
+                } : nil,
+                onShowInFinder: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
+                onRemoveFromFolder: { [weak self] in
+                    guard let self else { return }
+                    self.onItemDraggedOut(entry.page, entry.index)
+                    self.refresh()
+                }
+            ))
+            if cachedIcon == nil {
+                Task { @MainActor [weak self] in
+                    let icon = await cache.icon(for: record)
+                    guard let self, self.refreshGeneration == generation else { return }
+                    guard let index = self.gridModel.tiles.firstIndex(where: { $0.id == tileID }) else { return }
+                    self.gridModel.tiles[index].icon = icon
+                }
             }
         }
-        return cell
-    }
-
-    func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
-        guard let indexPath = indexPaths.first, flattenedItems.indices.contains(indexPath.item) else { return }
-        let entry = flattenedItems[indexPath.item]
-        if case .app(let id) = entry.item, let record = model.record(for: id) {
-            onLaunch(record)
-        }
-    }
-
-    private func contextMenu(for indexPath: IndexPath) -> NSMenu? {
-        guard flattenedItems.indices.contains(indexPath.item) else { return nil }
-        let entry = flattenedItems[indexPath.item]
-        guard case .app(let id) = entry.item, let record = model.record(for: id) else { return nil }
-
-        let actions = ContextMenuBuilder.Actions(
-            open: { [weak self] in self?.onLaunch(record) },
-            openNewInstance: record.canOpenNewInstance ? { [weak self] in
-                self?.model.recordLaunch(for: record.id)
-                Task { await self?.model.save() }
-                AppLauncher.launch(record, createsNewInstance: true)
-            } : nil,
-            showInFinder: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
-            addToDock: {},
-            rename: {},
-            hide: {},
-            removeFromFolder: { [weak self] in
-                guard let self else { return }
-                self.onItemDraggedOut(entry.page, entry.index)
-                self.refresh()
-            },
-            getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
-            showWindows: nil, // Folder-internal items don't get the window browser shortcut yet; open the app itself first.
-            uninstall: nil // Same reasoning as showWindows: open the app itself first.
-        )
-        return ContextMenuBuilder.menu(for: record, isInFolder: true, actions: actions)
+        gridModel.tiles = tiles
     }
 }

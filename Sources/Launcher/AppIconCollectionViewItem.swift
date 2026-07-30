@@ -63,11 +63,11 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
         view = container
     }
 
-    /// Matches `Grid.GridCellItem`'s handling of `GridSettings.iconSize` —
-    /// this item was previously hardcoded to 64pt regardless of the user's
-    /// configured grid icon size, so search results rendered at a visibly
-    /// different (and, at large configured sizes, jarringly smaller) size
-    /// than the main grid the moment a query was typed.
+    /// Matches `Grid.GridCellItem`'s icon sizing — this item was previously
+    /// hardcoded to 64pt regardless of the main grid's actual icon size (a
+    /// fixed function of the row/column geometry), so search results
+    /// rendered at a visibly different size than the main grid the moment a
+    /// query was typed.
     func configure(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double) {
         currentRequestKey = record.iconCacheKey
         iconWidthConstraint?.constant = CGFloat(iconSize)

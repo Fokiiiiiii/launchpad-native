@@ -107,9 +107,9 @@ final class GridCellItem: NSCollectionViewItem {
         view.layer?.opacity = 1
     }
 
-    /// Applies `GridSettings.iconSize` — previously hardcoded to 64pt
-    /// regardless of the setting, which is why icons rendered noticeably
-    /// smaller than intended.
+    /// Applies `GridViewController.currentIconSize` (a fixed function of
+    /// the grid's own row/column geometry — there is no user-adjustable
+    /// icon-size setting).
     private func applyIconSize(_ size: Double) {
         let clamped = CGFloat(size)
         currentIconSizeValue = clamped
@@ -144,12 +144,14 @@ final class GridCellItem: NSCollectionViewItem {
     /// - Parameter showsLabel: When `false`, hides and empties the name
     ///   label (an empty, hidden label has 0 intrinsic height, so the
     ///   existing Auto Layout constraints between `iconView`/`label`/
-    ///   `container` stay satisfied with no conflicts) — used by
-    ///   `FolderContentsViewController`'s compact icon-only popover cells,
-    ///   where the folder's name is already shown once above the grid.
-    ///   VoiceOver still announces the name either way (`setAccessibilityLabel`
-    ///   is unconditional) since hiding the visible label shouldn't hide it
-    ///   from accessibility.
+    ///   `container` stay satisfied with no conflicts). No caller currently
+    ///   passes `false` — the opened-folder panel now hosts its own SwiftUI
+    ///   tile grid (`FolderOverlayTileView`) instead of `GridCellItem`
+    ///   directly — but kept as a real, reachable option rather than pruned,
+    ///   since a future compact-icon-only presentation of this cell is
+    ///   plausible. VoiceOver still announces the name either way
+    ///   (`setAccessibilityLabel` is unconditional) since hiding the visible
+    ///   label shouldn't hide it from accessibility.
     func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, displayName: String? = nil, showsLabel: Bool = true) {
         currentRequestKey = record.iconCacheKey
         applyIconSize(iconSize)
