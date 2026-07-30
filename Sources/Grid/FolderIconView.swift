@@ -27,25 +27,26 @@ struct FolderIconView: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
-        ZStack {
-            shape.fill(.white.opacity(0.13))
-
-            Grid(horizontalSpacing: cellGap, verticalSpacing: cellGap) {
-                ForEach(0..<3, id: \.self) { row in
-                    GridRow {
-                        ForEach(0..<3, id: \.self) { col in
-                            let index = row * 3 + col
-                            cell(at: index)
-                        }
+        // No fill behind the tile at all — a real user found the filled
+        // background (plus the top-highlight gradient this used to also
+        // draw over the whole tile) read as an unwanted "shadow" over the
+        // app-less padding/gaps, and made the folder look conspicuously
+        // bigger/heavier than neighboring app icons even at the exact same
+        // pixel dimensions (confirmed via debug frame logging — the outer
+        // frame matches an app icon's exactly; the perceived size
+        // difference was purely from this fill's visual weight). Only the
+        // real icon cells and a hairline outer stroke remain.
+        Grid(horizontalSpacing: cellGap, verticalSpacing: cellGap) {
+            ForEach(0..<3, id: \.self) { row in
+                GridRow {
+                    ForEach(0..<3, id: \.self) { col in
+                        let index = row * 3 + col
+                        cell(at: index)
                     }
                 }
             }
-            .padding(pad)
-
-            shape.fill(
-                LinearGradient(colors: [.white.opacity(0.16), .clear], startPoint: .top, endPoint: .center)
-            )
         }
+        .padding(pad)
         .frame(width: size, height: size)
         .clipShape(shape)
         .overlay(shape.strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
@@ -60,7 +61,10 @@ struct FolderIconView: View {
                 .aspectRatio(contentMode: .fill)
                 .clipShape(cellShape)
         } else {
-            cellShape.fill(.white.opacity(0.06))
+            // Fully transparent — no placeholder box at all for an unfilled
+            // slot (see this method's caller's doc comment on why a faint
+            // fill here was also part of the "shadow" complaint).
+            Color.clear
         }
     }
 }

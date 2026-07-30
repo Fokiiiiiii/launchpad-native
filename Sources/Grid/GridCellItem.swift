@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import Diagnostics
 import SwiftUI
 
 /// One grid cell: either an app (icon + label) or a folder (a live-hosted
@@ -188,6 +189,11 @@ final class GridCellItem: NSCollectionViewItem {
         let hosting = ensureFolderHostingView()
         hosting.isHidden = false
         hosting.rootView = FolderIconView(icons: icons, size: currentIconSizeValue)
+        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_FOLDER_FRAME"] == "1" {
+            DispatchQueue.main.async {
+                DiagnosticsLog.grid.info("folderFrameDebug: iconView.frame=\(String(describing: self.iconView.frame), privacy: .public), hosting.frame=\(String(describing: hosting.frame), privacy: .public), iconSize=\(iconSize, privacy: .public), currentIconSizeValue=\(self.currentIconSizeValue, privacy: .public)")
+            }
+        }
         label.isHidden = false
         label.stringValue = name
         applySelection(isSelected)
