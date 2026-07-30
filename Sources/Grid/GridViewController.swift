@@ -245,6 +245,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func select(_ indexPath: IndexPath) {
         guard model.pages.indices.contains(currentPage),
               model.pages[currentPage].indices.contains(indexPath.item) else { return }
+        keyboardSelectionActive = true
         collectionView.selectionIndexPaths = [indexPath]
         collectionView.reloadItems(at: [indexPath])
     }
@@ -1020,6 +1021,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             folderID: folderID,
             iconCache: iconCache,
             iconSize: currentIconSize,
+            columns: model.gridSettings.columns,
             onLaunch: { [weak self] record in
                 self?.closeFolderOverlay()
                 self?.onLaunch(record)
@@ -1171,31 +1173,23 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    /// The icon size the grid is *actually* rendering right now — not always
-    /// the same as `model.gridSettings.iconSize`, but `iconSize` is now the
-    /// **primary driver**: this used to treat the cell's proportional size
-    /// (`min(cellSize.width, cellSize.height) * 0.55`) as the real value and
-    /// `iconSize * 1.5` as a rarely-binding ceiling, which was structurally
-    /// broken — for realistic grid configs the proportional size sits far
-    /// below that ceiling, so the Settings icon-size slider had no visible
-    /// effect across most of its range (confirmed: user's real grid is 6x3
-    /// with `iconSize` 160, but the proportional formula rendered smaller
-    /// than that regardless of where the slider was set). Roles are now
-    /// inverted: `gridSettings.iconSize` is returned directly, and cell
-    /// geometry only clamps it down as a safety ceiling — `cellSize.height`
-    /// minus `labelAllowance` (room reserved for the label band below the
-    /// icon) and `cellSize.width`, whichever is smaller — so the icon can
-    /// never overflow the cell or clip its own label. Exposed so other
+    /// The icon size the grid is *actually* rendering right now. There is no
+    /// user-adjustable icon-size setting anymore (explicit request: "現在の
+    /// 設定項目にはアプリのサイズがあるけど完全にそれをけしてほしい行数の
+    /// 数値によって変化する固定実装にして") — this is a fixed function of
+    /// the grid's own geometry, which is itself driven by the `rows`/
+    /// `columns` settings: `cellSize.height` minus `labelAllowance` (room
+    /// reserved for the label band below the icon) and `cellSize.width`,
+    /// whichever is smaller, so the icon always fills the available cell
+    /// without overflowing it or clipping its own label. Exposed so other
     /// surfaces showing the same apps — the search results list — can match
-    /// this exactly instead of independently reapplying the raw setting,
-    /// which visibly disagreed with what the grid displayed whenever the two
-    /// formulas differed.
+    /// this exactly instead of independently computing their own size.
     public var currentIconSize: Double {
         let cellSize = layout.currentCellSize
-        guard cellSize.width > 0, cellSize.height > 0 else { return model.gridSettings.iconSize }
+        guard cellSize.width > 0, cellSize.height > 0 else { return 96 }
         let labelAllowance: CGFloat = 44
         let cellCeiling = min(cellSize.width, cellSize.height - labelAllowance)
-        return min(model.gridSettings.iconSize, Double(max(cellCeiling, 1)))
+        return Double(max(cellCeiling, 1))
     }
 
     /// The grid's actual per-cell size right now (`PagedGridLayout`'s
@@ -1232,7 +1226,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
               model.pages[currentPage].indices.contains(indexPath.item) else {
             return NSCollectionViewItem()
         }
-        let isSelected = collectionView.selectionIndexPaths.contains(indexPath)
+        let isSelected = keyboardSelectionActive && collectionView.selectionIndexPaths.contains(indexPath)
         let iconSize = currentIconSize
         switch model.pages[currentPage][indexPath.item] {
         case .app(let id):
@@ -1397,6 +1391,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private var pendingItemPress: (indexPath: IndexPath, startPoint: NSPoint)?
     private var activeItemDrag: ItemDragSession?
+    /// A mouse click tracks `collectionView.selectionIndexPaths` (needed for
+    /// drag/launch/context-menu targeting) but must NOT draw the visible
+    /// highlight ring — a real user found the box+glow that appeared around
+    /// every clicked icon distracting ("アプリをいじった時に出る白い枠は基本
+    /// 的に出ないように"). Keyboard arrow-key browsing (`moveSelection`/
+    /// `select`) is the one case that should still show it, since without
+    /// any visual feedback there'd be no way to see where keyboard focus is.
+    private var keyboardSelectionActive = false
     private var itemDragGeneration = 0
     /// Round 12 §8c: lightweight velocity approximation for
     /// `animateLayerTranslation`'s re-targeted springs (reorder-preview
@@ -1454,11 +1456,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // at all). Toggling the highlight directly on the already-existing
         // live cell views avoids touching the view identity mid-gesture.
         let previousSelection = collectionView.selectionIndexPaths
+        keyboardSelectionActive = false
         collectionView.selectionIndexPaths = [indexPath]
         for previous in previousSelection where previous != indexPath {
             (collectionView.item(at: previous) as? GridCellItem)?.applySelection(false)
         }
-        (collectionView.item(at: indexPath) as? GridCellItem)?.applySelection(true)
+        // No `applySelection(true)` here — a mouse click tracks selection
+        // state without drawing the ring (see `keyboardSelectionActive`'s
+        // doc comment).
+        (collectionView.item(at: indexPath) as? GridCellItem)?.applySelection(false)
 
         let point = collectionView.convert(event.locationInWindow, from: nil)
         pendingItemPress = (indexPath, point)
