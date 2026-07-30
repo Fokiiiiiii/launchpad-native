@@ -47,7 +47,8 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
                 viewModel: viewModel,
                 appIcon: nil,
                 onCancel: { [weak self] in self?.close() },
-                onConfirm: { [weak self] in self?.confirmAndClose() }
+                onConfirm: { [weak self] in self?.confirmAndClose() },
+                onContentHeightChange: { [weak self] height in self?.applyContentHeight(height) }
             )
         )
         let window = DismissableWindow(contentViewController: hosting)
@@ -94,11 +95,38 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
                     viewModel: viewModel,
                     appIcon: icon,
                     onCancel: { [weak self] in self?.close() },
-                    onConfirm: { [weak self] in self?.confirmAndClose() }
+                    onConfirm: { [weak self] in self?.confirmAndClose() },
+                    onContentHeightChange: { [weak self] height in self?.applyContentHeight(height) }
                 )
             )
             self.window?.contentViewController = updatedHosting
         }
+    }
+
+    /// Real, confirmed bug: the window used to be a fixed 500pt tall
+    /// regardless of how much content actually fit inside it — since
+    /// `ScrollView` (unlike `VStack`) always greedily claims its full
+    /// allotted height rather than shrinking to short content, a real
+    /// screenshot showed a large empty gap between the last visible row and
+    /// the footer buttons ("消去uiの上のデッドスペース"). `UninstallPanelView`
+    /// now measures its own true content height via a `GeometryReader`-
+    /// backed `PreferenceKey` and reports it here — this resizes the real
+    /// window to match, instead of a SwiftUI-side band-aid that can't
+    /// actually shrink the `NSWindow` itself. Keeps the window's vertical
+    /// *center* fixed while resizing (matching `positionWindow`'s own
+    /// screen-centering) so it shrinks/grows symmetrically in place rather
+    /// than sliding to a new position. A sane floor (200pt) guards against
+    /// collapsing to nothing during the brief window before the first
+    /// layout pass reports a real height.
+    private func applyContentHeight(_ height: CGFloat) {
+        guard let window else { return }
+        let clampedHeight = max(height, 200)
+        guard abs(window.frame.height - clampedHeight) > 0.5 else { return }
+        let center = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        var newFrame = window.frame
+        newFrame.size.height = clampedHeight
+        newFrame.origin.y = center.y - clampedHeight / 2
+        window.setFrame(newFrame, display: true, animate: true)
     }
 
     private func positionWindow(_ window: NSWindow, on screen: NSScreen?) {

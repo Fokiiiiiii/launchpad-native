@@ -2,6 +2,31 @@ import AppKit
 import Localization
 import SwiftUI
 
+/// Reports the natural (unclipped) height of whatever it's attached to, via
+/// a zero-size `GeometryReader` overlay — the standard SwiftUI technique for
+/// letting a `ScrollView` (which otherwise always greedily expands to fill
+/// whatever frame it's given, never "hugging" short content) size itself to
+/// its actual content up to a cap. See `UninstallPanelView.body`'s doc
+/// comment for the real bug this fixes.
+private struct ContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// Same technique as `ContentHeightKey`, applied to the *whole* panel body
+/// instead of just the scrollable section — lets
+/// `UninstallPanelWindowController` resize the actual `NSWindow` to match
+/// real content instead of always showing a fixed 500pt-tall window with
+/// left­over space wherever the content happened to be shorter.
+private struct TotalHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 /// Floating panel shown from the grid's "Uninstall…" context menu item.
 /// Adapted directly from the user-supplied "Tessera" design reference's
 /// `UninstallSheet` (`Dialogs.swift`) — same header (icon/name/total size),
@@ -21,8 +46,30 @@ struct UninstallPanelView: View {
     let appIcon: NSImage?
     let onCancel: () -> Void
     let onConfirm: () -> Void
+    /// Called whenever the panel's actual natural height changes (sections
+    /// expanding/collapsing, the async icon fetch swapping in a taller/
+    /// shorter header state, etc.) — lets the window controller resize the
+    /// real `NSWindow` to match instead of leaving the fixed-height window's
+    /// own dead space. Defaults to a no-op so SwiftUI previews / call sites
+    /// that don't care about window sizing don't need to pass one.
+    var onContentHeightChange: (CGFloat) -> Void = { _ in }
 
     @State private var expandedSections: Set<UninstallPanelViewModel.SectionKind> = Set(UninstallPanelViewModel.SectionKind.allCases)
+    /// Real, confirmed bug (a real screenshot showed a large blank gap
+    /// between the last visible row and the footer buttons, reported as
+    /// "消去uiの上のデッドスペース"): `ScrollView` doesn't size itself to
+    /// its content the way `VStack` does — `.frame(maxHeight: 296)` alone
+    /// makes it greedily claim up to 296pt of the fixed 500pt-tall window
+    /// regardless of whether the sections/rows inside it actually need
+    /// that much space. With only a couple of sections expanded (a common
+    /// case — most apps have few cache/preference files), real content is
+    /// often well under 296pt, and the difference showed up as dead space
+    /// sitting directly above the Divider/footer. Measured via this
+    /// preference-key height report instead of guessing a smaller fixed
+    /// constant, so it stays correct as sections expand/collapse and as
+    /// real apps' actual file counts vary.
+    @State private var sectionsContentHeight: CGFloat = 0
+    private static let maxSectionsHeight: CGFloat = 296
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -37,11 +84,22 @@ struct UninstallPanelView: View {
                             }
                         }
                     }
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: ContentHeightKey.self, value: proxy.size.height)
+                        }
+                    )
                 }
-                .frame(maxHeight: 296)
+                .onPreferenceChange(ContentHeightKey.self) { sectionsContentHeight = $0 }
+                .frame(height: min(sectionsContentHeight, Self.maxSectionsHeight))
                 Divider()
                 footer
             }
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: TotalHeightKey.self, value: proxy.size.height)
+                }
+            )
             // Round 13 §A: the window's native titlebar/traffic-lights are
             // now fully hidden — this is the only remaining discoverable
             // way to close the panel beyond outside-click/Escape.
@@ -49,7 +107,8 @@ struct UninstallPanelView: View {
                 .padding(12)
         }
         .background(.regularMaterial)
-        .frame(width: 420, height: 500)
+        .frame(width: 420)
+        .onPreferenceChange(TotalHeightKey.self) { onContentHeightChange($0) }
     }
 
     private var header: some View {
