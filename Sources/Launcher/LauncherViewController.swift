@@ -66,14 +66,21 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // ambient background) — `searchBarGlass` is a purely decorative
         // sibling behind `searchIcon`/`searchField`, never their container,
         // for the same hit-testing reason `GlassBackgroundView`'s doc
-        // comment explains for the full-screen background.
-        let searchBarGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 20)
+        // comment explains for the full-screen background. Matches the
+        // "Tessera" design reference's `SearchField` (`.pill` style) exactly:
+        // `TSLayout.searchCorner` (10 — a rounded rect, not a full stadium
+        // shape like this bar's previous 20pt/half-height corner radius).
+        let searchBarGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 10)
         searchBarGlass.translatesAutoresizingMaskIntoConstraints = false
 
         searchIcon.translatesAutoresizingMaskIntoConstraints = false
+        // 12.5pt medium + opacity 0.65 — the reference's own
+        // `Image(systemName: "magnifyingglass").font(.system(size: 12.5,
+        // weight: .medium)).foregroundStyle(.white.opacity(0.65))`; the
+        // previous 16pt was an invented value, not taken from the reference.
         searchIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 16, weight: .medium))
-        searchIcon.contentTintColor = .secondaryLabelColor
+            .withSymbolConfiguration(.init(pointSize: 12.5, weight: .medium))
+        searchIcon.contentTintColor = NSColor.white.withAlphaComponent(0.65)
 
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.cell = SearchFieldCell()
@@ -113,7 +120,9 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             string: L10n.searchPlaceholder,
             attributes: [.kern: -0.4, .foregroundColor: NSColor.placeholderTextColor]
         )
-        searchField.font = .systemFont(ofSize: 20, weight: .regular)
+        // 13.5pt — the reference's own `.font(.system(size: 13.5))`; the
+        // previous 20pt was an invented value, not taken from the reference.
+        searchField.font = .systemFont(ofSize: 13.5, weight: .regular)
         // Round 13 §E: confirmed via real measurement (`log stream` with
         // `LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING=1`) that without this, the
         // field editor's typed text falls back to `.controlTextColor` — a
@@ -137,22 +146,26 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // glass chip with its own gearshape button living right next to
         // the quick-menu chip below — both routes opened the exact same
         // Settings window. Removed in favor of a single entry point (the
-        // quick menu's "Open Settings…" item, wired up below), matching
-        // the reference design's search bar (one "•••" chip, no separate
-        // persistent gear icon).
+        // quick menu's "Open Settings…" item, wired up below).
         //
-        // A single glass chip for a quick-access menu (browsing mode, sort
-        // order, and a Settings shortcut) without requiring a full trip
-        // into Settings for a toggle already surfaced there.
-        let quickMenuGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 14)
-        quickMenuGlass.translatesAutoresizingMaskIntoConstraints = false
-
+        // The quick-menu button itself now lives *inside* the search bar's
+        // own pill (trailing edge) instead of as a separate floating chip
+        // beside it — matches the "Tessera" reference's `SearchField`
+        // exactly, whose "•••" button is one more element in the same
+        // `HStack` as the magnifying glass and text field, not a second
+        // glass shape. Symbol is plain `ellipsis` (not `ellipsis.circle` —
+        // the circle is drawn manually via the button's own layer, matching
+        // the reference's `.background(.white.opacity(0.12), in: Circle())`),
+        // 10pt bold, in a 20x20 circle.
         quickMenuButton.translatesAutoresizingMaskIntoConstraints = false
         quickMenuButton.bezelStyle = .circular
         quickMenuButton.isBordered = false
-        quickMenuButton.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: L10n.quickMenuAccessibilityLabel)?
-            .withSymbolConfiguration(.init(pointSize: 18, weight: .regular))
-        quickMenuButton.contentTintColor = .secondaryLabelColor
+        quickMenuButton.wantsLayer = true
+        quickMenuButton.layer?.cornerRadius = 10
+        quickMenuButton.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        quickMenuButton.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: L10n.quickMenuAccessibilityLabel)?
+            .withSymbolConfiguration(.init(pointSize: 10, weight: .bold))
+        quickMenuButton.contentTintColor = NSColor.white.withAlphaComponent(0.7)
         quickMenuButton.target = self
         quickMenuButton.action = #selector(quickMenuButtonTapped)
 
@@ -175,63 +188,56 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         addChild(gridViewController)
         gridViewController.view.translatesAutoresizingMaskIntoConstraints = false
 
-        // Plain positioning containers (not glass themselves) — each holds
-        // one glass shape plus the real interactive control(s) as siblings
-        // drawn on top of it, so the capsule/chip reads as one floating
-        // piece of glass while every click still hits a normal AppKit
-        // control directly.
+        // Plain positioning container (not glass itself) — holds the glass
+        // shape plus every real interactive control (icon, field, quick-menu
+        // button) as siblings drawn on top of it, so the pill reads as one
+        // floating piece of glass while every click still hits a normal
+        // AppKit control directly. One pill holding all three, not a
+        // separate chip for the quick-menu button, matches the reference's
+        // `SearchField` exactly (see the controls' own doc comments above).
         let searchBar = NSView()
         searchBar.translatesAutoresizingMaskIntoConstraints = false
         searchBar.addSubview(searchBarGlass)
         searchBar.addSubview(searchIcon)
         searchBar.addSubview(searchField)
-
-        let quickMenuChip = NSView()
-        quickMenuChip.translatesAutoresizingMaskIntoConstraints = false
-        quickMenuChip.addSubview(quickMenuGlass)
-        quickMenuChip.addSubview(quickMenuButton)
+        searchBar.addSubview(quickMenuButton)
 
         root.addSubview(searchBar)
-        root.addSubview(quickMenuChip)
         root.addSubview(gridViewController.view)
         root.addSubview(searchResultsScrollView)
         NSLayoutConstraint.activate([
+            // 300x36 — `TSLayout.searchWidth`/`searchHeight` from the
+            // reference exactly; the previous 400x44 was an invented value.
             searchBar.topAnchor.constraint(equalTo: root.topAnchor, constant: 36),
             searchBar.centerXAnchor.constraint(equalTo: root.centerXAnchor),
-            searchBar.widthAnchor.constraint(equalToConstant: 400),
-            searchBar.heightAnchor.constraint(equalToConstant: 44),
+            searchBar.widthAnchor.constraint(equalToConstant: 300),
+            searchBar.heightAnchor.constraint(equalToConstant: 36),
 
             searchBarGlass.leadingAnchor.constraint(equalTo: searchBar.leadingAnchor),
             searchBarGlass.trailingAnchor.constraint(equalTo: searchBar.trailingAnchor),
             searchBarGlass.topAnchor.constraint(equalTo: searchBar.topAnchor),
             searchBarGlass.bottomAnchor.constraint(equalTo: searchBar.bottomAnchor),
 
-            searchIcon.leadingAnchor.constraint(equalTo: searchBar.leadingAnchor, constant: 16),
+            // 12pt leading inset — the reference's `.padding(.leading, 12)`.
+            searchIcon.leadingAnchor.constraint(equalTo: searchBar.leadingAnchor, constant: 12),
             // SF Symbol "magnifyingglass" has its handle in the lower-right,
             // so its optical center sits slightly up-left of the glyph's
             // true geometric center — nudge centerY up by 1pt to compensate.
             searchIcon.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor, constant: -1),
-            searchIcon.widthAnchor.constraint(equalToConstant: 20),
-            searchIcon.heightAnchor.constraint(equalToConstant: 20),
+            searchIcon.widthAnchor.constraint(equalToConstant: 16),
+            searchIcon.heightAnchor.constraint(equalToConstant: 16),
 
-            searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 10),
-            searchField.trailingAnchor.constraint(equalTo: searchBar.trailingAnchor, constant: -16),
+            // 8pt gap — the reference's `HStack(spacing: 8)`.
+            searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 8),
+            searchField.trailingAnchor.constraint(equalTo: quickMenuButton.leadingAnchor, constant: -8),
             searchField.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
 
-            quickMenuChip.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
-            quickMenuChip.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
-            quickMenuChip.widthAnchor.constraint(equalToConstant: 32),
-            quickMenuChip.heightAnchor.constraint(equalToConstant: 32),
-
-            quickMenuGlass.leadingAnchor.constraint(equalTo: quickMenuChip.leadingAnchor),
-            quickMenuGlass.trailingAnchor.constraint(equalTo: quickMenuChip.trailingAnchor),
-            quickMenuGlass.topAnchor.constraint(equalTo: quickMenuChip.topAnchor),
-            quickMenuGlass.bottomAnchor.constraint(equalTo: quickMenuChip.bottomAnchor),
-
-            quickMenuButton.centerXAnchor.constraint(equalTo: quickMenuChip.centerXAnchor),
-            quickMenuButton.centerYAnchor.constraint(equalTo: quickMenuChip.centerYAnchor),
-            quickMenuButton.widthAnchor.constraint(equalToConstant: 28),
-            quickMenuButton.heightAnchor.constraint(equalToConstant: 28),
+            // 20x20 circle, 8pt trailing inset — the reference's own
+            // `.frame(width: 20, height: 20)` button + `.padding(.trailing, 8)`.
+            quickMenuButton.trailingAnchor.constraint(equalTo: searchBar.trailingAnchor, constant: -8),
+            quickMenuButton.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+            quickMenuButton.widthAnchor.constraint(equalToConstant: 20),
+            quickMenuButton.heightAnchor.constraint(equalToConstant: 20),
 
             gridViewController.view.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 24),
             gridViewController.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),

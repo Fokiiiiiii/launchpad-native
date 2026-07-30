@@ -182,6 +182,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         pageControl.numberOfPages = model.pages.count
         pageControl.currentPage = currentPage
         prefetchAdjacentPageIcons()
+        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_GRID_LAYOUT"] == "1" {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                DiagnosticsLog.grid.info("gridLayoutDebug: view.frame=\(String(describing: self.view.frame), privacy: .public), scrollView.frame=\(String(describing: self.scrollView.frame), privacy: .public), pageControl.frame=\(String(describing: self.pageControl.frame), privacy: .public), collectionView.bounds=\(String(describing: self.collectionView.bounds), privacy: .public), currentCellSize=\(String(describing: self.layout.currentCellSize), privacy: .public), currentIconSize=\(self.currentIconSize, privacy: .public), settings=columns:\(self.model.gridSettings.columns, privacy: .public) rows:\(self.model.gridSettings.rows, privacy: .public)")
+            }
+        }
     }
 
     /// Warms `IconCache` for the pages adjacent to `currentPage`, ahead of
