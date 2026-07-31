@@ -24,14 +24,7 @@ import CoreGraphics
 /// genuinely usable), it's just no longer visible.
 final class MenuBarCoverWindow: NSWindow {
     init(screen: NSScreen) {
-        let menuBarHeight = NSStatusBar.system.thickness
-        let rect = NSRect(
-            x: screen.frame.minX,
-            y: screen.frame.maxY - menuBarHeight,
-            width: screen.frame.width,
-            height: menuBarHeight
-        )
-        super.init(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
+        super.init(contentRect: Self.coverRect(for: screen), styleMask: [.borderless], backing: .buffered, defer: false)
         isOpaque = true
         // A dark, neutral tone close to the rest of the launcher's own
         // glass-over-blurred-desktop look, so the covered strip doesn't read
@@ -50,15 +43,46 @@ final class MenuBarCoverWindow: NSWindow {
     /// against `Self.targetScreen()` on every call rather than assuming the
     /// screen never changes between shows.
     func reposition(on screen: NSScreen) {
-        let menuBarHeight = NSStatusBar.system.thickness
-        setFrame(
-            NSRect(
-                x: screen.frame.minX,
-                y: screen.frame.maxY - menuBarHeight,
-                width: screen.frame.width,
-                height: menuBarHeight
-            ),
-            display: true
+        setFrame(Self.coverRect(for: screen), display: true)
+    }
+
+    /// Real, confirmed bug (a real screenshot showed a 1-3px sliver of the
+    /// real menu bar still visible above this cover): `NSStatusBar.system.thickness`
+    /// is a fixed status-item sizing constant (24pt on a typical Mac), not a
+    /// live measurement of the real OS-reserved menu-bar strip — which is
+    /// taller than that on notched displays (the whole strip renders taller
+    /// everywhere on those displays, not just around the camera housing, to
+    /// stay a consistent height). Mirrors `GridViewController`'s own
+    /// `dockReservedHeight` pattern (see its doc comment): `screen.frame.maxY
+    /// - screen.visibleFrame.maxY` is the same "public, always-current
+    /// source of truth" already proven for the Dock, applied here to the
+    /// menu bar's own reserved strip instead. `screen.safeAreaInsets.top`
+    /// (macOS 12+) is compared too and matters independently of the
+    /// `visibleFrame` term: `LauncherWindowController.show()` calls
+    /// `NSApp.presentationOptions.insert(.autoHideMenuBar)` immediately
+    /// before this runs, and `visibleFrame` can reflect *this app's own*
+    /// requested presentation state (reading as if no menu bar space is
+    /// reserved at all) rather than the real on-screen state —
+    /// `safeAreaInsets.top` is a physical-display-geometry property, not an
+    /// available-drawable-area property, so it stays reliable in that case.
+    /// `NSStatusBar.system.thickness` remains in the `max()` as a hard
+    /// floor, so this never regresses below the original behavior even when
+    /// the other two terms read as 0. The final `+1pt` pad is cheap
+    /// insurance against sub-point/backing-pixel rounding at
+    /// window-frame-setting time — harmless since `ignoresMouseEvents =
+    /// true` makes any resulting over-coverage a no-op.
+    private static func coverRect(for screen: NSScreen) -> NSRect {
+        let measured = max(
+            screen.frame.maxY - screen.visibleFrame.maxY,
+            screen.safeAreaInsets.top,
+            NSStatusBar.system.thickness
+        )
+        let padded = measured + 1
+        return NSRect(
+            x: screen.frame.minX,
+            y: screen.frame.maxY - padded,
+            width: screen.frame.width,
+            height: padded
         )
     }
 }

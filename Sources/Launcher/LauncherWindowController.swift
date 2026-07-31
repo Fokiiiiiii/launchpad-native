@@ -279,7 +279,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         menuBarCoverWindow = cover
         cover.reposition(on: screen)
         cover.orderFront(nil)
-        DiagnosticsLog.launcher.info("show(): after makeKeyAndOrderFront, isVisible=\(window.isVisible, privacy: .public), isKeyWindow=\(window.isKeyWindow, privacy: .public), menuBarCover.frame=\(String(describing: cover.frame), privacy: .public), menuBarCover.level=\(cover.level.rawValue, privacy: .public), menuBarLevel=\(Int(CGWindowLevelForKey(.mainMenuWindow)), privacy: .public)")
+        DiagnosticsLog.launcher.info("show(): after makeKeyAndOrderFront, isVisible=\(window.isVisible, privacy: .public), isKeyWindow=\(window.isKeyWindow, privacy: .public), menuBarCover.frame=\(String(describing: cover.frame), privacy: .public), menuBarCover.level=\(cover.level.rawValue, privacy: .public), menuBarLevel=\(Int(CGWindowLevelForKey(.mainMenuWindow)), privacy: .public), screen.frame=\(String(describing: screen.frame), privacy: .public), screen.visibleFrame=\(String(describing: screen.visibleFrame), privacy: .public), screen.safeAreaInsets.top=\(screen.safeAreaInsets.top, privacy: .public)")
 
         if !wasVisible {
             animateIn(window: window)
