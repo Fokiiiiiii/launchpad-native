@@ -49,11 +49,19 @@ final class FolderContentsViewController: NSViewController {
     /// (`LazyVGrid(columns: Array(repeating: ..., count: metrics.columns))`
     /// — always exactly `metrics.columns`).
     private let columns: Int
+    /// The full outer card width the caller wants (`GridViewController.openFolder`
+    /// computes this as `screenWidth - 192`, matching the reference's own
+    /// `.padding(.horizontal, TSLayout.folderPanelInsetH)`), fed into
+    /// `preferredContentSize.width` by `updatePreferredContentSize()` below
+    /// so the caller can read it back via `preferredContentSize` without
+    /// duplicating the row/height math this controller owns. See
+    /// `loadView()`'s doc comment for why `root`'s own outer frame is set
+    /// directly by the caller rather than via Auto Layout constraints.
+    private let panelWidth: CGFloat
     /// Matches the "Tessera" design reference's `LazyVGrid(..., spacing: 26)`
     /// exactly — the previous 16pt was an invented value, not taken from
     /// the reference.
     private static let cellSpacing: CGFloat = 26
-    private var itemWidth: CGFloat { CGFloat(iconSize) + 24 }
     private var itemHeight: CGFloat { CGFloat(iconSize) + 40 }
 
     /// Flattened (folderPage, folderIndex, item) so "Remove from Folder" can
@@ -73,6 +81,7 @@ final class FolderContentsViewController: NSViewController {
         iconCache: IconCache,
         iconSize: Double,
         columns: Int,
+        panelWidth: CGFloat,
         onLaunch: @escaping (ApplicationRecord) -> Void,
         onItemDraggedOut: @escaping (Int, Int) -> Void
     ) {
@@ -81,6 +90,7 @@ final class FolderContentsViewController: NSViewController {
         self.iconCache = iconCache
         self.iconSize = iconSize
         self.columns = max(columns, 1)
+        self.panelWidth = max(panelWidth, 240)
         self.onLaunch = onLaunch
         self.onItemDraggedOut = onItemDraggedOut
         super.init(nibName: nil, bundle: nil)
@@ -91,6 +101,30 @@ final class FolderContentsViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
+        // `root`'s own outer frame is deliberately plain/frame-based (this
+        // is the default — `translatesAutoresizingMaskIntoConstraints`
+        // stays `true`), never Auto Layout, and the caller
+        // (`GridViewController.openFolder`) sets `root.frame` directly
+        // rather than via constraints. This sidesteps a real, confirmed
+        // AppKit behavior: when a view controller's view *does* use pure
+        // Auto Layout for its own outer geometry, `NSViewController`
+        // automatically maintains its own width/height constraints mirroring
+        // `preferredContentSize` (visible in a live constraint dump as
+        // `'NSViewController.preferredContentSize.width'`) — and in one
+        // confirmed real regression ("フォルダを開くと画面が半分になる" /
+        // "フォルダのみためがひどすぎる"), that auto-mirrored constraint
+        // intermittently won over an explicit, equal-or-higher-priority
+        // caller-side constraint for `root`'s width, leaving the panel
+        // rendered at its SwiftUI content's own narrower intrinsic size
+        // instead of the intended screen-relative width — reproducibly, on
+        // a fresh rebuild, regardless of priority tuning or explicitly
+        // deactivating that constraint after the fact (both tried; neither
+        // held). Never having `root` participate in Auto Layout for its own
+        // frame in the first place removes the interaction entirely: Auto
+        // Layout still governs everything *inside* `root` (background/
+        // titleField/scrollView/hosting, all pinned to `root`'s bounds),
+        // which works identically regardless of whether `root` itself is
+        // frame- or constraint-positioned by its own superview.
 
         // Dark, styled card background — a decorative sibling behind the
         // title/grid, matching the reference's self-contained floating
@@ -105,6 +139,15 @@ final class FolderContentsViewController: NSViewController {
         // has no explicit weight (defaults to regular).
         titleField.font = .systemFont(ofSize: 21, weight: .regular)
         titleField.alignment = .center
+        // Matches the reference's own `.shadow(color: .black.opacity(0.5),
+        // radius: 8, y: 2)` on the title text — AppKit's y-offset convention
+        // is flipped relative to SwiftUI's (positive = up), so -2 here is
+        // the same downward-cast shadow.
+        let titleShadow = NSShadow()
+        titleShadow.shadowColor = NSColor.black.withAlphaComponent(0.5)
+        titleShadow.shadowBlurRadius = 8
+        titleShadow.shadowOffset = NSSize(width: 0, height: -2)
+        titleField.shadow = titleShadow
 
         let hosting = NSHostingView(rootView: FolderOverlayGridContent(model: gridModel, columns: columns, iconSize: CGFloat(iconSize)))
         hosting.translatesAutoresizingMaskIntoConstraints = false
@@ -133,7 +176,9 @@ final class FolderContentsViewController: NSViewController {
             titleField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             titleField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
 
-            scrollView.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 8),
+            // 28pt — the reference's own `VStack(spacing: 28)` wrapping the
+            // title and grid; the previous 8pt was an invented value.
+            scrollView.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 28),
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
@@ -155,30 +200,24 @@ final class FolderContentsViewController: NSViewController {
             hosting.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
         ])
         view = root
-        // `NSPopover.contentSize`/the caller's own size constraints have no
-        // effect once the content view controller's view uses Auto Layout
-        // (documented Apple behavior) — `preferredContentSize` is the
-        // mechanism that actually works for an Auto Layout view controller.
         refresh()
     }
 
-    /// Computes `preferredContentSize` from the fixed `columns` count (the
-    /// main grid's own column count — see that property's doc comment for
-    /// why this isn't a per-item-count heuristic) — width is therefore
-    /// always the same regardless of how many apps the folder holds; only
-    /// the row count (hence height, up to the 480pt/scrolling cap) grows
-    /// or shrinks with the actual item count.
+    /// Computes `preferredContentSize` — width is always exactly `panelWidth`
+    /// (the caller's target, see its doc comment for why this must match
+    /// exactly); only the height is derived here, from the fixed `columns`
+    /// count (the main grid's own column count — see that property's doc
+    /// comment for why this isn't a per-item-count heuristic) and the actual
+    /// row count (up to the 480pt/scrolling cap).
     private func updatePreferredContentSize() {
         let itemCount = max(flattenedItems.count, 1)
         let rows = max(1, Int(ceil(Double(itemCount) / Double(columns))))
-        let cellWidth = itemWidth + Self.cellSpacing
         let cellHeight = itemHeight + Self.cellSpacing
-        // Horizontal/vertical section inset (22/34, matching the reference)
-        // plus the title field's own area above the grid (21pt font + its
-        // top padding/gap constraints) and the scroll view's bottom inset.
-        let width = min(CGFloat(columns) * cellWidth + 44, 640)
-        let height = min(CGFloat(rows) * cellHeight + 68 + 70, 480)
-        preferredContentSize = NSSize(width: max(width, 240), height: max(height, 180))
+        // Title field's own area above the grid (21pt font + its top
+        // padding + the 28pt title-to-grid gap) and the scroll view's
+        // bottom inset.
+        let height = min(CGFloat(rows) * cellHeight + 88 + 70, 480)
+        preferredContentSize = NSSize(width: panelWidth, height: max(height, 180))
     }
 
     private func refresh() {

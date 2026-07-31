@@ -58,6 +58,21 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private var currentPage = 0
     private var folderOverlayBackdrop: FolderOverlayBackdropView?
+    /// Real, confirmed lifecycle bug: nothing previously retained the
+    /// `FolderContentsViewController` created in `openFolder` beyond that
+    /// function's own local scope — its `.view` stayed alive (retained by
+    /// `backdrop`'s subview list), but the *view controller itself*
+    /// deallocated almost immediately after `openFolder` returned, since
+    /// `NSView` does not retain its owning `NSViewController` back. A view
+    /// whose controller has already been deallocated while the view is
+    /// still on screen is an invalid, undefined-behavior state for AppKit
+    /// (view controller lifecycle/appearance callbacks, `preferredContentSize`
+    /// bookkeeping, and this controller's own async icon-loading `Task`
+    /// blocks — which capture `[weak self]` pointing at itself — all assume
+    /// the controller outlives its view). Retaining it here for as long as
+    /// the overlay is shown is the correct, necessary fix regardless of any
+    /// single symptom it happens to explain.
+    private var folderContentsViewController: FolderContentsViewController?
     private let windowThumbnailService = WindowThumbnailService()
 
     // MARK: Drag-tracked page paging state (see `beginPageDrag`)
@@ -1053,12 +1068,25 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let start = DispatchTime.now()
         guard model.folders[folderID] != nil else { return }
 
+        // Matches the "Tessera" reference's own `FolderOverlay`:
+        // `.padding(.horizontal, TSLayout.folderPanelInsetH)` (96pt) on the
+        // card, which makes its width scale with the screen rather than sit
+        // at a small fixed cap (the previous, invented 640pt cap read as far
+        // narrower than the reference photo). Computed *before*
+        // `FolderContentsViewController` is created and passed in as its
+        // `panelWidth` — see that property's doc comment for why the
+        // controller's own `preferredContentSize.width` must equal this
+        // exact value rather than the caller applying a separate,
+        // independently-computed width constraint afterward.
+        let panelWidth = view.bounds.width - 192
+
         let folderVC = FolderContentsViewController(
             model: model,
             folderID: folderID,
             iconCache: iconCache,
             iconSize: currentIconSize,
             columns: model.gridSettings.columns,
+            panelWidth: panelWidth,
             onLaunch: { [weak self] record in
                 self?.closeFolderOverlay()
                 self?.onLaunch(record)
@@ -1078,7 +1106,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         backdrop.onDismiss = { [weak self] in self?.closeFolderOverlay() }
 
         let panel = folderVC.view
-        panel.translatesAutoresizingMaskIntoConstraints = false
         backdrop.addSubview(panel)
         view.addSubview(backdrop)
 
@@ -1087,16 +1114,41 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             backdrop.topAnchor.constraint(equalTo: view.topAnchor),
             backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-
-            panel.centerXAnchor.constraint(equalTo: backdrop.centerXAnchor),
-            panel.topAnchor.constraint(equalTo: backdrop.topAnchor, constant: 48),
-            panel.widthAnchor.constraint(equalToConstant: size.width),
-            panel.heightAnchor.constraint(equalToConstant: size.height)
+            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+
+        // `panel` is positioned via a direct, one-time frame assignment —
+        // not Auto Layout constraints — see `FolderContentsViewController
+        // .loadView()`'s doc comment for why (a real, confirmed regression
+        // where AppKit's own `preferredContentSize`-mirrored width
+        // constraint intermittently won over an explicit Auto Layout
+        // constraint of equal or higher priority). `backdrop`'s eventual
+        // size is already known here without waiting for its own Auto
+        // Layout resolution: it's pinned 1:1 to `view`'s edges above, so
+        // its size always equals `view.bounds.size` (already read into
+        // `panelWidth`). 196pt top offset and 96pt side insets both match
+        // the reference's own `.padding(.top, 196)` /
+        // `.padding(.horizontal, TSLayout.folderPanelInsetH)` exactly.
+        let backdropSize = view.bounds.size
+        panel.frame = NSRect(
+            x: (backdropSize.width - size.width) / 2,
+            y: backdropSize.height - 196 - size.height,
+            width: size.width,
+            height: size.height
+        )
+        // Forces `root`'s internal Auto Layout children (title/scroll view/
+        // hosted SwiftUI grid, all pinned to `root`'s now-final frame) to
+        // resolve synchronously against that frame before the entrance
+        // animation starts, rather than depending on some later, unrelated
+        // event (an async icon load's own `layoutIfNeeded()` call) to
+        // eventually force the correct layout — the same class of
+        // intermittent race already fixed once for the icon-trickle case in
+        // `FolderContentsViewController.refresh()`.
+        panel.layoutSubtreeIfNeeded()
 
         folderOverlayBackdrop?.removeFromSuperview()
         folderOverlayBackdrop = backdrop
+        folderContentsViewController = folderVC
         view.window?.makeFirstResponder(backdrop)
 
         backdrop.alphaValue = 0
@@ -1115,8 +1167,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.14
             backdrop.animator().alphaValue = 0
-        }, completionHandler: {
+        }, completionHandler: { [weak self] in
             backdrop.removeFromSuperview()
+            self?.folderContentsViewController = nil
         })
     }
 
