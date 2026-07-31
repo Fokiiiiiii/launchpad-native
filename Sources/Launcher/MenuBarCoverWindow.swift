@@ -24,17 +24,33 @@ import CoreGraphics
 /// genuinely usable), it's just no longer visible.
 final class MenuBarCoverWindow: NSWindow {
     init(screen: NSScreen) {
-        super.init(contentRect: Self.coverRect(for: screen), styleMask: [.borderless], backing: .buffered, defer: false)
-        isOpaque = true
-        // A dark, neutral tone close to the rest of the launcher's own
-        // glass-over-blurred-desktop look, so the covered strip doesn't read
-        // as an obviously different flat rectangle.
-        backgroundColor = NSColor(white: 0.07, alpha: 1.0)
+        let rect = Self.coverRect(for: screen)
+        super.init(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
+        // Real, confirmed complaint: a flat solid fill ("メニューバーのカバー
+        // の部分の色合いがおかしい") read as an obviously different, wrong-
+        // toned rectangle sitting right above the launcher's own translucent
+        // glass-over-blurred-desktop background — the two never matched
+        // because a flat opaque color can't track whatever the desktop
+        // wallpaper actually looks like, while the glass view below it does.
+        // Reusing `GlassBackgroundFactory.makeBackground` (the exact same
+        // material the rest of the launcher's background already uses, incl.
+        // its Reduce Transparency/Increase Contrast handling) makes this
+        // strip a visual continuation of that background instead of a
+        // mismatched patch — real macOS menu bars are themselves translucent
+        // by default, so layering this same blur+tint over it reliably
+        // smears its icons/text illegible without needing full opacity.
+        isOpaque = false
+        backgroundColor = .clear
         hasShadow = false
         ignoresMouseEvents = true
         isMovableByWindowBackground = false
         level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 1)
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
+
+        let glass = GlassBackgroundFactory.makeBackground(cornerRadius: 0)
+        glass.frame = NSRect(origin: .zero, size: rect.size)
+        glass.autoresizingMask = [.width, .height]
+        contentView = glass
     }
 
     /// Repositions to a (possibly different) screen's menu bar rect —
