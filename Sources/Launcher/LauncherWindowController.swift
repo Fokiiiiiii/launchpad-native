@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import CoreGraphics
 import Diagnostics
 import Grid
 import Persistence
@@ -13,6 +14,11 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private var window: LauncherWindow?
     private var viewController: LauncherViewController?
     private var rootContentView: NSView?
+    /// See `MenuBarCoverWindow`'s doc comment — a more fundamental fix for
+    /// the real menu bar showing over the launcher than the two prior
+    /// presentationOptions-based attempts. Shown/hidden in lockstep with
+    /// the launcher window itself.
+    private var menuBarCoverWindow: MenuBarCoverWindow?
     private let viewModel = LauncherViewModel()
     private let gridModel: GridModel
     private let iconCache: IconCache
@@ -258,10 +264,22 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // the existing `hideDockWhileLauncherOpen` window-level toggle —
         // that one is a user preference for whether the Dock icon strip
         // itself should show through; the menu bar isn't part of that
-        // choice.
+        // choice. Kept alongside `menuBarCoverWindow` below (belt-and-
+        // suspenders) since this alone was repeatedly confirmed, via real
+        // screenshots, not to actually retract the menu bar in practice.
         NSApp.presentationOptions.insert(.autoHideMenuBar)
         window.makeKeyAndOrderFront(nil)
-        DiagnosticsLog.launcher.info("show(): after makeKeyAndOrderFront, isVisible=\(window.isVisible, privacy: .public), isKeyWindow=\(window.isKeyWindow, privacy: .public)")
+
+        // See `MenuBarCoverWindow`'s doc comment: `.autoHideMenuBar` above
+        // has repeatedly failed to actually hide the real menu bar (per
+        // direct screenshot evidence), so this physically paints over its
+        // screen rect instead of continuing to rely on WindowServer's
+        // cooperation.
+        let cover = menuBarCoverWindow ?? MenuBarCoverWindow(screen: screen)
+        menuBarCoverWindow = cover
+        cover.reposition(on: screen)
+        cover.orderFront(nil)
+        DiagnosticsLog.launcher.info("show(): after makeKeyAndOrderFront, isVisible=\(window.isVisible, privacy: .public), isKeyWindow=\(window.isKeyWindow, privacy: .public), menuBarCover.frame=\(String(describing: cover.frame), privacy: .public), menuBarCover.level=\(cover.level.rawValue, privacy: .public), menuBarLevel=\(Int(CGWindowLevelForKey(.mainMenuWindow)), privacy: .public)")
 
         if !wasVisible {
             animateIn(window: window)
@@ -300,6 +318,11 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             Task { @MainActor in
                 guard let self, self.animationGeneration == generation, let window else { return }
                 window.orderOut(nil)
+                // Hidden alongside the launcher's own fade completion (not
+                // immediately at the top of hide()) — ordering it out any
+                // earlier would reveal the real menu bar while the launcher
+                // itself is still visibly fading out.
+                self.menuBarCoverWindow?.orderOut(nil)
                 // Reset to the resting state so the next show() starts clean —
                 // this only runs if nothing interrupted this close (the
                 // generation check above), so it never clobbers a reopen.
