@@ -203,10 +203,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // confirmed via log stream without Accessibility/GUI-scripting
             // permission to perform a real trackpad gesture. Needs the real
             // catalog loaded first (more than one page to drag between).
-            // "commit" or "abort" selects which path to simulate — both
-            // matter given this feature's history.
+            // "commit" or "abort" selects which path to simulate; "rapid"
+            // fires a second commit ~150ms after the first (well inside the
+            // up-to-~1s settle window) — a real, confirmed regression
+            // ("連続でページをスワイプした時にページが送られない時があ
+            // る") where a swipe starting during a still-settling previous
+            // one was silently dropped. Kept permanently (not a one-off
+            // test) since this exact class of bug — a new gesture arriving
+            // before the previous one's async settle completes — has a real
+            // history of resurfacing in this file.
             if let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG"] {
-                launcherWindowController.debugSimulatePageDrag(commit: mode != "abort")
+                if mode == "rapid" {
+                    launcherWindowController.debugSimulatePageDrag(commit: true)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak launcherWindowController] in
+                        launcherWindowController?.debugSimulatePageDrag(commit: true)
+                    }
+                } else {
+                    launcherWindowController.debugSimulatePageDrag(commit: mode != "abort")
+                }
             }
 
             // Debug-only: drives the custom item-drag state machine

@@ -96,6 +96,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// or settle callback from a previous gesture can recognize it's stale
     /// and no-op instead of undoing a newer gesture's state.
     private var dragGeneration = 0
+    /// The page `endPageDrag` has already committed to (or `nil` if the
+    /// current/most recent drag settled with no page change) — set right
+    /// before scheduling `finishPageDrag`'s async settle-timed call, so
+    /// `beginPageDrag` can complete a still-settling previous drag
+    /// *immediately and correctly* (landing on the page it actually
+    /// committed to) instead of either dropping the new swipe or finishing
+    /// onto the stale pre-transition page.
+    private var pendingPageDragTargetPage: Int?
     /// Last-resort recovery bound for `beginPageDrag`'s fallback timer —
     /// see the doc comment there for why this must be far longer than any
     /// real gesture, not a tight "feels responsive" value.
@@ -454,9 +462,22 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// and the hard fallback timer — the actual neighbor snapshot is
     /// created lazily in `updatePageDrag` once the direction is known.
     private func beginPageDrag() {
-        guard dragDirection == 0, dragNeighborImageView == nil else {
-            DiagnosticsLog.grid.notice("beginPageDrag: bailed early (dragDirection=\(self.dragDirection, privacy: .public), neighborAlreadyExists=\(self.dragNeighborImageView != nil, privacy: .public))")
-            return
+        if dragDirection != 0 || dragNeighborImageView != nil {
+            // Real, confirmed bug ("連続でページをスワイプした時にページ
+            // が送られない時がある"): a previous swipe's settle spring can
+            // take up to ~1s to finish (see `endPageDrag`'s commit-case
+            // response), and silently bailing here meant a new swipe that
+            // began during that window did *nothing at all* — not queued,
+            // not deferred, just dropped, with no visible feedback. Instead
+            // of bailing, complete the pending transition immediately
+            // (landing on whatever page it already committed to, via
+            // `pendingPageDragTargetPage` — falling back to `currentPage`
+            // only defensively, since a real in-flight drag always sets
+            // it) so the new swipe can begin right away rather than being
+            // swallowed. This only skips the tail of the previous
+            // transition's visual settle, never the transition itself.
+            DiagnosticsLog.grid.notice("beginPageDrag: previous drag still settling, finishing it immediately so this swipe isn't dropped")
+            finishPageDrag(targetPage: pendingPageDragTargetPage ?? currentPage)
         }
         guard collectionView.bounds.width > 0 else {
             DiagnosticsLog.grid.notice("beginPageDrag: bailed, collectionView.bounds.width <= 0")
@@ -604,6 +625,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         CATransaction.commit()
 
         let targetPage = commit ? currentPage + dragDirection : currentPage
+        pendingPageDragTargetPage = targetPage
         let generation = dragGeneration
         // Clamped defensively — this is a display-timing nicety, not the
         // real safety net (that's the fixed `dragSafetyNetTimeout` fallback
@@ -656,6 +678,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         dragNeighborImageView?.removeFromSuperview()
         dragNeighborImageView = nil
         dragDirection = 0
+        pendingPageDragTargetPage = nil
         dragGeneration += 1
         prefetchAdjacentPageIcons()
     }
@@ -680,6 +703,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         dragNeighborImageView?.removeFromSuperview()
         dragNeighborImageView = nil
         dragDirection = 0
+        pendingPageDragTargetPage = nil
         collectionView.reloadData()
         pageControl.currentPage = currentPage
         dragGeneration += 1
