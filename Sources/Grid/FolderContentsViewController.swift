@@ -108,6 +108,11 @@ final class FolderContentsViewController: NSViewController {
 
         let hosting = NSHostingView(rootView: FolderOverlayGridContent(model: gridModel, columns: columns, iconSize: CGFloat(iconSize)))
         hosting.translatesAutoresizingMaskIntoConstraints = false
+        // Defense in depth alongside the explicit widthAnchor below and the
+        // forced layoutIfNeeded() calls in refresh() — never let SwiftUI's
+        // own intrinsic-size measurement win a priority tie-break against
+        // the imposed Auto Layout width.
+        hosting.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -220,9 +225,27 @@ final class FolderContentsViewController: NSViewController {
                     guard let self, self.refreshGeneration == generation else { return }
                     guard let index = self.gridModel.tiles.firstIndex(where: { $0.id == tileID }) else { return }
                     self.gridModel.tiles[index].icon = icon
+                    // Real, confirmed bug: a fresh folder open has every icon
+                    // start nil and trickle in one at a time as each
+                    // `cache.icon(for:)` await resolves — each of these
+                    // `@Published` writes re-renders `FolderOverlayGridContent`,
+                    // and one debug-hook check (which happened to sample
+                    // only twice, at 0ms and +300ms) missed that a mid-stream
+                    // re-render can race Auto Layout's width-constraint
+                    // resolution and leave `NSHostingView` measured against
+                    // its own narrower SwiftUI-computed intrinsic size
+                    // instead of the imposed `scrollView.contentView.widthAnchor`
+                    // — exactly the collapsed-column symptom, just
+                    // intermittent depending on how many icons are still
+                    // loading when a screenshot is taken. Forcing a
+                    // synchronous layout pass after every trickle update
+                    // makes the correct width win deterministically instead
+                    // of depending on AppKit "eventually" reconciling it.
+                    self.view.window?.layoutIfNeeded()
                 }
             }
         }
         gridModel.tiles = tiles
+        view.window?.layoutIfNeeded()
     }
 }
