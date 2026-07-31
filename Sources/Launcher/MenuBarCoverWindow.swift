@@ -26,19 +26,33 @@ final class MenuBarCoverWindow: NSWindow {
     init(screen: NSScreen) {
         let rect = Self.coverRect(for: screen)
         super.init(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
-        // Real, confirmed complaint: a flat solid fill ("メニューバーのカバー
-        // の部分の色合いがおかしい") read as an obviously different, wrong-
-        // toned rectangle sitting right above the launcher's own translucent
-        // glass-over-blurred-desktop background — the two never matched
-        // because a flat opaque color can't track whatever the desktop
-        // wallpaper actually looks like, while the glass view below it does.
-        // Reusing `GlassBackgroundFactory.makeBackground` (the exact same
-        // material the rest of the launcher's background already uses, incl.
-        // its Reduce Transparency/Increase Contrast handling) makes this
-        // strip a visual continuation of that background instead of a
-        // mismatched patch — real macOS menu bars are themselves translucent
-        // by default, so layering this same blur+tint over it reliably
-        // smears its icons/text illegible without needing full opacity.
+        // Real, confirmed complaint #1: a flat solid fill ("メニューバーの
+        // カバーの部分の色合いがおかしい") read as an obviously different,
+        // wrong-toned rectangle sitting right above the launcher's own
+        // translucent glass-over-blurred-desktop background — a flat opaque
+        // color can't track whatever the desktop wallpaper actually looks
+        // like the way the glass view below it does.
+        //
+        // Real, confirmed complaint #2 (after switching to bare
+        // `GlassBackgroundFactory.makeBackground`): the real menu bar's
+        // icons/text were still faintly legible through the blur — a single
+        // Gaussian-blur pass softens edges but doesn't fully erase small,
+        // high-contrast vector content, and `GlassBackgroundFactory`'s own
+        // tint (`black.withAlphaComponent(0.08)`) was deliberately tuned
+        // for *lightly* tinting a photographic wallpaper, not for reliably
+        // hiding detailed content — two different jobs that don't share the
+        // same strength requirement even though they share the same blur
+        // technique. Confirmed by reading `GlassBackgroundView.swift`'s own
+        // doc comments, which explicitly describe that 8% tint as chosen to
+        // avoid "crushing the desktop wallpaper," the opposite of what this
+        // cover needs.
+        //
+        // Fix: keep the glass material (visual continuity with the
+        // launcher's own background survives), but layer a much stronger
+        // opaque-ish dark overlay (60% black) on top — enough to reliably
+        // erase icon/text detail while still letting ~40% of the blurred
+        // brightness/color variation show through, so it still reads as
+        // "this app's own dark glass," not an unrelated flat patch.
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
@@ -47,10 +61,21 @@ final class MenuBarCoverWindow: NSWindow {
         level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 1)
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
 
+        let container = NSView(frame: NSRect(origin: .zero, size: rect.size))
+        container.autoresizingMask = [.width, .height]
+
         let glass = GlassBackgroundFactory.makeBackground(cornerRadius: 0)
-        glass.frame = NSRect(origin: .zero, size: rect.size)
+        glass.frame = container.bounds
         glass.autoresizingMask = [.width, .height]
-        contentView = glass
+        container.addSubview(glass)
+
+        let scrim = NSView(frame: container.bounds)
+        scrim.autoresizingMask = [.width, .height]
+        scrim.wantsLayer = true
+        scrim.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor
+        container.addSubview(scrim)
+
+        contentView = container
     }
 
     /// Repositions to a (possibly different) screen's menu bar rect —
