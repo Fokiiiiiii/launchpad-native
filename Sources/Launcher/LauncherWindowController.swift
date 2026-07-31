@@ -435,16 +435,29 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             }
         )
 
-        // The glass background is a plain sibling subview behind the real
+        // The background is a plain sibling subview behind the real
         // content — not a container for it — so normal AppKit hit-testing
-        // applies to every button/cell. See GlassBackgroundView.swift's doc
-        // comment for why (NSGlassEffectView.contentView broke mouse events).
+        // applies to every button/cell (`TesseraBackgroundView.hitTest`
+        // also hard-disables itself, same discipline `GlassBackgroundView
+        // .swift`'s doc comment establishes for why: a purely decorative
+        // background must never be a hit-test target).
         let root = NSView(frame: screen.frame)
         // Backs the open/close scale animation — animated on `root`'s own
         // layer, a level above `background`/`content.view`, so scaling
         // never fights with either of their own layer usage.
         root.wantsLayer = true
-        let background = GlassBackgroundFactory.makeBackground(cornerRadius: 0)
+        // `TesseraBackgroundView`, not `GlassBackgroundFactory` — a real,
+        // confirmed regression ("アプリの周りにある謎の枠を消してくれ")
+        // traced back to stretching `NSGlassEffectView`'s own Liquid Glass
+        // material (which self-draws a specular/edge highlight as part of
+        // the material itself) edge-to-edge across the entire screen. The
+        // Tessera reference's own full-screen background (`TSBackground`)
+        // never uses glass at all — only small cards/chips do (search bar,
+        // folder panel, Settings) — so the whole-window background now
+        // mirrors that reference composition (blurred desktop wallpaper +
+        // scrim + material sheen + ambient blooms) instead of routing
+        // through the same glass factory used for cards.
+        let background = TesseraBackgroundView(screen: screen)
         background.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(background)
 

@@ -47,12 +47,12 @@ final class MenuBarCoverWindow: NSWindow {
         // avoid "crushing the desktop wallpaper," the opposite of what this
         // cover needs.
         //
-        // Fix: keep the glass material (visual continuity with the
+        // Fix: keep a blurred-desktop background (visual continuity with the
         // launcher's own background survives), but layer a much stronger
         // opaque-ish dark overlay (60% black) on top — enough to reliably
         // erase icon/text detail while still letting ~40% of the blurred
         // brightness/color variation show through, so it still reads as
-        // "this app's own dark glass," not an unrelated flat patch.
+        // "this app's own dark background," not an unrelated flat patch.
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
@@ -64,10 +64,20 @@ final class MenuBarCoverWindow: NSWindow {
         let container = NSView(frame: NSRect(origin: .zero, size: rect.size))
         container.autoresizingMask = [.width, .height]
 
-        let glass = GlassBackgroundFactory.makeBackground(cornerRadius: 0)
-        glass.frame = container.bounds
-        glass.autoresizingMask = [.width, .height]
-        container.addSubview(glass)
+        // `TesseraBackgroundView`, not `GlassBackgroundFactory` — a real,
+        // confirmed regression ("アプリの周りにある謎の枠を消してくれ")
+        // traced back to stretching `NSGlassEffectView`'s own Liquid Glass
+        // material (which self-draws a specular/edge highlight) edge-to-edge
+        // across an entire screen-sized surface. The Tessera reference never
+        // uses glass full-screen — only for small cards/chips — so this
+        // strip now uses the same non-glass layered composition as the main
+        // launcher window's background. No bloom/highlight ellipses here
+        // (`includeBloomHighlights: false`): they're sized for a full
+        // screen and would barely register in this <40pt-tall strip.
+        let background = TesseraBackgroundView(screen: screen, configuration: .init(includeBloomHighlights: false))
+        background.frame = container.bounds
+        background.autoresizingMask = [.width, .height]
+        container.addSubview(background)
 
         // Real, confirmed complaint #3 ("変な黒い枠も消して"): a flat scrim
         // has a hard edge at its own bottom boundary, and since this cover
