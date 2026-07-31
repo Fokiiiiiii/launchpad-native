@@ -1068,6 +1068,23 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let start = DispatchTime.now()
         guard model.folders[folderID] != nil else { return }
 
+        // The reference's own `FolderOverlay` is a full-screen `ZStack`
+        // sibling covering the *entire* launcher (search bar included) —
+        // not scoped to just the grid area. `GridViewController.view` itself
+        // is only the bottom ~954pt of the 1050pt-tall window (the search
+        // bar occupies the top ~96pt as a sibling within
+        // `LauncherViewController.view`), so anchoring the backdrop to
+        // `view` left the search bar strip completely undimmed/unblurred
+        // while a folder was open — a real, confirmed visual bug
+        // ("上の部分がおかしい": the search bar area read as a bright,
+        // untouched strip floating above the darkened grid instead of
+        // being part of the same full-screen overlay). `view.window?
+        // .contentView` is the window's actual full-bounds root view (see
+        // `LauncherWindowController.makeWindow`'s own `root`), so anchoring
+        // there instead covers the whole screen, exactly like the
+        // reference.
+        let hostView = view.window?.contentView ?? view
+
         // Matches the "Tessera" reference's own `FolderOverlay`:
         // `.padding(.horizontal, TSLayout.folderPanelInsetH)` (96pt) on the
         // card, which makes its width scale with the screen rather than sit
@@ -1078,7 +1095,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // controller's own `preferredContentSize.width` must equal this
         // exact value rather than the caller applying a separate,
         // independently-computed width constraint afterward.
-        let panelWidth = view.bounds.width - 192
+        let panelWidth = hostView.bounds.width - 192
 
         let folderVC = FolderContentsViewController(
             model: model,
@@ -1122,14 +1139,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         let panel = folderVC.view
         backdrop.addSubview(panel)
-        view.addSubview(backdrop)
+        hostView.addSubview(backdrop)
 
         let size = folderVC.preferredContentSize
         NSLayoutConstraint.activate([
-            backdrop.topAnchor.constraint(equalTo: view.topAnchor),
-            backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            backdrop.topAnchor.constraint(equalTo: hostView.topAnchor),
+            backdrop.leadingAnchor.constraint(equalTo: hostView.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: hostView.trailingAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: hostView.bottomAnchor)
         ])
 
         // `panel` is positioned via a direct, one-time frame assignment —
@@ -1139,12 +1156,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // constraint intermittently won over an explicit Auto Layout
         // constraint of equal or higher priority). `backdrop`'s eventual
         // size is already known here without waiting for its own Auto
-        // Layout resolution: it's pinned 1:1 to `view`'s edges above, so
-        // its size always equals `view.bounds.size` (already read into
+        // Layout resolution: it's pinned 1:1 to `hostView`'s edges above, so
+        // its size always equals `hostView.bounds.size` (already read into
         // `panelWidth`). 196pt top offset and 96pt side insets both match
         // the reference's own `.padding(.top, 196)` /
         // `.padding(.horizontal, TSLayout.folderPanelInsetH)` exactly.
-        let backdropSize = view.bounds.size
+        let backdropSize = hostView.bounds.size
         panel.frame = NSRect(
             x: (backdropSize.width - size.width) / 2,
             y: backdropSize.height - 196 - size.height,
