@@ -173,6 +173,29 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         scrollView.drawsBackground = false
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = false
+        // Real, confirmed regression ("ページを変えるとアプリが下に下がる
+        // ...ずっと下がったまま...スワイプだけ"): user-confirmed that the
+        // shift is a real, *permanent* downward displacement, only via
+        // trackpad swipe (never dot/chevron clicks) — which this session
+        // couldn't reproduce directly, since simulating a swipe requires
+        // Accessibility/GUI-scripting permission this session doesn't have,
+        // and the existing `debugSimulatePageDrag` hook calls
+        // `beginPageDrag`/`updatePageDrag`/`endPageDrag` directly, bypassing
+        // `GridCollectionView.scrollWheel` (and its axis detection/momentum-
+        // phase handling) entirely — it can't exercise the one code path
+        // implicated. `hasVerticalScroller = false` above only hides the
+        // scroll *indicator*; it does not disable scrolling or elastic
+        // rubber-band bounce, both of which are otherwise allowed by
+        // default on both axes. This view has no scrollable content of its
+        // own at all (every page fits its viewport exactly — see
+        // `GridCollectionView.scrollWheel`'s own doc comment), so there is
+        // no legitimate reason for any elastic movement here, vertical or
+        // horizontal, regardless of whether it's proven to be the exact
+        // mechanism — disabling both removes an entire class of "some
+        // scroll-wheel-adjacent event reaches the scroll view's own
+        // elasticity machinery and leaves a residual offset" bugs outright.
+        scrollView.verticalScrollElasticity = .none
+        scrollView.horizontalScrollElasticity = .none
 
         pageControl.translatesAutoresizingMaskIntoConstraints = false
         pageControl.onSelectPage = { [weak self] index in self?.jumpToPage(index) }
