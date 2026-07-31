@@ -133,9 +133,21 @@ final class FolderContentsViewController: NSViewController {
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
 
-            hosting.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
-            hosting.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
-            hosting.topAnchor.constraint(equalTo: scrollView.topAnchor)
+            // Pinned to `scrollView.contentView` (the NSClipView), not
+            // `scrollView` itself — the documented-correct anchor target
+            // for a constraint-based documentView. Anchoring to the scroll
+            // view directly (two levels above hosting's actual superview)
+            // previously left NSHostingView without a firm width proposal,
+            // so SwiftUI fell back to its own intrinsic-size measurement
+            // and the whole panel rendered as a collapsed, narrow column —
+            // a real screenshot showed the folder as a garbled vertical
+            // sliver instead of a wide grid. The explicit widthAnchor is
+            // redundant with leading+trailing (consistent, not
+            // conflicting) but makes the firm-width requirement explicit.
+            hosting.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            hosting.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            hosting.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
         ])
         view = root
         // `NSPopover.contentSize`/the caller's own size constraints have no
