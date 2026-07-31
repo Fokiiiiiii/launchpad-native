@@ -1158,13 +1158,25 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // size is already known here without waiting for its own Auto
         // Layout resolution: it's pinned 1:1 to `hostView`'s edges above, so
         // its size always equals `hostView.bounds.size` (already read into
-        // `panelWidth`). 196pt top offset and 96pt side insets both match
-        // the reference's own `.padding(.top, 196)` /
+        // `panelWidth`). 96pt side insets match the reference's own
         // `.padding(.horizontal, TSLayout.folderPanelInsetH)` exactly.
+        //
+        // Vertically centered on screen rather than the reference's own
+        // literal fixed `.padding(.top, 196)` — a real, confirmed complaint
+        // ("画面の中央からずれてる"): the reference's fixed offset assumes a
+        // card tall enough to roughly fill the remaining space below it,
+        // but for a folder with only a couple of rows the card ends up far
+        // short of the 480pt height cap, leaving a much bigger gap below
+        // the card than above it — reading as pushed toward the top rather
+        // than centered. True vertical centering keeps the composition
+        // balanced regardless of how many rows the folder actually has,
+        // and matches the broader macOS convention of centering modal-style
+        // overlays (Quick Look, alerts, About panels) rather than pinning
+        // them to a fixed offset tuned for one specific content size.
         let backdropSize = hostView.bounds.size
         panel.frame = NSRect(
             x: (backdropSize.width - size.width) / 2,
-            y: backdropSize.height - 196 - size.height,
+            y: (backdropSize.height - size.height) / 2,
             width: size.width,
             height: size.height
         )

@@ -267,6 +267,25 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // choice. Kept alongside `menuBarCoverWindow` below (belt-and-
         // suspenders) since this alone was repeatedly confirmed, via real
         // screenshots, not to actually retract the menu bar in practice.
+        //
+        // `.hideMenuBar` (the stronger, unconditional option — no
+        // fullscreen heuristic involved) was tried in response to a direct
+        // user ask for something more fundamental than the cover-window
+        // workaround below, but caused a real, reproduced crash
+        // (EXC_BAD_ACCESS / SIGSEGV) on this exact launch path: inserting
+        // it appears to trigger an immediate, synchronous screen
+        // frame/`visibleFrame` change that cascades into an
+        // `NSCollectionView` frame-change notification
+        // (`_resizeToFitContentAndClipView` → `LauncherViewController
+        // .numberOfSections(in:)`) landing on a thread Swift's actor-
+        // isolation runtime check doesn't recognize as the main executor —
+        // confirmed via a real crash report, not a hunch. `.autoHideMenuBar`
+        // never triggers this same cascade, so it's kept as the only
+        // presentation-options mechanism here; a genuine menu-bar removal
+        // would need either real `NSWindow` fullscreen (a much larger,
+        // separately-tracked change — see the plan's "windowed mode
+        // deferred to a separate round" note) or a fix for this crash
+        // path, neither of which this round attempts.
         NSApp.presentationOptions.insert(.autoHideMenuBar)
         window.makeKeyAndOrderFront(nil)
 

@@ -172,10 +172,21 @@ final class FolderContentsViewController: NSViewController {
         root.addSubview(titleField)
         root.addSubview(scrollView)
         NSLayoutConstraint.activate([
-            background.topAnchor.constraint(equalTo: root.topAnchor),
-            background.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            background.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            background.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            // The reference applies the card background *only* to the
+            // grid (`LazyVGrid(...).padding(...).background{card}`) — the
+            // title above it has no background at all and floats directly
+            // on the blurred/darkened backdrop. Pinning `background` to
+            // `root`'s full bounds (the previous code) put the title
+            // *inside* the same boxed card as the grid — a real, confirmed
+            // regression ("その他の文字が枠内にはいてるのが気になる").
+            // Pinning it to `scrollView`'s own bounds instead makes the
+            // card start exactly where the grid does, leaving the 28pt
+            // title-to-grid gap as open backdrop space, matching the
+            // reference.
+            background.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            background.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            background.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
 
             titleField.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
             titleField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
