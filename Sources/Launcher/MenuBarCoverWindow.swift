@@ -69,10 +69,32 @@ final class MenuBarCoverWindow: NSWindow {
         glass.autoresizingMask = [.width, .height]
         container.addSubview(glass)
 
+        // Real, confirmed complaint #3 ("変な黒い枠も消して"): a flat scrim
+        // has a hard edge at its own bottom boundary, and since this cover
+        // is a *separate* `NSWindow` stacked above the launcher's own
+        // window, that hard edge reads as a visible seam/line running the
+        // full width of the screen right where this window ends and the
+        // launcher's own (unscrimmed) background begins — confirmed via a
+        // real screenshot showing a distinct horizontal band at exactly the
+        // cover's height. Fading the scrim's opacity down to zero only over
+        // its last ~15% keeps full coverage over the menu bar icons/text
+        // (concentrated well above that) while letting the transition into
+        // the launcher's background below blend smoothly instead of
+        // cutting sharply.
         let scrim = NSView(frame: container.bounds)
         scrim.autoresizingMask = [.width, .height]
         scrim.wantsLayer = true
-        scrim.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor
+        let scrimGradient = CAGradientLayer()
+        scrimGradient.frame = container.bounds
+        scrimGradient.colors = [
+            NSColor.black.withAlphaComponent(0.6).cgColor,
+            NSColor.black.withAlphaComponent(0.6).cgColor,
+            NSColor.black.withAlphaComponent(0.0).cgColor
+        ]
+        scrimGradient.locations = [0.0, 0.85, 1.0]
+        scrimGradient.startPoint = CGPoint(x: 0.5, y: 1.0)
+        scrimGradient.endPoint = CGPoint(x: 0.5, y: 0.0)
+        scrim.layer = scrimGradient
         container.addSubview(scrim)
 
         contentView = container

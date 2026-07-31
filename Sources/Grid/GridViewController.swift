@@ -1101,9 +1101,24 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         let backdrop = FolderOverlayBackdropView()
         backdrop.translatesAutoresizingMaskIntoConstraints = false
-        backdrop.wantsLayer = true
-        backdrop.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
         backdrop.onDismiss = { [weak self] in self?.closeFolderOverlay() }
+
+        // Blurs the grid behind the overlay, then darkens on top — matches
+        // the reference's `blur(22px)` + `rgba(8,8,9,.55)` exactly (a flat
+        // dim color alone, the previous implementation, left the grid
+        // sharply visible underneath instead of visibly blurred).
+        let blur = NonInteractiveFolderBlurView(frame: backdrop.bounds)
+        blur.autoresizingMask = [.width, .height]
+        blur.material = .fullScreenUI
+        blur.blendingMode = .withinWindow
+        blur.state = .active
+        backdrop.addSubview(blur)
+
+        let tint = NSView(frame: backdrop.bounds)
+        tint.autoresizingMask = [.width, .height]
+        tint.wantsLayer = true
+        tint.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        backdrop.addSubview(tint)
 
         let panel = folderVC.view
         backdrop.addSubview(panel)
@@ -2409,4 +2424,19 @@ private final class FolderOverlayBackdropView: NSView {
     override func cancelOperation(_ sender: Any?) {
         onDismiss?()
     }
+}
+
+/// Blurs the live grid content behind the folder overlay — matching the
+/// Tessera reference's own `.dc.html` mockup
+/// (`background:rgba(8,8,9,.55);backdrop-filter:blur(22px)`), which shows
+/// the grid as visibly *blurred and darkened*, not just darkened. A purely
+/// decorative background must never intercept clicks (same reasoning as
+/// `Launcher.NonInteractiveVisualEffectView`, which this file can't import
+/// across the module boundary — `Grid` sits below `Launcher` — so this is a
+/// local copy of the same one-line fix): overriding `hitTest` to
+/// unconditionally return `nil` lets every click fall through to
+/// `FolderOverlayBackdropView.mouseDown` (the actual dismiss handler)
+/// regardless of this view sitting on top of it in z-order.
+private final class NonInteractiveFolderBlurView: NSVisualEffectView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

@@ -126,11 +126,16 @@ final class FolderContentsViewController: NSViewController {
         // which works identically regardless of whether `root` itself is
         // frame- or constraint-positioned by its own superview.
 
-        // Dark, styled card background — a decorative sibling behind the
-        // title/grid, matching the reference's self-contained floating
-        // card. Corner radius (34) matches the "Tessera" design reference's
-        // own folder panel exactly.
-        let background = GlassBackgroundHelper.makeBackground(cornerRadius: 34, dark: true)
+        // Light, barely-tinted frosted-glass card background — a decorative
+        // sibling behind the title/grid. Matches the reference's own
+        // `.dc.html` mockup exactly (`rgba(255,255,255,.07)` fill, 1px
+        // `rgba(255,255,255,.12)` border, soft downward drop shadow) —
+        // *not* a dark/black-tinted card, which read as a heavy black panel
+        // instead of the reference's airy floating glass (see
+        // `GlassBackgroundHelper.makeFolderCardBackground`'s doc comment).
+        // Corner radius (34) matches the reference's own folder panel
+        // exactly.
+        let background = GlassBackgroundHelper.makeFolderCardBackground(cornerRadius: 34)
         background.translatesAutoresizingMaskIntoConstraints = false
 
         titleField.translatesAutoresizingMaskIntoConstraints = false
