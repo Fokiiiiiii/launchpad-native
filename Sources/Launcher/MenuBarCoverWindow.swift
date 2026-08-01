@@ -79,34 +79,17 @@ final class MenuBarCoverWindow: NSWindow {
         background.autoresizingMask = [.width, .height]
         container.addSubview(background)
 
-        // Real, confirmed complaint #3 ("変な黒い枠も消して"): a flat scrim
-        // has a hard edge at its own bottom boundary, and since this cover
-        // is a *separate* `NSWindow` stacked above the launcher's own
-        // window, that hard edge reads as a visible seam/line running the
-        // full width of the screen right where this window ends and the
-        // launcher's own (unscrimmed) background begins — confirmed via a
-        // real screenshot showing a distinct horizontal band at exactly the
-        // cover's height. Fading the scrim's opacity down to zero only over
-        // its last ~15% keeps full coverage over the menu bar icons/text
-        // (concentrated well above that) while letting the transition into
-        // the launcher's background below blend smoothly instead of
-        // cutting sharply.
-        let scrim = NSView(frame: container.bounds)
-        scrim.autoresizingMask = [.width, .height]
-        scrim.wantsLayer = true
-        let scrimGradient = CAGradientLayer()
-        scrimGradient.frame = container.bounds
-        scrimGradient.colors = [
-            NSColor.black.withAlphaComponent(0.6).cgColor,
-            NSColor.black.withAlphaComponent(0.6).cgColor,
-            NSColor.black.withAlphaComponent(0.0).cgColor
-        ]
-        scrimGradient.locations = [0.0, 0.85, 1.0]
-        scrimGradient.startPoint = CGPoint(x: 0.5, y: 1.0)
-        scrimGradient.endPoint = CGPoint(x: 0.5, y: 0.0)
-        scrim.layer = scrimGradient
-        container.addSubview(scrim)
-
+        // Real, confirmed report ("メニューバーの上の部分が黒くなっている"):
+        // this used to layer an additional flat 60%-black scrim on top of
+        // `TesseraBackgroundView` — but that view's own `scrimLayer` (92-94%
+        // opacity over an already-opaque near-black `baseLayer`) is already
+        // dark enough on its own to hide the real menu bar's icons/text; the
+        // extra scrim on top of an already-near-black surface just crushed
+        // this strip into a flat solid black band, visibly darker/flatter
+        // than the launcher's own (unscrimmed) background right below it —
+        // exactly the mismatch this cover exists to avoid (see complaint #1
+        // above). Removed; `TesseraBackgroundView` alone matches the
+        // launcher's own background exactly since it's the same view.
         contentView = container
     }
 
