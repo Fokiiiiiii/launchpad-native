@@ -573,16 +573,20 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// Round 13 §G: fixed, not width-relative — "even the slightest
     /// deliberate swipe" should commit regardless of screen size/column
     /// count, and a fixed point value reads as more predictable/tunable
-    /// than a width fraction that changes with icon size. Comfortably above
-    /// `GridCollectionView.minimumEngageDistance` (10pt — the separate,
-    /// unrelated gate for "does this even count as a horizontal gesture at
-    /// all," checked before this function is ever reached), leaving real
-    /// room for a deliberate reversal to still land under the commit line.
+    /// than a width fraction that changes with icon size. Real, confirmed
+    /// report ("ページ送りの感度が下がってる、少しでもスワイプしたら動く
+    /// ように"): 48pt required a noticeably deliberate swipe. Lowered to
+    /// 20pt — still comfortably above `GridCollectionView
+    /// .minimumEngageDistance` (10pt — the separate, unrelated gate for
+    /// "does this even count as a horizontal gesture at all," checked
+    /// before this function is ever reached), leaving a little room for a
+    /// deliberate reversal to still land under the commit line, but small
+    /// enough that a light swipe commits instead of springing back.
     /// `deltaX`/`velocity` here are already the gesture's *final* values at
     /// release (not a stored peak), so reversing an in-progress swipe back
     /// toward the original page already reads as a cancel for free — no
     /// separate "was this reversed" logic is needed.
-    private static let pageDragCommitDistance: CGFloat = 48
+    private static let pageDragCommitDistance: CGFloat = 20
 
     private func endPageDrag(deltaX: CGFloat, velocity: CGFloat) {
         let width = max(collectionView.bounds.width, 1)
@@ -968,15 +972,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         DiagnosticsLog.launcher.info("debugSimulatePageDrag: starting at page \(startPage, privacy: .public), commit=\(commit, privacy: .public)")
         beginPageDrag()
         let width = max(collectionView.bounds.width, 1)
-        // Round 13 §G: `endPageDrag`'s commit threshold became a fixed
-        // ~48pt (was `width * 0.3`) — the abort case must stay a small
-        // fixed delta clearly *below* that new threshold regardless of
-        // screen width; the old `width * 0.05` fraction would now exceed 48pt
-        // on any normal-sized screen and flip this "should abort" simulation
-        // into incorrectly committing. The commit case can stay width-
-        // relative since half the page width always clears 48pt.
+        // Round 13 §G (revised): `endPageDrag`'s commit threshold is now a
+        // fixed 20pt (lowered further from 48pt per a real report that the
+        // swipe felt insensitive) — the abort case must stay a small fixed
+        // delta clearly *below* that threshold regardless of screen width,
+        // small enough not to collide with the new lower commit line. The
+        // commit case can stay width-relative since half the page width
+        // always clears 20pt.
         let commitTargetDeltaX: CGFloat = -width * 0.5
-        let abortTargetDeltaX: CGFloat = -20
+        let abortTargetDeltaX: CGFloat = -8
         let targetDeltaX = commit ? commitTargetDeltaX : abortTargetDeltaX
         let steps = 10
         for step in 1...steps {
