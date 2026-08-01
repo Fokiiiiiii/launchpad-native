@@ -66,11 +66,14 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // ambient background) — `searchBarGlass` is a purely decorative
         // sibling behind `searchIcon`/`searchField`, never their container,
         // for the same hit-testing reason `GlassBackgroundView`'s doc
-        // comment explains for the full-screen background. Matches the
-        // "Tessera" design reference's `SearchField` (`.pill` style) exactly:
-        // `TSLayout.searchCorner` (10 — a rounded rect, not a full stadium
-        // shape like this bar's previous 20pt/half-height corner radius).
-        let searchBarGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 10)
+        // comment explains for the full-screen background. Real, confirmed
+        // report ("検索バーのデザインが堅い"): the reference's own SwiftUI
+        // source (`TSLayout.searchCorner` = 10) and its HTML mockup
+        // disagree here (20pt/half-height in the HTML) — 10pt on a 36pt-tall
+        // bar reads as a barely-rounded rectangle, not a soft capsule. Full
+        // stadium shape (half the bar's own height) matches what the user
+        // actually saw and asked for.
+        let searchBarGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 18)
         searchBarGlass.translatesAutoresizingMaskIntoConstraints = false
 
         searchIcon.translatesAutoresizingMaskIntoConstraints = false
