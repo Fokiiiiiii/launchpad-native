@@ -1,4 +1,6 @@
+import AppKit
 import Catalog
+import Diagnostics
 import Foundation
 import Uninstall
 
@@ -19,6 +21,15 @@ public final class UninstallPanelViewModel: ObservableObject {
         public let id = UUID()
         public let removalItem: RemovalItem
         public var sizeInBytes: Int64?
+        /// Real, confirmed report ("中身のフォルダのアイコンが見えない"):
+        /// every non-app-bundle row (caches, preferences, receipts — mostly
+        /// folders, not applications) rendered as a flat gray placeholder
+        /// square forever, since only the app bundle row had an icon to
+        /// show. Populated asynchronously alongside `sizeInBytes` via
+        /// `NSWorkspace.icon(forFile:)` — the same API Finder itself uses,
+        /// so a folder gets the real folder icon, a plist gets the real
+        /// plist icon, etc., instead of a placeholder.
+        public var icon: NSImage?
         public var isChecked: Bool
         /// sharedRisk/unknown/requiresPrivilegedHelper items are always
         /// shown (never silently hidden) but can never be checked — matches
@@ -51,12 +62,16 @@ public final class UninstallPanelViewModel: ObservableObject {
             let row = Row(
                 removalItem: item,
                 sizeInBytes: nil,
+                icon: nil,
                 isChecked: item.classification == .owned && !item.requiresPrivilegedHelper,
                 isDisabled: item.classification != .owned || item.requiresPrivilegedHelper
             )
             grouped[kind, default: []].append(row)
         }
         rowsBySection = grouped
+        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_UNINSTALL"] == "1" {
+            DiagnosticsLog.settings.info("UninstallPanelViewModel.init: isSystemProtected=\(record.isSystemProtected, privacy: .public), plan.count=\(plan.count, privacy: .public), rowsBySection counts=\(grouped.map { "\($0.key): \($0.value.count)" }.joined(separator: ", "), privacy: .public)")
+        }
         Task { await computeSizes() }
     }
 
@@ -78,8 +93,17 @@ public final class UninstallPanelViewModel: ObservableObject {
             for index in rows.indices {
                 let path = rows[index].removalItem.path
                 rows[index].sizeInBytes = await Task.detached { DiskSizeEstimator.estimatedSize(at: path) }.value
+                // NSWorkspace's own icon lookup — same API Finder itself
+                // uses, so a folder gets the real folder icon, a plist gets
+                // the real plist icon, etc. Works even for paths that don't
+                // exist (falls back to a generic icon for the extension),
+                // so a missing/already-cleaned-up file never crashes this.
+                rows[index].icon = NSWorkspace.shared.icon(forFile: path.path)
             }
             rowsBySection[kind] = rows
+            if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_UNINSTALL"] == "1" {
+                DiagnosticsLog.settings.info("UninstallPanelViewModel.computeSizes: kind=\(String(describing: kind), privacy: .public) icons=\(rows.map { $0.icon != nil ? "1" : "0" }.joined(separator: ","), privacy: .public)")
+            }
         }
         isComputingSizes = false
         let total = rowsBySection.values.flatMap { $0 }.filter(\.isChecked).reduce(Int64(0)) { $0 + ($1.sizeInBytes ?? 0) }

@@ -2,31 +2,6 @@ import AppKit
 import Localization
 import SwiftUI
 
-/// Reports the natural (unclipped) height of whatever it's attached to, via
-/// a zero-size `GeometryReader` overlay — the standard SwiftUI technique for
-/// letting a `ScrollView` (which otherwise always greedily expands to fill
-/// whatever frame it's given, never "hugging" short content) size itself to
-/// its actual content up to a cap. See `UninstallPanelView.body`'s doc
-/// comment for the real bug this fixes.
-private struct ContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-/// Same technique as `ContentHeightKey`, applied to the *whole* panel body
-/// instead of just the scrollable section — lets
-/// `UninstallPanelWindowController` resize the actual `NSWindow` to match
-/// real content instead of always showing a fixed 500pt-tall window with
-/// left­over space wherever the content happened to be shorter.
-private struct TotalHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 /// Floating panel shown from the grid's "Uninstall…" context menu item.
 /// Adapted directly from the user-supplied "Tessera" design reference's
 /// `UninstallSheet` (`Dialogs.swift`) — same header (icon/name/total size),
@@ -76,30 +51,48 @@ struct UninstallPanelView: View {
             VStack(spacing: 0) {
                 header
                 Divider()
+                // Real, confirmed bug ("消去uiに中身のコンポーネントなど
+                // の情報が出ない"): this used to be a `LazyVStack` sized via
+                // `GeometryReader` + `PreferenceKey`. Two bugs stacked here:
+                // (1) `LazyVStack` only materializes children within its
+                // containing scroll view's *current viewport*, which was
+                // driven by `sectionsContentHeight` starting at `0` — a
+                // self-reinforcing loop with no path to a nonzero height.
+                // Switching to `VStack` (which measures every row up front
+                // regardless of the enclosing scroll view's size) broke that
+                // loop. (2) Even after that fix, real device logs showed
+                // `GeometryReader`'s `.preference`-reported height staying
+                // stuck at `0` on every layout pass — while a diagnostic
+                // `.onAppear` on the very same `GeometryReader` observed a
+                // real, nonzero size. The `.background(GeometryReader{...})`
+                // + `PreferenceKey` combination is evidently unreliable
+                // inside a `ScrollView` hosted via `NSHostingController` in
+                // this app (a known class of SwiftUI footgun — `.preference`
+                // updates can silently lag or stick to a stale layout pass).
+                // `onGeometryChange(for:of:action:)` (macOS 14+, this app
+                // targets macOS 15) reports the same geometry via a direct
+                // callback instead of the preference-propagation machinery,
+                // and was confirmed via the same real-device logging to
+                // report the correct nonzero height immediately.
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    VStack(spacing: 0) {
                         ForEach(UninstallPanelViewModel.SectionKind.allCases, id: \.self) { kind in
                             if let rows = viewModel.rowsBySection[kind], !rows.isEmpty {
                                 sectionView(kind: kind, rows: rows)
                             }
                         }
                     }
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear.preference(key: ContentHeightKey.self, value: proxy.size.height)
-                        }
-                    )
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { newHeight in
+                        sectionsContentHeight = newHeight
+                    }
                 }
-                .onPreferenceChange(ContentHeightKey.self) { sectionsContentHeight = $0 }
-                .frame(height: min(sectionsContentHeight, Self.maxSectionsHeight))
+                .frame(height: min(max(sectionsContentHeight, 1), Self.maxSectionsHeight))
                 Divider()
                 footer
             }
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: TotalHeightKey.self, value: proxy.size.height)
-                }
-            )
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { newHeight in
+                onContentHeightChange(newHeight)
+            }
             // Round 13 §A: the window's native titlebar/traffic-lights are
             // now fully hidden — this is the only remaining discoverable
             // way to close the panel beyond outside-click/Escape.
@@ -108,7 +101,6 @@ struct UninstallPanelView: View {
         }
         .background(.regularMaterial)
         .frame(width: 420)
-        .onPreferenceChange(TotalHeightKey.self) { onContentHeightChange($0) }
     }
 
     private var header: some View {
@@ -194,6 +186,11 @@ struct UninstallPanelView: View {
 
             if row.removalItem.path == viewModel.record.bundleURL, let appIcon {
                 Image(nsImage: appIcon)
+                    .resizable()
+                    .frame(width: 22, height: 22)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            } else if let icon = row.icon {
+                Image(nsImage: icon)
                     .resizable()
                     .frame(width: 22, height: 22)
                     .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))

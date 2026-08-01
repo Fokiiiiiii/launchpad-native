@@ -238,6 +238,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 launcherWindowController.debugOpenFirstFolder()
             }
 
+            // Debug-only: opens the Uninstall panel against
+            // Scripts/build-uninstall-fixture.sh's throwaway fixture app —
+            // never a real installed app — so the panel's section/row
+            // rendering can be checked via log stream without needing a
+            // real right-click-menu interaction (this session has no
+            // Accessibility/GUI-scripting permission to perform one).
+            if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_UNINSTALL"] == "1" {
+                let fixtureURL = URL(fileURLWithPath: NSHomeDirectory() + "/.cache/launchpad-native/fixtures/UninstallFixture.app")
+                let bundleID = "com.launchpadnative.uninstallfixture"
+                let record = ApplicationRecord(
+                    id: StableAppID(bundleURL: fixtureURL, bundleIdentifier: bundleID, teamIdentifier: nil),
+                    bundleIdentifier: bundleID,
+                    bundleURL: fixtureURL,
+                    executableURL: nil,
+                    displayName: "Uninstall Fixture",
+                    originalDisplayName: "Uninstall Fixture",
+                    bundleVersion: "1.0",
+                    teamIdentifier: nil,
+                    category: nil,
+                    sourceID: "debug",
+                    isSystemProtected: false,
+                    isBackgroundOnly: false,
+                    iconCacheKey: bundleID,
+                    canLaunch: false,
+                    canOpenNewInstance: false,
+                    lastSeenModificationDate: Date(timeIntervalSince1970: 0)
+                )
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self else { return }
+                    DiagnosticsLog.appHost.info("LAUNCHPAD_DEBUG_SHOW_UNINSTALL: showing panel for fixture record")
+                    self.uninstallPanelWindowController.show(for: record, allRecords: [record], on: self.launcherWindowController.currentScreen)
+                }
+            }
+
             for await update in await scanner.updates() {
                 launcherWindowController.updateRecords(update.records)
             }
