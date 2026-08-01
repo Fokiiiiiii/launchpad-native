@@ -74,7 +74,15 @@ final class MenuBarCoverWindow: NSWindow {
         // launcher window's background. No bloom/highlight ellipses here
         // (`includeBloomHighlights: false`): they're sized for a full
         // screen and would barely register in this <40pt-tall strip.
-        let background = TesseraBackgroundView(screen: screen, configuration: .init(includeBloomHighlights: false))
+        //
+        // Real, confirmed report ("メニューバーの上の部分が黒くなっている"):
+        // this view's own position within the screen (`viewportOrigin`) must
+        // be passed through — see that parameter's doc comment. Without it,
+        // this strip's gradients ran their own independent sweep across its
+        // ~31pt height instead of sharing the main window's full-screen one,
+        // producing a visible seam/flat band at the shared edge.
+        let viewportOrigin = CGPoint(x: rect.minX - screen.frame.minX, y: rect.minY - screen.frame.minY)
+        let background = TesseraBackgroundView(screen: screen, viewportOrigin: viewportOrigin, configuration: .init(includeBloomHighlights: false))
         background.frame = container.bounds
         background.autoresizingMask = [.width, .height]
         container.addSubview(background)

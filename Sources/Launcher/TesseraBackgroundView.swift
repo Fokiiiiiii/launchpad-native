@@ -33,8 +33,31 @@ final class TesseraBackgroundView: NSView {
     private let sheenLayer = CAGradientLayer()
     private var bloomLayer: CALayer?
     private var highlightLayer: CALayer?
+    private let fullScreenSize: CGSize
+    /// This view's own position within the full screen, in the screen's own
+    /// bottom-left-origin coordinate space (`NSScreen.frame`'s own
+    /// convention). Real, confirmed report ("メニューバーの上の部分が黒く
+    /// なっている"): `MenuBarCoverWindow` and `LauncherWindowController`
+    /// each construct their own independent `TesseraBackgroundView`
+    /// instance, and every gradient here (`scrimLayer`/`sheenLayer`) is
+    /// positioned in *that layer's own* unit square — each view previously
+    /// treated its own bounds as if it were the entire screen, so the menu
+    /// bar strip's gradients ran their own independent 0-to-1 sweep across
+    /// its ~31pt height while the main window ran the *same* 0-to-1 sweep
+    /// across its ~1000pt+ height. Two independently-normalized gradients
+    /// meeting at a shared edge don't produce continuous values there —
+    /// this is why the strip visibly reads as a flat, separate band instead
+    /// of blending into what's directly below it. Fed with the *whole
+    /// screen's* size and this view's own offset within it, every layer
+    /// below is now framed at full-screen size and shifted by
+    /// `-viewportOrigin` — each view becomes a window looking into one
+    /// shared, continuous composition instead of computing its own
+    /// self-contained one.
+    private let viewportOrigin: CGPoint
 
-    init(screen: NSScreen, configuration: Configuration = .init()) {
+    init(screen: NSScreen, viewportOrigin: CGPoint = .zero, configuration: Configuration = .init()) {
+        self.fullScreenSize = screen.frame.size
+        self.viewportOrigin = viewportOrigin
         super.init(frame: .zero)
         wantsLayer = true
         guard let root = layer else { return }
@@ -107,7 +130,7 @@ final class TesseraBackgroundView: NSView {
             highlightLayer = highlight
         }
 
-        updateLayerFrames(for: screen.frame.size)
+        updateLayerFrames()
     }
 
     // Radial CAGradientLayers need their own bounds set explicitly (they
@@ -124,11 +147,20 @@ final class TesseraBackgroundView: NSView {
 
     override func layout() {
         super.layout()
-        updateLayerFrames(for: bounds.size)
+        updateLayerFrames()
     }
 
-    private func updateLayerFrames(for size: CGSize) {
-        let bounds = CGRect(origin: .zero, size: size)
+    /// Every layer below is framed at the *whole screen's* size (not this
+    /// view's own, possibly much smaller, bounds) and shifted by
+    /// `-viewportOrigin` — see `viewportOrigin`'s doc comment for why. A
+    /// view whose `viewportOrigin` is `.zero` and whose own bounds already
+    /// equal `fullScreenSize` (the main launcher window) behaves exactly as
+    /// before this change; only a narrower/offset view (the menu bar cover)
+    /// changes behavior.
+    private func updateLayerFrames() {
+        let size = fullScreenSize
+        let origin = CGPoint(x: -viewportOrigin.x, y: -viewportOrigin.y)
+        let bounds = CGRect(origin: origin, size: size)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
@@ -143,8 +175,8 @@ final class TesseraBackgroundView: NSView {
         if let bloomLayer, let bloomLayerGradient {
             let bloomSize = CGSize(width: size.width * (620.0 / 1440.0), height: size.height * (520.0 / 900.0))
             bloomLayer.frame = CGRect(
-                x: size.width - bloomSize.width * 0.72,
-                y: -bloomSize.height * 0.35,
+                x: origin.x + size.width - bloomSize.width * 0.72,
+                y: origin.y - bloomSize.height * 0.35,
                 width: bloomSize.width,
                 height: bloomSize.height
             )
@@ -153,8 +185,8 @@ final class TesseraBackgroundView: NSView {
         if let highlightLayer, let highlightLayerGradient {
             let highlightSize = CGSize(width: size.width * (420.0 / 1440.0), height: size.height * (360.0 / 900.0))
             highlightLayer.frame = CGRect(
-                x: -highlightSize.width * 0.35,
-                y: size.height - highlightSize.height * 0.65,
+                x: origin.x - highlightSize.width * 0.35,
+                y: origin.y + size.height - highlightSize.height * 0.65,
                 width: highlightSize.width,
                 height: highlightSize.height
             )
