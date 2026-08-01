@@ -245,9 +245,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         guard let screen = view.window?.screen else { return }
         let dockReservedHeight = max(screen.visibleFrame.minY - screen.frame.minY, 0)
         pageControlBottomConstraint?.constant = -(dockReservedHeight + 24)
-        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_GRID_LAYOUT"] == "1" {
-            DiagnosticsLog.grid.info("updatePageControlBottomMargin: screen.frame=\(String(describing: screen.frame), privacy: .public), screen.visibleFrame=\(String(describing: screen.visibleFrame), privacy: .public), dockReservedHeight=\(dockReservedHeight, privacy: .public)")
-        }
     }
 
     public func reload() {
@@ -259,12 +256,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         pageControl.numberOfPages = model.pages.count
         pageControl.currentPage = currentPage
         prefetchAdjacentPageIcons()
-        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_GRID_LAYOUT"] == "1" {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                DiagnosticsLog.grid.info("gridLayoutDebug: view.frame=\(String(describing: self.view.frame), privacy: .public), scrollView.frame=\(String(describing: self.scrollView.frame), privacy: .public), pageControl.frame=\(String(describing: self.pageControl.frame), privacy: .public), collectionView.bounds=\(String(describing: self.collectionView.bounds), privacy: .public), currentCellSize=\(String(describing: self.layout.currentCellSize), privacy: .public), currentIconSize=\(self.currentIconSize, privacy: .public), settings=columns:\(self.model.gridSettings.columns, privacy: .public) rows:\(self.model.gridSettings.rows, privacy: .public)")
-            }
-        }
     }
 
     /// Warms `IconCache` for the pages adjacent to `currentPage`, ahead of
@@ -689,15 +680,56 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// shows the correct content — nothing stale to flash.
     private func finishPageDrag(targetPage: Int) {
         currentPage = targetPage
-        collectionView.reloadData()
-        collectionView.layoutSubtreeIfNeeded()
-        collectionView.displayIfNeeded()
+
+        // A large-scale parallel code audit (7 independent finders) traced
+        // a real, confirmed bug ("ページを変えるとアプリが下に下がる...
+        // スワイプだけ...数百msくらいで下に行く") to this exact spot:
+        // `jumpToPage` (dot/chevron clicks, which NEVER reproduce the
+        // symptom) never forces a synchronous layout/redraw pass at all —
+        // it just calls `reloadData()` and lets AppKit's normal deferred
+        // layout cycle handle it. This function used to be the one place
+        // in the whole file that called `layoutSubtreeIfNeeded()`/
+        // `displayIfNeeded()` while `collectionView`'s own layer transform
+        // was still non-identity (off-screen, ±width from the drag).
+        // Multiple independent auditors flagged that exact combination as
+        // the only structural difference between the two page-change
+        // paths, and traced it (via `PagedGridLayout.prepare()`'s own
+        // self-referential `contentSize` computation, fixed separately in
+        // `PagedGridLayout.swift`) to the long-documented ~63pt "content
+        // taller than viewport" overflow this function's own
+        // `resetScrollPosition()` doc comment records.
+        //
+        // Fix: reset the transform to identity *before* reloading/forcing
+        // layout, not after. The first version of this fix assumed
+        // `dragNeighborImageView` — positioned `.above` `scrollView`, see
+        // `updatePageDrag` — fully covered `collectionView` at this point,
+        // making the early on-screen transform invisible. Real, confirmed
+        // regression from that assumption (user report: "前のページの
+        // アプリ名の文字が一瞬残って既存の文字と重なる"): the snapshot's
+        // host collection view renders with a transparent background
+        // (`SnapshotDataSource`'s `tempCollectionView.backgroundColors =
+        // [.clear]`, see `renderPageSnapshot`), so only the icon/label
+        // *shapes* are opaque — the gaps between/around cells are see-
+        // through. With `collectionView` moved on-screen but not yet
+        // reloaded for the new page, its stale (previous-page) labels
+        // bled through those transparent gaps for one frame, doubling up
+        // visibly with the snapshot's own labels. `isHidden` guarantees
+        // nothing is drawn at all regardless of what's underneath or how
+        // transparent the covering snapshot is — strictly safer than
+        // relying on the snapshot's opacity.
+        collectionView.isHidden = true
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         collectionView.layer?.removeAllAnimations()
         collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
         CATransaction.commit()
+
+        collectionView.reloadData()
+        collectionView.layoutSubtreeIfNeeded()
+        collectionView.displayIfNeeded()
+        collectionView.isHidden = false
+
         resetScrollPosition()
         pageControl.currentPage = currentPage
         dragNeighborImageView?.removeFromSuperview()
