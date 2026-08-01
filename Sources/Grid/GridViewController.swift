@@ -1661,15 +1661,22 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private static let itemDragEdgeZoneWidth: CGFloat = 70
     private static let itemDragEdgeHoverDelay: TimeInterval = 0.45
     private static let itemDragFolderHoverDelay: TimeInterval = 0.5
-    private static let itemDragReorderDebounce: TimeInterval = 0.12
+    /// Real, confirmed report ("アプリ移動の操作感が悪い"): 0.12s stacked
+    /// on top of the 40% hysteresis band below meant a reorder preview only
+    /// ever responded to a large, sustained move — lowered to make dragging
+    /// feel directly responsive again.
+    private static let itemDragReorderDebounce: TimeInterval = 0.06
     private static let itemDragFolderZoneInset: CGFloat = 0.2 // ~60% center region
     /// Round 12 §8a: the pointer must cross this fraction of a cell's width
     /// *past* the committed slot's own center before the candidate slot is
     /// allowed to change at all — a real hysteresis band (spec 7.3) around
     /// the current selection, replacing the old "any raw nearest-slot change
     /// restarts the debounce timer" behavior, which could still flicker if
-    /// the pointer sat right on a cell boundary.
-    private static let itemDragHysteresisFraction: CGFloat = 0.4
+    /// the pointer sat right on a cell boundary. Real, confirmed report
+    /// ("アプリ移動の操作感が悪い"): 40% required dragging almost a full
+    /// cell past center before anything visibly responded — lowered to 15%,
+    /// still enough to damp boundary flicker without reading as sluggish.
+    private static let itemDragHysteresisFraction: CGFloat = 0.15
     /// Round 12 §8b: proportional "peek" of the incoming page shown while
     /// dwelling in the edge zone, matching the user-provided spec's own
     /// suggested formula (`previewOffset = -proximity * 30`).
