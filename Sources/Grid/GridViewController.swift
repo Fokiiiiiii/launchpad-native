@@ -381,6 +381,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 guard let self else { return }
                 self.currentPage = index
                 self.collectionView.reloadData()
+                self.resetScrollPosition()
                 self.prefetchAdjacentPageIcons()
 
                 // Snap the freshly-reloaded content to the "just off to the
@@ -697,6 +698,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.layer?.removeAllAnimations()
         collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
         CATransaction.commit()
+        resetScrollPosition()
         pageControl.currentPage = currentPage
         dragNeighborImageView?.removeFromSuperview()
         dragNeighborImageView = nil
@@ -704,6 +706,36 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         pendingPageDragTargetPage = nil
         dragGeneration += 1
         prefetchAdjacentPageIcons()
+    }
+
+    /// Real, confirmed regression ("ページを変えるとアプリが下に下がる...
+    /// ずっと下がったまま...スワイプだけ...数百msくらいで下に行く"): a
+    /// real, measured fact (via a temporary diagnostic, since a real
+    /// trackpad swipe can't be simulated in this session) is that
+    /// `collectionView`'s content is actually ~63pt *taller* than
+    /// `scrollView`'s visible viewport for this grid's configuration —
+    /// contradicting `GridCollectionView.scrollWheel`'s own doc comment
+    /// ("a page fits entirely in the viewport... nothing to actually
+    /// scroll"), which is evidently not true for every grid configuration.
+    /// That 63pt is a *real*, legitimate scrollable range, so if a real
+    /// 2-finger trackpad gesture's vertical component ever causes the
+    /// enclosing `NSScrollView`/`NSClipView` to scroll even partway into
+    /// it (through some path independent of `GridCollectionView`'s own
+    /// `scrollWheel` override, which never forwards to `super` and — per
+    /// direct code reading — shouldn't be able to cause this on its own),
+    /// nothing previously reset it back — only the layer's *transform* was
+    /// ever zeroed after a page change, never the scroll view's actual
+    /// `contentView.bounds.origin`, a completely independent property. That
+    /// would explain every reported detail: permanent (nothing undoes it),
+    /// swipe-only (dot/chevron clicks never touch the scroll view at all),
+    /// and only becoming visible after the settle delay (this method is
+    /// what fires at that point). Forcing it back to `.zero` on every page
+    /// change closes off this entire class of drift regardless of the
+    /// exact mechanism that first nudges it.
+    private func resetScrollPosition() {
+        guard scrollView.contentView.bounds.origin != .zero else { return }
+        scrollView.contentView.bounds.origin = .zero
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     /// Hard safety net, reachable from three independent places (the fixed
@@ -723,6 +755,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.layer?.removeAllAnimations()
         collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
         CATransaction.commit()
+        resetScrollPosition()
         dragNeighborImageView?.removeFromSuperview()
         dragNeighborImageView = nil
         dragDirection = 0
