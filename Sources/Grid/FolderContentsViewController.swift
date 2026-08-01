@@ -126,18 +126,6 @@ final class FolderContentsViewController: NSViewController {
         // which works identically regardless of whether `root` itself is
         // frame- or constraint-positioned by its own superview.
 
-        // Light, barely-tinted frosted-glass card background — a decorative
-        // sibling behind the title/grid. Matches the reference's own
-        // `.dc.html` mockup exactly (`rgba(255,255,255,.07)` fill, 1px
-        // `rgba(255,255,255,.12)` border, soft downward drop shadow) —
-        // *not* a dark/black-tinted card, which read as a heavy black panel
-        // instead of the reference's airy floating glass (see
-        // `GlassBackgroundHelper.makeFolderCardBackground`'s doc comment).
-        // Corner radius (34) matches the reference's own folder panel
-        // exactly.
-        let background = GlassBackgroundHelper.makeFolderCardBackground(cornerRadius: 34)
-        background.translatesAutoresizingMaskIntoConstraints = false
-
         titleField.translatesAutoresizingMaskIntoConstraints = false
         // 21pt regular weight — the reference's own
         // `Text(folder.name).font(.system(size: TSLayout.folderTitleSize))`
@@ -168,26 +156,9 @@ final class FolderContentsViewController: NSViewController {
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
 
-        root.addSubview(background)
         root.addSubview(titleField)
         root.addSubview(scrollView)
         NSLayoutConstraint.activate([
-            // The reference applies the card background *only* to the
-            // grid (`LazyVGrid(...).padding(...).background{card}`) — the
-            // title above it has no background at all and floats directly
-            // on the blurred/darkened backdrop. Pinning `background` to
-            // `root`'s full bounds (the previous code) put the title
-            // *inside* the same boxed card as the grid — a real, confirmed
-            // regression ("その他の文字が枠内にはいてるのが気になる").
-            // Pinning it to `scrollView`'s own bounds instead makes the
-            // card start exactly where the grid does, leaving the 28pt
-            // title-to-grid gap as open backdrop space, matching the
-            // reference.
-            background.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            background.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
-            background.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
-            background.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
-
             titleField.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
             titleField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             titleField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
