@@ -136,6 +136,51 @@ public final class GridModel {
         onChange?()
     }
 
+    public var showsMenuBarIcon: Bool {
+        document.showsMenuBarIcon
+    }
+
+    public func setShowsMenuBarIcon(_ value: Bool) {
+        document.showsMenuBarIcon = value
+        onChange?()
+    }
+
+    public var showsHiddenAppsInSearch: Bool {
+        document.showsHiddenAppsInSearch
+    }
+
+    public func setShowsHiddenAppsInSearch(_ value: Bool) {
+        document.showsHiddenAppsInSearch = value
+        onChange?()
+    }
+
+    public var backgroundMode: LauncherBackgroundMode {
+        document.backgroundMode
+    }
+
+    public func setBackgroundMode(_ mode: LauncherBackgroundMode) {
+        document.backgroundMode = mode
+        onChange?()
+    }
+
+    public var glassMaterialIntensity: Double {
+        document.glassMaterialIntensity
+    }
+
+    public func setGlassMaterialIntensity(_ value: Double) {
+        document.glassMaterialIntensity = value
+        onChange?()
+    }
+
+    public var blursWallpaper: Bool {
+        document.blursWallpaper
+    }
+
+    public func setBlursWallpaper(_ value: Bool) {
+        document.blursWallpaper = value
+        onChange?()
+    }
+
     /// "カスタム" (manual drag order, unchanged), "名前順", "追加日順" (newest
     /// first), or "最終使用日順" (most recently launched first) — the latter
     /// two read from `LayoutDocument.dateAddedByID`/`lastUsedByID`, stamped

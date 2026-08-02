@@ -36,6 +36,60 @@ import Testing
     #expect(loaded.lastUsedByID[StableAppIdentifier(value: "abc")] == used)
 }
 
+@Test func round20SettingsFieldsRoundTrip() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = LayoutStore(directory: dir)
+
+    var doc = LayoutDocument.empty
+    doc.showsMenuBarIcon = false
+    doc.showsHiddenAppsInSearch = true
+    doc.backgroundMode = .wallpaper
+    doc.glassMaterialIntensity = 0.62
+    doc.blursWallpaper = false
+
+    try await store.save(doc)
+    let loaded = await store.load()
+
+    #expect(loaded.showsMenuBarIcon == false)
+    #expect(loaded.showsHiddenAppsInSearch == true)
+    #expect(loaded.backgroundMode == .wallpaper)
+    #expect(loaded.glassMaterialIntensity == 0.62)
+    #expect(loaded.blursWallpaper == false)
+}
+
+/// Same regression class as `decodingADocumentSavedBeforeNewerFieldsExistedUsesSensibleDefaults`
+/// below, for the 5 fields Round 20 added.
+@Test func decodingADocumentSavedBeforeRound20FieldsExistedUsesSensibleDefaults() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    var doc = LayoutDocument.empty
+    doc.lastSelectedPage = 9
+    let encoded = try JSONEncoder().encode(doc)
+
+    var json = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+    json.removeValue(forKey: "showsMenuBarIcon")
+    json.removeValue(forKey: "showsHiddenAppsInSearch")
+    json.removeValue(forKey: "backgroundMode")
+    json.removeValue(forKey: "glassMaterialIntensity")
+    json.removeValue(forKey: "blursWallpaper")
+    let oldSchemaData = try JSONSerialization.data(withJSONObject: json)
+
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try oldSchemaData.write(to: dir.appendingPathComponent("layout.json"))
+
+    let store = LayoutStore(directory: dir)
+    let loaded = await store.load()
+
+    #expect(loaded.lastSelectedPage == 9) // proves the file actually decoded, not a fallback to .empty
+    #expect(loaded.showsMenuBarIcon == true)
+    #expect(loaded.showsHiddenAppsInSearch == false)
+    #expect(loaded.backgroundMode == .glass)
+    #expect(loaded.glassMaterialIntensity == 0.35)
+    #expect(loaded.blursWallpaper == true)
+}
+
 @Test func loadFallsBackToLastKnownGoodWhenPrimaryIsCorrupted() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

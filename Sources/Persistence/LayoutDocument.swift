@@ -62,6 +62,15 @@ public enum AppIconStyle: String, Codable, Sendable, CaseIterable {
     case diagonal
 }
 
+/// Whether the launcher's full-screen backdrop (`TesseraBackgroundView`)
+/// shows the real desktop wallpaper directly, or a dimmed/tinted "glass"
+/// treatment over it. Adding new raw-`String` cases here is backward
+/// compatible on its own, same reasoning as `SortMode` above.
+public enum LauncherBackgroundMode: String, Codable, Sendable {
+    case wallpaper
+    case glass
+}
+
 /// Populated in Phase 6 (Customization); present now so the schema doesn't
 /// need a migration just to add it later.
 ///
@@ -329,6 +338,24 @@ public struct LayoutDocument: Codable, Sendable {
     /// nested in `GridSettings`). Applied at runtime via
     /// `NSApp.applicationIconImage`; see `Settings.AppIconStyleApplier`.
     public var appIconStyle: AppIconStyle
+    /// Whether the menu bar has a `NSStatusItem` for this app — see
+    /// `Settings.MenuBarIconController`. On by default: with `LSUIElement`
+    /// (no Dock icon), this is the one persistently-visible entry point
+    /// while the launcher itself is hidden.
+    public var showsMenuBarIcon: Bool
+    /// When off (the default), hidden apps (`hiddenApplicationIDs`) are
+    /// excluded from search results, matching how they're already excluded
+    /// from the grid itself. Real, confirmed gap found while implementing
+    /// this: no such exclusion existed before this field — hidden apps were
+    /// always searchable regardless of this setting's absence.
+    public var showsHiddenAppsInSearch: Bool
+    public var backgroundMode: LauncherBackgroundMode
+    /// 0...1 — only meaningful when `backgroundMode == .glass`; see
+    /// `TesseraBackgroundView.Configuration.materialIntensity`.
+    public var glassMaterialIntensity: Double
+    /// Only meaningful when `backgroundMode == .wallpaper`; see
+    /// `TesseraBackgroundView.Configuration.blursWallpaper`.
+    public var blursWallpaper: Bool
 
     public init(
         schemaVersion: Int,
@@ -346,7 +373,12 @@ public struct LayoutDocument: Codable, Sendable {
         hideDockWhileLauncherOpen: Bool = false,
         dateAddedByID: [StableAppIdentifier: Date] = [:],
         lastUsedByID: [StableAppIdentifier: Date] = [:],
-        appIconStyle: AppIconStyle = .classic
+        appIconStyle: AppIconStyle = .classic,
+        showsMenuBarIcon: Bool = true,
+        showsHiddenAppsInSearch: Bool = false,
+        backgroundMode: LauncherBackgroundMode = .glass,
+        glassMaterialIntensity: Double = 0.35,
+        blursWallpaper: Bool = true
     ) {
         self.schemaVersion = schemaVersion
         self.layoutMode = layoutMode
@@ -364,10 +396,15 @@ public struct LayoutDocument: Codable, Sendable {
         self.dateAddedByID = dateAddedByID
         self.lastUsedByID = lastUsedByID
         self.appIconStyle = appIconStyle
+        self.showsMenuBarIcon = showsMenuBarIcon
+        self.showsHiddenAppsInSearch = showsHiddenAppsInSearch
+        self.backgroundMode = backgroundMode
+        self.glassMaterialIntensity = glassMaterialIntensity
+        self.blursWallpaper = blursWallpaper
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, layoutMode, gridSettings, pages, folders, itemOrder, aliases, hiddenApplicationIDs, customSources, triggerSettings, lastSelectedPage, lastScrollPosition, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle
+        case schemaVersion, layoutMode, gridSettings, pages, folders, itemOrder, aliases, hiddenApplicationIDs, customSources, triggerSettings, lastSelectedPage, lastScrollPosition, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle, showsMenuBarIcon, showsHiddenAppsInSearch, backgroundMode, glassMaterialIntensity, blursWallpaper
     }
 
     public init(from decoder: Decoder) throws {
@@ -388,6 +425,11 @@ public struct LayoutDocument: Codable, Sendable {
         dateAddedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .dateAddedByID) ?? [:]
         lastUsedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .lastUsedByID) ?? [:]
         appIconStyle = try container.decodeIfPresent(AppIconStyle.self, forKey: .appIconStyle) ?? .classic
+        showsMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showsMenuBarIcon) ?? true
+        showsHiddenAppsInSearch = try container.decodeIfPresent(Bool.self, forKey: .showsHiddenAppsInSearch) ?? false
+        backgroundMode = try container.decodeIfPresent(LauncherBackgroundMode.self, forKey: .backgroundMode) ?? .glass
+        glassMaterialIntensity = try container.decodeIfPresent(Double.self, forKey: .glassMaterialIntensity) ?? 0.35
+        blursWallpaper = try container.decodeIfPresent(Bool.self, forKey: .blursWallpaper) ?? true
     }
 
     public static let currentSchemaVersion = 1

@@ -7,7 +7,7 @@ import AppKit
 /// background: `PageControlView`'s page-pill and
 /// `FolderContentsViewController`'s popover card. Previously each view had
 /// its own ad-hoc ~15-line copy of the same logic; this consolidates them.
-enum GlassBackgroundHelper {
+public enum GlassBackgroundHelper {
     static func makeBackground(cornerRadius: CGFloat, dark: Bool = false) -> NSView {
         let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         if #available(macOS 26.0, *), !reduceTransparency {
@@ -42,7 +42,14 @@ enum GlassBackgroundHelper {
     /// (see its own doc comment). Restored verbatim from the commit that
     /// introduced it (`d5d95a0`) since this panel-level card is an
     /// independent layer from the per-icon fix and needs no changes itself.
-    static func makeFolderCardBackground(cornerRadius: CGFloat) -> NSView {
+    public static func makeFolderCardBackground(
+        cornerRadius: CGFloat,
+        tint: NSColor = NSColor.white.withAlphaComponent(0.07),
+        borderAlpha: CGFloat = 0.12,
+        shadowOpacity: Float = 0.5,
+        shadowRadius: CGFloat = 40,
+        shadowOffset: CGSize = CGSize(width: 0, height: -20)
+    ) -> NSView {
         let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
 
         let container = NSView()
@@ -52,9 +59,9 @@ enum GlassBackgroundHelper {
         // clipped glass/tint/border all live one level deeper, in `clip`.
         container.layer?.masksToBounds = false
         container.layer?.shadowColor = NSColor.black.cgColor
-        container.layer?.shadowOpacity = 0.5
-        container.layer?.shadowRadius = 40
-        container.layer?.shadowOffset = CGSize(width: 0, height: -20)
+        container.layer?.shadowOpacity = shadowOpacity
+        container.layer?.shadowRadius = shadowRadius
+        container.layer?.shadowOffset = shadowOffset
 
         let clip = NSView()
         clip.translatesAutoresizingMaskIntoConstraints = false
@@ -62,12 +69,12 @@ enum GlassBackgroundHelper {
         clip.layer?.cornerRadius = cornerRadius
         clip.layer?.masksToBounds = true
         clip.layer?.borderWidth = 1
-        clip.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        clip.layer?.borderColor = NSColor.white.withAlphaComponent(borderAlpha).cgColor
 
         if #available(macOS 26.0, *), !reduceTransparency {
             let glass = NSGlassEffectView()
             glass.cornerRadius = cornerRadius
-            glass.tintColor = NSColor.white.withAlphaComponent(0.07)
+            glass.tintColor = tint
             glass.translatesAutoresizingMaskIntoConstraints = false
             clip.addSubview(glass)
             NSLayoutConstraint.activate([
@@ -94,16 +101,16 @@ enum GlassBackgroundHelper {
                 fallback.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
                 fallback.bottomAnchor.constraint(equalTo: clip.bottomAnchor)
             ])
-            let tint = NSView()
-            tint.wantsLayer = true
-            tint.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor
-            tint.translatesAutoresizingMaskIntoConstraints = false
-            clip.addSubview(tint)
+            let tintOverlay = NSView()
+            tintOverlay.wantsLayer = true
+            tintOverlay.layer?.backgroundColor = tint.cgColor
+            tintOverlay.translatesAutoresizingMaskIntoConstraints = false
+            clip.addSubview(tintOverlay)
             NSLayoutConstraint.activate([
-                tint.topAnchor.constraint(equalTo: clip.topAnchor),
-                tint.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
-                tint.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
-                tint.bottomAnchor.constraint(equalTo: clip.bottomAnchor)
+                tintOverlay.topAnchor.constraint(equalTo: clip.topAnchor),
+                tintOverlay.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+                tintOverlay.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
+                tintOverlay.bottomAnchor.constraint(equalTo: clip.bottomAnchor)
             ])
         }
 
