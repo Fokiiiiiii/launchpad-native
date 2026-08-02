@@ -189,6 +189,64 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(model.folders[folderID]?.name == "Utilities")
 }
 
+@Test @MainActor func moveItemWithinFolderReordersSamePage() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")])
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 1, destinationPage: 0, destinationIndex: 0)
+
+    guard case .folder(let folderID) = model.pages[0][0] else {
+        Issue.record("expected a folder")
+        return
+    }
+    // First join: dragging A (index 0) onto B (index 1) makes a folder
+    // holding [B, A] (createOrJoinFolder orders newly-joined folders as
+    // [targetItem, draggedItem]). Second join: dragging C (now index 1)
+    // onto the folder (now index 0) appends C, giving [B, A, C].
+    model.moveItemWithinFolder(folderID, page: 0, fromIndex: 2, toIndex: 0) // C to front
+
+    let bundleIDs = model.folders[folderID]?.pages[0].compactMap { item -> String? in
+        guard case .app(let id) = item else { return nil }
+        return model.record(for: id)?.bundleIdentifier
+    }
+    #expect(bundleIDs == ["c", "b", "a"])
+}
+
+@Test @MainActor func moveItemWithinFolderIgnoresNoopAndOutOfRange() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b")])
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+
+    guard case .folder(let folderID) = model.pages[0][0] else {
+        Issue.record("expected a folder")
+        return
+    }
+    let before = model.folders[folderID]?.pages[0]
+
+    model.moveItemWithinFolder(folderID, page: 0, fromIndex: 0, toIndex: 0) // no-op (same index)
+    model.moveItemWithinFolder(folderID, page: 1, fromIndex: 0, toIndex: 0) // out-of-range page
+    model.moveItemWithinFolder(folderID, page: 0, fromIndex: 5, toIndex: 0) // out-of-range index
+    model.moveItemWithinFolder(FolderID(), page: 0, fromIndex: 0, toIndex: 1) // unknown folder
+
+    let after = model.folders[folderID]?.pages[0]
+    #expect(before?.count == after?.count)
+    let beforeIDs = before?.compactMap { item -> String? in
+        guard case .app(let id) = item else { return nil }
+        return model.record(for: id)?.bundleIdentifier
+    }
+    let afterIDs = after?.compactMap { item -> String? in
+        guard case .app(let id) = item else { return nil }
+        return model.record(for: id)?.bundleIdentifier
+    }
+    #expect(beforeIDs == afterIDs)
+}
+
 @Test @MainActor func saveThenReloadPreservesArrangement() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }

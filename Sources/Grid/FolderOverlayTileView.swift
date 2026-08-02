@@ -18,6 +18,19 @@ struct FolderOverlayTile: Identifiable {
     let onOpenNewInstance: (() -> Void)?
     let onShowInFinder: () -> Void
     let onRemoveFromFolder: () -> Void
+    /// Real, confirmed report ("フォルダ内だとアプリの並び替えができな
+    /// い"): called when another tile (identified by its own `id`) is
+    /// dropped onto this one. Uses SwiftUI's own `.draggable`/
+    /// `.dropDestination` (`Transferable`-based, macOS 13+) rather than
+    /// the main grid's hand-rolled AppKit mouse-tracking state machine
+    /// (`GridViewController.ItemDragSession`) — that machine is written
+    /// directly against `NSCollectionViewItem`/`IndexPath` inside a live
+    /// `NSCollectionView` and has no way to address a folder's SwiftUI-
+    /// hosted contents, and this codebase's history with hand-rolled drag
+    /// state machines has been rocky enough (see that type's own doc
+    /// comments) that a folder's much smaller, lower-stakes reorder
+    /// surface uses the platform's own well-tested primitive instead.
+    let onReorder: (_ draggedID: String) -> Void
 }
 
 struct FolderOverlayTileView: View {
@@ -56,6 +69,16 @@ struct FolderOverlayTileView: View {
                 .onChanged { _ in pressed = true }
                 .onEnded { _ in pressed = false }
         )
+        // `String` is `Transferable` out of the box (no custom wrapper
+        // type needed) — the payload is just this tile's own `id`, which
+        // `FolderContentsViewController.reorderTile` uses to look up both
+        // the dragged and dropped-on items' current positions.
+        .draggable(tile.id)
+        .dropDestination(for: String.self) { items, _ in
+            guard let draggedID = items.first, draggedID != tile.id else { return false }
+            tile.onReorder(draggedID)
+            return true
+        }
         .contextMenu {
             Button { tile.onLaunch() } label: { Label(L10n.menuOpen, systemImage: "arrow.up.forward.app") }
             if let onOpenNewInstance = tile.onOpenNewInstance {

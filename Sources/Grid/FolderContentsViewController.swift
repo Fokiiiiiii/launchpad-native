@@ -281,6 +281,9 @@ final class FolderContentsViewController: NSViewController {
                     guard let self else { return }
                     self.onItemDraggedOut(entry.page, entry.index)
                     self.refresh()
+                },
+                onReorder: { [weak self] draggedID in
+                    self?.reorderTile(draggedID: draggedID, droppedOnID: tileID)
                 }
             ))
             if cachedIcon == nil {
@@ -311,5 +314,31 @@ final class FolderContentsViewController: NSViewController {
         }
         gridModel.tiles = tiles
         view.window?.layoutIfNeeded()
+    }
+
+    /// Real, confirmed report ("フォルダ内だとアプリの並び替えができな
+    /// い"): backs `FolderOverlayTile.onReorder`, called when
+    /// `draggedID` is dropped onto the tile identified by `droppedOnID`.
+    /// A plain "insert at the dropped-on tile's current position" — no
+    /// pixel-level insertion-point indicator (unlike the main grid's
+    /// `ItemDragSession`), matching the smaller stakes of a folder's
+    /// contents. Scoped to a single folder page — a drag across the
+    /// boundary of `gridSettings.folderGridSize` (rare; most folders never
+    /// fill even one page) silently no-ops rather than guessing how the
+    /// two pages' capacities should absorb the move.
+    private func reorderTile(draggedID: String, droppedOnID: String) {
+        guard draggedID != droppedOnID,
+              let from = flattenedItems.first(where: { tileID(for: $0.item) == draggedID }),
+              let to = flattenedItems.first(where: { tileID(for: $0.item) == droppedOnID }),
+              from.page == to.page
+        else { return }
+        model.moveItemWithinFolder(folderID, page: from.page, fromIndex: from.index, toIndex: to.index)
+        Task { await model.save() }
+        refresh()
+    }
+
+    private func tileID(for item: LayoutItem) -> String? {
+        guard case .app(let id) = item, let record = model.record(for: id) else { return nil }
+        return record.iconCacheKey
     }
 }

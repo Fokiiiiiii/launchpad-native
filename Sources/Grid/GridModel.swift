@@ -411,6 +411,32 @@ public final class GridModel {
         onChange?()
     }
 
+    /// Real, confirmed report ("フォルダ内だとアプリの並び替えができな
+    /// い"): the folder-internal equivalent of `moveItem` above — same
+    /// remove/clamp/insert shape, but scoped to one page inside a single
+    /// folder's own `pages` array, driven by `FolderOverlayTileView`'s
+    /// SwiftUI `.draggable`/`.dropDestination` (not the main grid's
+    /// AppKit-only `ItemDragSession`, which has no way to address a
+    /// folder's internal contents). Deliberately doesn't span folder pages
+    /// — `FolderContentsViewController` flattens all of a folder's pages
+    /// into one scrollable list for display, but the underlying model
+    /// still pages at `gridSettings.folderGridSize`; letting a drag reorder
+    /// across that boundary would need to decide how the two pages'
+    /// capacities absorb the move, which the caller isn't set up to
+    /// resolve yet (see `FolderContentsViewController.reorderTile`'s own
+    /// same-page guard).
+    public func moveItemWithinFolder(_ folderID: FolderID, page: Int, fromIndex: Int, toIndex: Int) {
+        guard var folder = folders[folderID],
+              folder.pages.indices.contains(page),
+              folder.pages[page].indices.contains(fromIndex),
+              fromIndex != toIndex else { return }
+        let item = folder.pages[page].remove(at: fromIndex)
+        let clampedIndex = min(max(toIndex, 0), folder.pages[page].count)
+        folder.pages[page].insert(item, at: clampedIndex)
+        folders[folderID] = folder
+        onChange?()
+    }
+
     /// Dragging one item onto another: onto a bare app, both merge into a new
     /// folder; onto an existing folder, the dragged item joins it.
     public func createOrJoinFolder(sourcePage: Int, sourceIndex: Int, destinationPage: Int, destinationIndex: Int, defaultFolderName: String = "New Folder") {
