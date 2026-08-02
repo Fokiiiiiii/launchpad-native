@@ -5,13 +5,19 @@ import SwiftUI
 /// window like `SettingsWindowController` — no elevated window level or
 /// Space-joining needed here, since nothing else is showing yet the first
 /// time this appears.
+///
+/// Round 20: chrome-less glass card, matching Settings/Uninstall/What's
+/// New — same `root`/background/`hosting.view` sibling pattern as
+/// `LauncherWindow.swift`. Hiding the native titlebar close button means
+/// `DismissableWindow`'s Escape handling is now the only way to dismiss
+/// this early besides clicking through all 4 pages.
 @MainActor
 public final class OnboardingWindowController: NSObject, NSWindowDelegate {
-    private var window: NSWindow?
+    private var window: DismissableWindow?
     private let onFinished: () -> Void
     /// Guards against `finish()` running twice — once from the "Get
     /// Started" button, once from `windowWillClose` if the user instead
-    /// closes the window via its titlebar button.
+    /// dismisses via Escape.
     private var didFinish = false
 
     public init(onFinished: @escaping () -> Void) {
@@ -29,10 +35,40 @@ public final class OnboardingWindowController: NSObject, NSWindowDelegate {
         let hosting = NSHostingController(rootView: OnboardingView(onFinished: { [weak self] in
             self?.finish()
         }))
-        let window = NSWindow(contentViewController: hosting)
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+
+        let root = NSView()
+        let background = OnboardingGlassBackground.make(cornerRadius: 22)
+        background.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(background)
+        root.addSubview(hosting.view)
+        NSLayoutConstraint.activate([
+            background.topAnchor.constraint(equalTo: root.topAnchor),
+            background.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            background.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            hosting.view.topAnchor.constraint(equalTo: root.topAnchor),
+            hosting.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+        ])
+
+        let containerController = NSViewController()
+        containerController.view = root
+
+        let window = DismissableWindow(contentViewController: containerController)
+        window.onCancel = { [weak self] in self?.finish() }
+        window.title = ""
         window.styleMask = [.titled, .closable, .fullSizeContentView]
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        window.standardWindowButton(.closeButton)?.isHidden = true
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+        window.isMovableByWindowBackground = true
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()

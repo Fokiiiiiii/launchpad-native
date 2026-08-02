@@ -48,9 +48,20 @@ struct OnboardingView: View {
                 }
                 .keyboardShortcut(.defaultAction)
             }
-            .padding(24)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
-        .frame(width: 560, height: 420)
+        .padding(EdgeInsets(top: 44, leading: 48, bottom: 30, trailing: 48))
+        // Real, confirmed constraint: each page (`WelcomePage`/`TriggersPage`/
+        // etc.) below is built around `Spacer()`s that vertically-center
+        // its content inside a *fixed*-height container — matching the
+        // reference's own content-driven variable height here would mean
+        // restructuring all 4 pages to size themselves intrinsically
+        // instead, which is exactly the "existing page content/logic"
+        // this pass is scoped to leave untouched. Keeps the previous
+        // 420pt height, only widens to the reference's 660pt and applies
+        // its asymmetric padding.
+        .frame(width: 660, height: 420)
     }
 
     private var pageDots: some View {
