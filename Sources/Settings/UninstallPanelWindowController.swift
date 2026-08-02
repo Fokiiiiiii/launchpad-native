@@ -3,6 +3,7 @@ import Catalog
 import CoreGraphics
 import Diagnostics
 import Foundation
+import Grid
 import SwiftUI
 
 /// Presents the new Uninstall panel (Round 12 §6) — a small floating window
@@ -25,6 +26,15 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
     private let onWillClose: () -> Void
     private var outsideClickMonitor: OutsideClickDismissMonitor?
     private var viewModel: UninstallPanelViewModel?
+    /// Round 20 §C: the sibling `background`/`hosting.view` pair inside the
+    /// window's real content view. Kept as stored properties (rather than
+    /// rebuilding them each time) because the async icon-fetch completion
+    /// below must swap in a new hosting view *without* discarding this
+    /// `root`/`background` pair — replacing `window.contentViewController`
+    /// wholesale (the pre-Round-20 approach) would tear down the glass card
+    /// along with it.
+    private var rootContentView: NSView?
+    private var currentHostingView: NSView?
     /// Round 13 §A: set by `closeWithoutKeyReclaim()` — see
     /// `SettingsWindowController.closeWithoutKeyReclaim()`'s doc comment for
     /// the race this avoids (identical reasoning applies here).
@@ -53,7 +63,43 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
                 onContentHeightChange: { [weak self] height in self?.applyContentHeight(height) }
             )
         )
-        let window = DismissableWindow(contentViewController: hosting)
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+
+        // Round 20 §C: same `root`/`background`/`hosting.view` sibling glass
+        // chrome as `SettingsWindowController.show(on:)` — see that method's
+        // doc comment for why the background is a sibling rather than a
+        // container. Both are kept as stored properties (`rootContentView`/
+        // `currentHostingView`) because the icon-fetch completion below must
+        // replace only the hosting view, not this whole hierarchy.
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 586, height: 500))
+        let background = GlassBackgroundHelper.makeFolderCardBackground(
+            cornerRadius: 13,
+            tint: NSColor(srgbRed: 30 / 255, green: 30 / 255, blue: 32 / 255, alpha: 0.90),
+            borderAlpha: 0.13,
+            shadowOpacity: 0.70,
+            shadowRadius: 55,
+            shadowOffset: CGSize(width: 0, height: -31)
+        )
+        background.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(background)
+        root.addSubview(hosting.view)
+        NSLayoutConstraint.activate([
+            background.topAnchor.constraint(equalTo: root.topAnchor),
+            background.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            background.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            hosting.view.topAnchor.constraint(equalTo: root.topAnchor),
+            hosting.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+        ])
+        rootContentView = root
+        currentHostingView = hosting.view
+
+        let containerController = NSViewController()
+        containerController.view = root
+
+        let window = DismissableWindow(contentViewController: containerController)
         window.onCancel = { [weak self] in self?.close() }
         // Round 13 §A: no native chrome at all — same treatment as
         // `SettingsWindowController`. `titlebarAppearsTransparent` alone
@@ -67,7 +113,15 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
         window.isMovableByWindowBackground = true
-        window.setContentSize(NSSize(width: 420, height: 500))
+        // Round 20 §C: the glass card now draws the window's visible shape/
+        // shadow — the window frame itself must be transparent/shadowless so
+        // it doesn't composite a second, square, opaque layer behind the
+        // rounded card (same trio `SettingsWindowController`/`LauncherWindow`
+        // already use).
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.setContentSize(NSSize(width: 586, height: 500))
         window.isReleasedWhenClosed = false
         window.delegate = self
         positionWindow(window, on: screen)
@@ -91,7 +145,7 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
             // header icon frame — fetching at the final display size keeps
             // it crisp instead of upscaling a smaller bitmap.
             let icon = await cache.icon(for: record, size: 64)
-            guard let self, self.viewModel === viewModel else { return } // stale request guard
+            guard let self, self.viewModel === viewModel, let root = self.rootContentView else { return } // stale request guard
             let updatedHosting = NSHostingController(
                 rootView: UninstallPanelView(
                     viewModel: viewModel,
@@ -101,7 +155,24 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
                     onContentHeightChange: { [weak self] height in self?.applyContentHeight(height) }
                 )
             )
-            self.window?.contentViewController = updatedHosting
+            updatedHosting.view.translatesAutoresizingMaskIntoConstraints = false
+            // Round 20 §C: replace only the hosting view inside `root`, not
+            // `window.contentViewController` itself — swapping the whole
+            // content view controller (the pre-Round-20 approach) would
+            // discard the `background` glass card sibling along with it.
+            self.currentHostingView?.removeFromSuperview()
+            root.addSubview(updatedHosting.view)
+            NSLayoutConstraint.activate([
+                updatedHosting.view.topAnchor.constraint(equalTo: root.topAnchor),
+                updatedHosting.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+                updatedHosting.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+                updatedHosting.view.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+            ])
+            self.currentHostingView = updatedHosting.view
+            // Keep the container's `NSViewController` retaining the new
+            // `NSHostingController` alive — `root.addSubview` alone doesn't
+            // extend its lifetime beyond this closure.
+            self.window?.contentViewController?.addChild(updatedHosting)
         }
     }
 
@@ -158,6 +229,8 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
         window?.close()
         window = nil
         viewModel = nil
+        rootContentView = nil
+        currentHostingView = nil
     }
 
     /// Round 13 §A: used when the *launcher itself* is hiding — see

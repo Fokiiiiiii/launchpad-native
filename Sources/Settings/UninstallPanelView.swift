@@ -99,8 +99,7 @@ struct UninstallPanelView: View {
             PanelCloseButton(action: onCancel)
                 .padding(12)
         }
-        .background(.regularMaterial)
-        .frame(width: 420)
+        .frame(width: 586)
     }
 
     private var header: some View {
