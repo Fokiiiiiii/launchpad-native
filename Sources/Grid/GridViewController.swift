@@ -1661,26 +1661,44 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private static let itemDragEdgeZoneWidth: CGFloat = 70
     private static let itemDragEdgeHoverDelay: TimeInterval = 0.45
     private static let itemDragFolderHoverDelay: TimeInterval = 0.5
-    /// Real, confirmed report ("アプリ移動の操作感が悪い"): 0.12s stacked
-    /// on top of the 40% hysteresis band below meant a reorder preview only
-    /// ever responded to a large, sustained move — lowered to make dragging
-    /// feel directly responsive again.
-    private static let itemDragReorderDebounce: TimeInterval = 0.06
+    /// Real, confirmed report ("上からやってもなんの反応もない"): now that
+    /// the 2D hysteresis radius below is the sole anti-chatter gate (see its
+    /// doc comment), this additional time delay only added pure lag on top
+    /// — dropped to 0. The `Timer` mechanism itself is unchanged so a future
+    /// tuning pass can reintroduce a nonzero value without restructuring
+    /// anything.
+    private static let itemDragReorderDebounce: TimeInterval = 0.0
     private static let itemDragFolderZoneInset: CGFloat = 0.2 // ~60% center region
-    /// Round 12 §8a: the pointer must cross this fraction of a cell's width
-    /// *past* the committed slot's own center before the candidate slot is
-    /// allowed to change at all — a real hysteresis band (spec 7.3) around
-    /// the current selection, replacing the old "any raw nearest-slot change
-    /// restarts the debounce timer" behavior, which could still flicker if
-    /// the pointer sat right on a cell boundary. Real, confirmed report
-    /// ("アプリ移動の操作感が悪い"): 40% required dragging almost a full
-    /// cell past center before anything visibly responded — lowered to 15%,
-    /// still enough to damp boundary flicker without reading as sluggish.
-    private static let itemDragHysteresisFraction: CGFloat = 0.15
-    /// Round 12 §8b: proportional "peek" of the incoming page shown while
-    /// dwelling in the edge zone, matching the user-provided spec's own
-    /// suggested formula (`previewOffset = -proximity * 30`).
-    private static let itemDragEdgePeekMaxOffset: CGFloat = 30
+    /// Round 12 §8a: the pointer must move this fraction of a cell's own
+    /// short side past the committed slot's center before the candidate slot
+    /// is allowed to change at all — a real hysteresis band (spec 7.3)
+    /// around the current selection, replacing the old "any raw nearest-slot
+    /// change restarts the debounce timer" behavior, which could still
+    /// flicker if the pointer sat right on a cell boundary. Real, confirmed
+    /// report ("狙った位置にアプリを置いてもそこにあるアプリが動かない"):
+    /// judging this from `point.x` alone made straight vertical drags onto
+    /// a different row never satisfy the crossing condition — this is now a
+    /// straight-line distance from the committed cell's center, so movement
+    /// in any direction (including pure vertical) can cross it. Raised
+    /// slightly from 0.15 to 0.18 alongside dropping the debounce above to
+    /// 0 — with hysteresis now the *only* anti-chatter layer (instead of
+    /// splitting the job with a time delay), a touch more radius keeps
+    /// boundary flicker damped without feeling sluggish.
+    private static let itemDragHysteresisFraction: CGFloat = 0.18
+    /// Real, confirmed report ("ページ端についてその先へ無理や進もうとし
+    /// た時に起きるアニメーションが過剰すぎる"): the old linear
+    /// `proximity * 30` formula meant the preview kept growing the harder
+    /// the pointer pushed toward the edge, with no natural ceiling short of
+    /// the zone's own zero/one clamp. `updateEdgePeek` now runs the
+    /// penetration distance through the existing `rubberBand` helper
+    /// (already used for the trackpad page-swipe's own edge resistance)
+    /// instead — overshoot-proportional resistance rather than a hard
+    /// linear ramp. This constant is the rubber band's `dimension`
+    /// term (how quickly it saturates), not a maximum offset: measured
+    /// output for `itemDragEdgeZoneWidth`(70)-sized penetration is ≈14.8pt,
+    /// and ≈5.8pt at 14pt of penetration — both comfortably below the old
+    /// linear formula's up-to-30pt sweep.
+    private static let itemDragEdgePeekResistanceDimension: CGFloat = 24
 
     private func handleItemMouseDown(indexPath: IndexPath, event: NSEvent) {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(indexPath.item) else { return }
@@ -1963,64 +1981,81 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         return NSRect(x: x, y: y, width: cellSize.width, height: cellSize.height)
     }
 
-    /// Nearest-remaining-cell + a short debounce timer — a simplified stand-
-    /// in for the spec's precise geometric hysteresis band (7.3), chosen to
-    /// avoid over-fitting timing constants that can't be hands-on tuned in
-    /// this session (no Accessibility permission for real trackpad/mouse
-    /// testing). Achieves the same practical goal: a candidate slot only
-    /// commits once the pointer has settled near it, not on every frame of
-    /// raw movement.
-    private func insertionSlot(forPoint point: NSPoint, excluding sourceOriginalIndex: Int) -> Int? {
+    /// Real, confirmed report ("アプリを狙った位置に移動させるのがめちゃく
+    /// ちゃむずい...狙った位置にアプリを置いてもそこにあるアプリが動かな
+    /// かったりする"): the previous implementation found the single
+    /// nearest *other item* (by dx²+dy² distance) and decided front/back
+    /// purely from that item's X coordinate — a fundamentally 1D judgment
+    /// bolted onto a 2D grid. Dragging straight up/down onto a different
+    /// row landed on the same X-based front/back call as a same-row drag,
+    /// which didn't reliably resolve to "the row the pointer is actually
+    /// over." This computes the slot directly from the grid's own geometry
+    /// (same `column = slot % columns; row = slot / columns` convention as
+    /// `PagedGridLayout.prepare()` and `frameForSlot` below) instead of
+    /// comparing to other items at all — "which cell is the pointer over,"
+    /// not "which existing item is closest." The column is clamped to
+    /// `0..<columns` *before* combining with the row — without that, a
+    /// point past the grid's right edge would compute a raw column >=
+    /// columns, which folds into the next row's slot range and silently
+    /// points at a completely unrelated cell instead of "the last column
+    /// of this row."
+    private func insertionSlot(forPoint point: NSPoint) -> Int? {
         guard model.pages.indices.contains(currentPage) else { return nil }
-        let items = model.pages[currentPage]
-        var naturalPos = 0
-        var closestNaturalPos = 0
-        var closestDistance = CGFloat.greatestFiniteMagnitude
-        var closestFrame = NSRect.zero
-        var found = false
-        for originalIndex in items.indices where originalIndex != sourceOriginalIndex {
-            defer { naturalPos += 1 }
-            guard let frame = layout.layoutAttributesForItem(at: IndexPath(item: originalIndex, section: 0))?.frame else { continue }
-            let dx = frame.midX - point.x
-            let dy = frame.midY - point.y
-            let distance = dx * dx + dy * dy
-            if distance < closestDistance {
-                closestDistance = distance
-                closestNaturalPos = naturalPos
-                closestFrame = frame
-                found = true
-            }
-        }
-        guard found else { return 0 }
-        return point.x > closestFrame.midX ? closestNaturalPos + 1 : closestNaturalPos
+        let remainingCount = max(model.pages[currentPage].count - 1, 0)
+        let columns = max(model.gridSettings.columns, 1)
+        let hSpacing = CGFloat(model.gridSettings.horizontalSpacing)
+        let vSpacing = CGFloat(model.gridSettings.verticalSpacing)
+        let margin = CGFloat(model.gridSettings.pageMargins)
+        let cellSize = layout.currentCellSize
+        let colStride = max(cellSize.width + hSpacing, 1)
+        let rowStride = max(cellSize.height + vSpacing, 1)
+
+        let rawColumn = Int(floor((point.x - margin) / colStride))
+        let clampedColumn = min(max(rawColumn, 0), columns - 1)
+        let rawRow = max(Int(floor((point.y - margin) / rowStride)), 0)
+        let slot = rawRow * columns + clampedColumn
+        // Past the last real slot (pointer over trailing empty cells) rounds
+        // down to "append at the end" — the row overshoot alone is absorbed
+        // by this final clamp.
+        return min(max(slot, 0), remainingCount)
     }
 
-    /// Round 12 §8a: real hysteresis around the *committed* slot, not just
-    /// the raw nearest-cell answer — the pointer must cross
-    /// `itemDragHysteresisFraction` of the committed slot's own cell width
-    /// past its center, in the direction of the raw candidate, before a new
-    /// candidate is even considered. The debounce timer below still runs on
-    /// top of that as a secondary safety net against rapid oscillation
-    /// right at the hysteresis boundary itself — it's cheap and this file's
-    /// own history (`insertionSlot`'s doc comment) already established it as
-    /// a reasonable stand-in, so it stays rather than being replaced.
+    /// Round 12 §8a, revised: real hysteresis around the *committed* slot,
+    /// not just the raw cell-under-pointer answer — the pointer must move
+    /// far enough from the committed slot's own center before a new
+    /// candidate is even considered. Real, confirmed bug found while fixing
+    /// "狙った位置にアプリを置いてもそこにあるアプリが動かない": the
+    /// previous version judged this purely from `point.x` (`point.x >
+    /// committedFrame.midX + threshold` / `< ... - threshold`), so a
+    /// straight vertical drag onto a different row — where `point.x` barely
+    /// moves — could never satisfy either condition even though `rawSlot`
+    /// (from `insertionSlot`, itself now genuinely 2D) had already changed
+    /// correctly. The candidate would then never commit no matter how far
+    /// the pointer moved vertically. Judging by straight-line distance from
+    /// the committed cell's center instead works for movement in any
+    /// direction.
     private func evaluateReorderCandidate(session: ItemDragSession, point: NSPoint) {
-        guard let rawSlot = insertionSlot(forPoint: point, excluding: session.sourceOriginalIndex) else { return }
+        guard let rawSlot = insertionSlot(forPoint: point) else { return }
         guard rawSlot != session.candidateSlot else {
             session.reorderTimer?.invalidate()
             return
         }
         let committedFrame = frameForSlot(session.candidateSlot)
-        let threshold = max(committedFrame.width, 1) * Self.itemDragHysteresisFraction
-        let crossedRight = rawSlot > session.candidateSlot && point.x > committedFrame.midX + threshold
-        let crossedLeft = rawSlot < session.candidateSlot && point.x < committedFrame.midX - threshold
-        guard crossedRight || crossedLeft else {
+        let dx = point.x - committedFrame.midX
+        let dy = point.y - committedFrame.midY
+        let radius = min(committedFrame.width, committedFrame.height) * Self.itemDragHysteresisFraction
+        guard dx * dx + dy * dy > radius * radius else {
             session.reorderTimer?.invalidate()
             return
         }
         guard rawSlot != session.pendingRawSlot else { return }
         session.pendingRawSlot = rawSlot
         session.reorderTimer?.invalidate()
+        // itemDragReorderDebounce is now 0 — the hysteresis radius above is
+        // the sole anti-chatter gate; this Timer indirection (and
+        // `session.reorderTimer`'s existence) is kept as-is so a future
+        // tuning pass can reintroduce a nonzero debounce without touching
+        // the surrounding structure.
         session.reorderTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragReorderDebounce, repeats: false) { [weak self, weak session] _ in
             guard let self, let session, session.generation == self.itemDragGeneration else { return }
             self.commitReorderCandidate(session: session, slot: rawSlot)
@@ -2049,7 +2084,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                   let originalFrame = layout.layoutAttributesForItem(at: IndexPath(item: originalIndex, section: 0))?.frame,
                   let layer = cell.view.layer else { continue }
             let targetFrame = frameForSlot(previewSlot)
-            animateLayerTranslation(layer, toX: targetFrame.minX - originalFrame.minX, toY: targetFrame.minY - originalFrame.minY)
+            // Real, confirmed report ("アプリを狙った位置に移動させるのが
+            // めちゃくちゃむずい"): the shared default (damping 0.86,
+            // response 0.24) reads fine for a settle/revert landing but
+            // adds one more layer of lag on top of the hysteresis/debounce
+            // changes above for a "make way" nudge during live dragging.
+            // Snappier, less bouncy values here only — `settleFloatingView`
+            // and `revertItemDrag` below keep calling this with no damping/
+            // response arguments, so their behavior is untouched.
+            animateLayerTranslation(layer, toX: targetFrame.minX - originalFrame.minX, toY: targetFrame.minY - originalFrame.minY, damping: 0.90, response: 0.16)
         }
     }
 
@@ -2067,7 +2110,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// gesture; see `commitPageTurnDuringDrag` for the other velocity-
     /// handoff case, which reuses the edge-peek's own last-known offset/time
     /// instead of this generic per-layer cache.
-    private func animateLayerTranslation(_ layer: CALayer, toX dx: CGFloat, toY dy: CGFloat) {
+    private func animateLayerTranslation(_ layer: CALayer, toX dx: CGFloat, toY dy: CGFloat, damping: CGFloat = 0.86, response: CGFloat = 0.24) {
         let presentationLayer = layer.presentation() ?? layer
         let currentX = (presentationLayer.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? 0
         let currentY = (presentationLayer.value(forKeyPath: "transform.translation.y") as? CGFloat) ?? 0
@@ -2087,8 +2130,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // by a near-zero denominator.
         let relativeVX = abs(dx - currentX) > 0.5 ? velocityX / (dx - currentX) : 0
         let relativeVY = abs(dy - currentY) > 0.5 ? velocityY / (dy - currentY) : 0
-        layer.add(Self.springAnimation(keyPath: "transform.translation.x", from: currentX, to: dx, damping: 0.86, response: 0.24, initialVelocity: relativeVX), forKey: "reorderX")
-        layer.add(Self.springAnimation(keyPath: "transform.translation.y", from: currentY, to: dy, damping: 0.86, response: 0.24, initialVelocity: relativeVY), forKey: "reorderY")
+        layer.add(Self.springAnimation(keyPath: "transform.translation.x", from: currentX, to: dx, damping: damping, response: response, initialVelocity: relativeVX), forKey: "reorderX")
+        layer.add(Self.springAnimation(keyPath: "transform.translation.y", from: currentY, to: dy, damping: damping, response: response, initialVelocity: relativeVY), forKey: "reorderY")
     }
 
     private static func estimateVelocity(from previousValue: CGFloat?, at previousTime: CFTimeInterval?, to currentValue: CGFloat, at currentTime: CFTimeInterval) -> CGFloat {
@@ -2202,14 +2245,18 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func updateEdgePeek(session: ItemDragSession, point: NSPoint) {
         let width = max(collectionView.bounds.width, 1)
         let zone = Self.itemDragEdgeZoneWidth
-        var proximity: CGFloat = 0
+        // `penetration`: raw distance (0...zone) the pointer has pushed past
+        // the edge zone's own outer boundary — not yet normalized to 0...1.
+        // Fed through `rubberBand` below instead of a linear proportion (see
+        // `itemDragEdgePeekResistanceDimension`'s doc comment for why).
+        var penetration: CGFloat = 0
         var direction = 0
         if point.x < zone, currentPage > 0 {
             direction = -1
-            proximity = Self.clamp01((zone - point.x) / zone)
+            penetration = zone - point.x
         } else if point.x > width - zone, currentPage < model.pages.count - 1 {
             direction = 1
-            proximity = Self.clamp01((point.x - (width - zone)) / zone)
+            penetration = point.x - (width - zone)
         }
         guard direction != 0 else {
             clearEdgePeek(session: session)
@@ -2238,7 +2285,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             session.edgePeekImageView = imageView
         }
 
-        let previewOffset = -proximity * Self.itemDragEdgePeekMaxOffset * CGFloat(direction)
+        // Real, confirmed report ("ページ端についてその先へ無理や進もう
+        // とした時に起きるアニメーションが過剰すぎる"): reuses the same
+        // rubber-band resistance formula the trackpad page-swipe already
+        // uses at its own edges — overshoot-proportional resistance
+        // instead of the old linear `proximity * 30` ramp that kept
+        // growing the harder the pointer pushed.
+        let dampedOffset = Self.rubberBand(penetration, dimension: Self.itemDragEdgePeekResistanceDimension)
+        let previewOffset = -dampedOffset * CGFloat(direction)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         collectionView.wantsLayer = true
