@@ -1,4 +1,5 @@
 import AppKit
+import Persistence
 import QuartzCore
 
 /// Full-screen decorative background matching the "Tessera" design
@@ -25,6 +26,21 @@ final class TesseraBackgroundView: NSView {
         /// isn't worth the complexity for something that wouldn't be visible
         /// anyway.
         var includeBloomHighlights: Bool = true
+        /// `.glass` (the default) is byte-for-byte the composition this
+        /// view already drew before Round 20 — a dimmed/tinted wallpaper
+        /// with a dark scrim and material sheen. `.wallpaper` shows the
+        /// desktop wallpaper close to full opacity with no scrim, matching
+        /// the reference's own `TSBackgroundMode.wallpaper`.
+        var mode: LauncherBackgroundMode = .glass
+        /// 0...1, `.glass` mode only — scales the sheen highlight's
+        /// opacity. The reference's own default (0.35) is this view's
+        /// existing hardcoded `sheenLayer.opacity`, so `materialIntensity
+        /// == 0.35` reproduces the pre-Round-20 look exactly.
+        var materialIntensity: Double = 0.35
+        /// `.wallpaper` mode only — whether the wallpaper layer itself is
+        /// blurred (softly, less than `.glass` mode's heavier blur) or
+        /// shown crisp.
+        var blursWallpaper: Bool = true
     }
 
     private let baseLayer = CALayer()
@@ -54,10 +70,14 @@ final class TesseraBackgroundView: NSView {
     /// shared, continuous composition instead of computing its own
     /// self-contained one.
     private let viewportOrigin: CGPoint
+    private let screen: NSScreen
+    private var configuration: Configuration
 
     init(screen: NSScreen, viewportOrigin: CGPoint = .zero, configuration: Configuration = .init()) {
         self.fullScreenSize = screen.frame.size
         self.viewportOrigin = viewportOrigin
+        self.screen = screen
+        self.configuration = configuration
         super.init(frame: .zero)
         wantsLayer = true
         guard let root = layer else { return }
@@ -65,9 +85,7 @@ final class TesseraBackgroundView: NSView {
         baseLayer.backgroundColor = NSColor(srgb: 0x0A0A0B).cgColor
         root.addSublayer(baseLayer)
 
-        wallpaperLayer.contents = TesseraWallpaperImageCache.blurredWallpaper(for: screen)
         wallpaperLayer.contentsGravity = .resizeAspectFill
-        wallpaperLayer.opacity = 0.30
         wallpaperLayer.transform = CATransform3DMakeScale(1.14, 1.14, 1)
         root.addSublayer(wallpaperLayer)
 
@@ -93,7 +111,6 @@ final class TesseraBackgroundView: NSView {
         // `radial-gradient(120% 100% at 50% 0%, ...)`.
         sheenLayer.startPoint = CGPoint(x: 0.5, y: 1.0)
         sheenLayer.endPoint = CGPoint(x: 1.1, y: -0.2)
-        sheenLayer.opacity = 0.35
         root.addSublayer(sheenLayer)
 
         if configuration.includeBloomHighlights {
@@ -130,7 +147,41 @@ final class TesseraBackgroundView: NSView {
             highlightLayer = highlight
         }
 
+        applyConfiguration()
         updateLayerFrames()
+    }
+
+    /// Applies `configuration`'s `mode`/`materialIntensity`/`blursWallpaper`
+    /// to the already-built layer tree — called once from `init` and again,
+    /// live, from `update(configuration:)`. `.glass` reproduces this view's
+    /// original, pre-Round-20 fixed values exactly (`wallpaperLayer.opacity
+    /// == 0.30`, full scrim, `sheenLayer.opacity == 0.35` when
+    /// `materialIntensity == 0.35`) — a user who never touches the new
+    /// Settings controls sees no visual change at all.
+    private func applyConfiguration() {
+        switch configuration.mode {
+        case .glass:
+            wallpaperLayer.contents = TesseraWallpaperImageCache.blurredWallpaper(for: screen)
+            wallpaperLayer.opacity = 0.30
+            scrimLayer.opacity = 1
+            sheenLayer.opacity = Float(configuration.materialIntensity)
+        case .wallpaper:
+            let radius: CGFloat = configuration.blursWallpaper ? 26 : 0
+            wallpaperLayer.contents = TesseraWallpaperImageCache.blurredWallpaper(for: screen, radius: radius)
+            wallpaperLayer.opacity = 1.0
+            scrimLayer.opacity = 0
+            sheenLayer.opacity = 0
+        }
+    }
+
+    /// Live-updates the background to match new Settings values — used by
+    /// `LauncherWindowController.updateBackgroundSettings(mode:materialIntensity:blursWallpaper:)`
+    /// so moving the material slider or flipping the mode picker takes
+    /// effect immediately, matching every other Settings control's
+    /// live-apply behavior.
+    func update(configuration: Configuration) {
+        self.configuration = configuration
+        applyConfiguration()
     }
 
     // Radial CAGradientLayers need their own bounds set explicitly (they

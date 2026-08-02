@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import Persistence
 
 /// A more fundamental fix for "the real macOS menu bar shows over the
 /// launcher" than the two previous attempts (re-asserting
@@ -23,7 +24,13 @@ import CoreGraphics
 /// through to it — so far-right status items like Wi-Fi/battery/clock stay
 /// genuinely usable), it's just no longer visible.
 final class MenuBarCoverWindow: NSWindow {
-    init(screen: NSScreen) {
+    /// Held so `updateBackgroundSettings(mode:materialIntensity:blursWallpaper:)`
+    /// can live-update it in lockstep with the main window's own background
+    /// — see `LauncherWindowController.updateBackgroundSettings`'s doc
+    /// comment.
+    private var background: TesseraBackgroundView?
+
+    init(screen: NSScreen, backgroundConfiguration: TesseraBackgroundView.Configuration = .init(includeBloomHighlights: false)) {
         let rect = Self.coverRect(for: screen)
         super.init(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
         // Real, confirmed complaint #1: a flat solid fill ("メニューバーの
@@ -82,10 +89,11 @@ final class MenuBarCoverWindow: NSWindow {
         // ~31pt height instead of sharing the main window's full-screen one,
         // producing a visible seam/flat band at the shared edge.
         let viewportOrigin = CGPoint(x: rect.minX - screen.frame.minX, y: rect.minY - screen.frame.minY)
-        let background = TesseraBackgroundView(screen: screen, viewportOrigin: viewportOrigin, configuration: .init(includeBloomHighlights: false))
+        let background = TesseraBackgroundView(screen: screen, viewportOrigin: viewportOrigin, configuration: backgroundConfiguration)
         background.frame = container.bounds
         background.autoresizingMask = [.width, .height]
         container.addSubview(background)
+        self.background = background
 
         // Real, confirmed report ("メニューバーの上の部分が黒くなっている"):
         // this used to layer an additional flat 60%-black scrim on top of
@@ -108,6 +116,19 @@ final class MenuBarCoverWindow: NSWindow {
     /// screen never changes between shows.
     func reposition(on screen: NSScreen) {
         setFrame(Self.coverRect(for: screen), display: true)
+    }
+
+    /// Mirrors `LauncherWindowController.updateBackgroundSettings` — keeps
+    /// this strip visually identical to the main window's background,
+    /// `includeBloomHighlights` aside (this strip never had blooms; that's
+    /// preserved by `update(configuration:)` only ever changing
+    /// `mode`/`materialIntensity`/`blursWallpaper`, not `includeBloomHighlights`).
+    func updateBackgroundSettings(mode: LauncherBackgroundMode, materialIntensity: Double, blursWallpaper: Bool) {
+        var configuration = TesseraBackgroundView.Configuration(includeBloomHighlights: false)
+        configuration.mode = mode
+        configuration.materialIntensity = materialIntensity
+        configuration.blursWallpaper = blursWallpaper
+        background?.update(configuration: configuration)
     }
 
     /// Real, confirmed bug (a real screenshot showed a 1-3px sliver of the

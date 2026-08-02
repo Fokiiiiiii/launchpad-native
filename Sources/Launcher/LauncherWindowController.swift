@@ -14,6 +14,11 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private var window: LauncherWindow?
     private var viewController: LauncherViewController?
     private var rootContentView: NSView?
+    /// Held so `updateBackgroundSettings(mode:materialIntensity:blursWallpaper:)`
+    /// can live-update it when Settings' background controls change —
+    /// `MenuBarCoverWindow` keeps its own separate instance in sync via the
+    /// same call (see that method's doc comment).
+    private var backgroundView: TesseraBackgroundView?
     /// See `MenuBarCoverWindow`'s doc comment — a more fundamental fix for
     /// the real menu bar showing over the launcher than the two prior
     /// presentationOptions-based attempts. Shown/hidden in lockstep with
@@ -23,6 +28,11 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private let gridModel: GridModel
     private let iconCache: IconCache
     private var hasAttemptedLegacyImport = false
+    /// The full, unfiltered scan result from the most recent `updateRecords(_:)`
+    /// — kept around so `refreshSearchableRecords()` can re-derive the
+    /// searchable set immediately when `showsHiddenAppsInSearch` changes in
+    /// Settings, without waiting for the next catalog scan.
+    private var latestRecords: [ApplicationRecord] = []
     private var onOpenSettings: (() -> Void)?
     private var onRequestUninstall: ((String) -> Void)?
     /// Round 13 §A: fired from `hide()` (see its own doc comment for why
@@ -155,6 +165,31 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         window?.applyDockVisibilityPreference(hideDock: hideDock)
     }
 
+    private func currentBackgroundConfiguration() -> TesseraBackgroundView.Configuration {
+        var config = TesseraBackgroundView.Configuration()
+        config.mode = gridModel.backgroundMode
+        config.materialIntensity = gridModel.glassMaterialIntensity
+        config.blursWallpaper = gridModel.blursWallpaper
+        return config
+    }
+
+    /// Called from Settings' background controls (type picker, material
+    /// slider, blur-wallpaper toggle) — `SettingsViewModel` already persists
+    /// the new value to `GridModel` itself (mirroring `appIconStyle`'s own
+    /// "model write + separate live-apply" split, not `hideDockWhileLauncherOpen`'s
+    /// single-callback-does-both shape), so this only needs to push the new
+    /// values into the already-live `TesseraBackgroundView` instances —
+    /// both the main window's and `MenuBarCoverWindow`'s own separate copy,
+    /// so the two stay visually identical.
+    public func updateBackgroundSettings(mode: LauncherBackgroundMode, materialIntensity: Double, blursWallpaper: Bool) {
+        var config = TesseraBackgroundView.Configuration()
+        config.mode = mode
+        config.materialIntensity = materialIntensity
+        config.blursWallpaper = blursWallpaper
+        backgroundView?.update(configuration: config)
+        menuBarCoverWindow?.updateBackgroundSettings(mode: mode, materialIntensity: materialIntensity, blursWallpaper: blursWallpaper)
+    }
+
     /// Called when Settings (which floats *above* the launcher without
     /// hiding it — see `SettingsWindowController`'s doc comment) closes —
     /// see `SettingsWindowController.windowWillClose`'s doc comment for the
@@ -188,7 +223,8 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     }
 
     public func updateRecords(_ records: [ApplicationRecord]) {
-        viewModel.setRecords(records)
+        latestRecords = records
+        applySearchableRecords()
 
         // Legacy import must run BEFORE reconcile: `applyLegacyImportIfFirstRun`
         // only applies when the grid is still completely empty, and
@@ -210,6 +246,29 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         gridModel.reconcile(with: records)
         viewController?.reloadGrid()
         Task { await gridModel.save() }
+    }
+
+    /// Real, confirmed gap found while implementing `showsHiddenAppsInSearch`:
+    /// hidden apps were never excluded from search results at all — only
+    /// from the grid itself — despite `GridModel.hideApplication`'s own doc
+    /// comment claiming otherwise. This is the actual exclusion, gated on
+    /// the new setting (default off, matching the *new* "excluded" behavior
+    /// this fixes the app into, not the old undocumented "always included"
+    /// one).
+    private func applySearchableRecords() {
+        if gridModel.showsHiddenAppsInSearch {
+            viewModel.setRecords(latestRecords)
+        } else {
+            let hiddenValues = Set(gridModel.hiddenApplicationIdentifiers.map(\.value))
+            viewModel.setRecords(latestRecords.filter { !hiddenValues.contains($0.id.value) })
+        }
+    }
+
+    /// Called from Settings when `showsHiddenAppsInSearch` changes, so the
+    /// toggle takes effect immediately rather than waiting for the next
+    /// catalog scan/FSEvents update.
+    public func refreshSearchableRecords() {
+        applySearchableRecords()
     }
 
     /// Same-trigger reinvocation closes it; otherwise it opens (or moves to
@@ -294,7 +353,11 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // direct screenshot evidence), so this physically paints over its
         // screen rect instead of continuing to rely on WindowServer's
         // cooperation.
-        let cover = menuBarCoverWindow ?? MenuBarCoverWindow(screen: screen)
+        let cover = menuBarCoverWindow ?? {
+            var config = currentBackgroundConfiguration()
+            config.includeBloomHighlights = false
+            return MenuBarCoverWindow(screen: screen, backgroundConfiguration: config)
+        }()
         menuBarCoverWindow = cover
         cover.reposition(on: screen)
         cover.orderFront(nil)
@@ -457,9 +520,10 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // mirrors that reference composition (blurred desktop wallpaper +
         // scrim + material sheen + ambient blooms) instead of routing
         // through the same glass factory used for cards.
-        let background = TesseraBackgroundView(screen: screen)
+        let background = TesseraBackgroundView(screen: screen, configuration: currentBackgroundConfiguration())
         background.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(background)
+        backgroundView = background
 
         content.view.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(content.view)

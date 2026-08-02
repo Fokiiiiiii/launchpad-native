@@ -1,7 +1,9 @@
 import Catalog
+import Diagnostics
 import Foundation
 import Grid
 import Persistence
+import ServiceManagement
 
 /// Renamed/regrouped to mirror a reference app's General/Screen/Apps/
 /// Advanced/About tab structure: `general` holds what used to be the
@@ -28,6 +30,9 @@ public final class SettingsViewModel: ObservableObject {
     private let model: GridModel
     private let onTriggerSettingsChanged: () -> Bool
     private let onDockVisibilityChanged: (Bool) -> Void
+    private let onShowsMenuBarIconChanged: (Bool) -> Void
+    private let onShowsHiddenAppsInSearchChanged: () -> Void
+    private let onBackgroundSettingsChanged: () -> Void
 
     @Published public var selectedTab: SettingsTab = .general
     @Published public var columns: Int {
@@ -69,6 +74,64 @@ public final class SettingsViewModel: ObservableObject {
             guard appIconStyle != oldValue else { return }
             model.setAppIconStyle(appIconStyle)
             AppIconStyleApplier.apply(appIconStyle)
+            persist()
+        }
+    }
+
+    /// State lives in `SMAppService.mainApp.status`, not `LayoutDocument` —
+    /// same "OS is the source of truth, this property just reflects it"
+    /// pattern as `f4Active` below, not a persisted preference of our own.
+    @Published public var launchAtLoginEnabled: Bool {
+        didSet {
+            guard launchAtLoginEnabled != oldValue else { return }
+            do {
+                if launchAtLoginEnabled {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                DiagnosticsLog.settings.error("SMAppService \(self.launchAtLoginEnabled ? "register" : "unregister", privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+    @Published public var showsMenuBarIcon: Bool {
+        didSet {
+            guard showsMenuBarIcon != oldValue else { return }
+            model.setShowsMenuBarIcon(showsMenuBarIcon)
+            onShowsMenuBarIconChanged(showsMenuBarIcon)
+            persist()
+        }
+    }
+    @Published public var showsHiddenAppsInSearch: Bool {
+        didSet {
+            guard showsHiddenAppsInSearch != oldValue else { return }
+            model.setShowsHiddenAppsInSearch(showsHiddenAppsInSearch)
+            onShowsHiddenAppsInSearchChanged()
+            persist()
+        }
+    }
+    @Published public var backgroundMode: LauncherBackgroundMode {
+        didSet {
+            guard backgroundMode != oldValue else { return }
+            model.setBackgroundMode(backgroundMode)
+            onBackgroundSettingsChanged()
+            persist()
+        }
+    }
+    @Published public var glassMaterialIntensity: Double {
+        didSet {
+            guard glassMaterialIntensity != oldValue else { return }
+            model.setGlassMaterialIntensity(glassMaterialIntensity)
+            onBackgroundSettingsChanged()
+            persist()
+        }
+    }
+    @Published public var blursWallpaper: Bool {
+        didSet {
+            guard blursWallpaper != oldValue else { return }
+            model.setBlursWallpaper(blursWallpaper)
+            onBackgroundSettingsChanged()
             persist()
         }
     }
@@ -157,10 +220,20 @@ public final class SettingsViewModel: ObservableObject {
     @Published public var customSources: [CustomSourceConfig]
     @Published public var hiddenApps: [(identifier: StableAppIdentifier, name: String)]
 
-    public init(model: GridModel, onTriggerSettingsChanged: @escaping () -> Bool, onDockVisibilityChanged: @escaping (Bool) -> Void) {
+    public init(
+        model: GridModel,
+        onTriggerSettingsChanged: @escaping () -> Bool,
+        onDockVisibilityChanged: @escaping (Bool) -> Void,
+        onShowsMenuBarIconChanged: @escaping (Bool) -> Void = { _ in },
+        onShowsHiddenAppsInSearchChanged: @escaping () -> Void = {},
+        onBackgroundSettingsChanged: @escaping () -> Void = {}
+    ) {
         self.model = model
         self.onTriggerSettingsChanged = onTriggerSettingsChanged
         self.onDockVisibilityChanged = onDockVisibilityChanged
+        self.onShowsMenuBarIconChanged = onShowsMenuBarIconChanged
+        self.onShowsHiddenAppsInSearchChanged = onShowsHiddenAppsInSearchChanged
+        self.onBackgroundSettingsChanged = onBackgroundSettingsChanged
 
         let grid = model.gridSettings
         columns = grid.columns
@@ -169,6 +242,12 @@ public final class SettingsViewModel: ObservableObject {
         sortMode = grid.sortMode
         hideDockWhileLauncherOpen = model.hideDockWhileLauncherOpen
         appIconStyle = model.appIconStyle
+        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+        showsMenuBarIcon = model.showsMenuBarIcon
+        showsHiddenAppsInSearch = model.showsHiddenAppsInSearch
+        backgroundMode = model.backgroundMode
+        glassMaterialIntensity = model.glassMaterialIntensity
+        blursWallpaper = model.blursWallpaper
 
         let triggers = model.triggerSettings
         f4Enabled = triggers.f4Enabled

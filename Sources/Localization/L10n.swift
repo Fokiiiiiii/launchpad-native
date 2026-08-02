@@ -228,4 +228,9 @@ public enum L10n {
     public static var backgroundModeGlass: String { string("settings.screen.background.glass", "Glass") }
     public static var glassMaterialLabel: String { string("settings.screen.background.material", "Glass Material") }
     public static var blurWallpaperToggleLabel: String { string("settings.screen.background.blur", "Blur Wallpaper") }
+
+    // MARK: Menu bar icon
+
+    public static var menuBarOpenLauncherItem: String { string("menubar.openlauncher", "Open Launcher") }
+    public static var menuBarQuitItem: String { string("menubar.quit", "Quit") }
 }

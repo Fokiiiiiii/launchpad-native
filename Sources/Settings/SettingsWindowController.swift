@@ -36,6 +36,9 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// `LauncherWindowController` (which owns the actual window) can update
     /// its live `level`.
     private let onDockVisibilityChanged: (Bool) -> Void
+    private let onShowsMenuBarIconChanged: (Bool) -> Void
+    private let onShowsHiddenAppsInSearchChanged: () -> Void
+    private let onBackgroundSettingsChanged: () -> Void
     /// Fired when this window closes — lets the composition root hand key
     /// status back to the still-visible launcher underneath (see
     /// `windowWillClose`'s doc comment for why this is needed at all).
@@ -55,11 +58,17 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         model: GridModel,
         onTriggerSettingsChanged: @escaping () -> Bool,
         onDockVisibilityChanged: @escaping (Bool) -> Void,
+        onShowsMenuBarIconChanged: @escaping (Bool) -> Void = { _ in },
+        onShowsHiddenAppsInSearchChanged: @escaping () -> Void = {},
+        onBackgroundSettingsChanged: @escaping () -> Void = {},
         onWillClose: @escaping () -> Void = {}
     ) {
         self.model = model
         self.onTriggerSettingsChanged = onTriggerSettingsChanged
         self.onDockVisibilityChanged = onDockVisibilityChanged
+        self.onShowsMenuBarIconChanged = onShowsMenuBarIconChanged
+        self.onShowsHiddenAppsInSearchChanged = onShowsHiddenAppsInSearchChanged
+        self.onBackgroundSettingsChanged = onBackgroundSettingsChanged
         self.onWillClose = onWillClose
         super.init()
     }
@@ -79,7 +88,14 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
             return
         }
 
-        let viewModel = SettingsViewModel(model: model, onTriggerSettingsChanged: onTriggerSettingsChanged, onDockVisibilityChanged: onDockVisibilityChanged)
+        let viewModel = SettingsViewModel(
+            model: model,
+            onTriggerSettingsChanged: onTriggerSettingsChanged,
+            onDockVisibilityChanged: onDockVisibilityChanged,
+            onShowsMenuBarIconChanged: onShowsMenuBarIconChanged,
+            onShowsHiddenAppsInSearchChanged: onShowsHiddenAppsInSearchChanged,
+            onBackgroundSettingsChanged: onBackgroundSettingsChanged
+        )
         viewModel.refreshF4Status()
         self.viewModel = viewModel
         let hosting = NSHostingController(rootView: SettingsView(viewModel: viewModel, onClose: { [weak self] in self?.close() }))

@@ -22,6 +22,7 @@ enum TesseraWallpaperImageCache {
     private struct CacheKey: Hashable {
         let displayID: CGDirectDisplayID
         let url: URL?
+        let radius: CGFloat
     }
 
     private static var cache: [CacheKey: CGImage] = [:]
@@ -34,10 +35,15 @@ enum TesseraWallpaperImageCache {
     /// material layers on top anyway) and memoizes per (screen, wallpaper
     /// URL) so the blur only ever runs once per screen even though both the
     /// main launcher window and `MenuBarCoverWindow` pull from this cache.
-    static func blurredWallpaper(for screen: NSScreen) -> CGImage? {
+    /// - Parameter radius: Gaussian blur radius at the (downsampled, max
+    ///   960pt) working resolution — the default (44) is this view's
+    ///   original, `.glass`-mode value. `0` skips the blur filter entirely
+    ///   (returns the downsampled/color-corrected image as-is), for
+    ///   `.wallpaper` mode with "blur wallpaper" turned off.
+    static func blurredWallpaper(for screen: NSScreen, radius: CGFloat = 44) -> CGImage? {
         let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
         let url = NSWorkspace.shared.desktopImageURL(for: screen)
-        let key = CacheKey(displayID: displayID, url: url)
+        let key = CacheKey(displayID: displayID, url: url, radius: radius)
         if let cached = cache[key] {
             return cached
         }
@@ -52,7 +58,7 @@ enum TesseraWallpaperImageCache {
             usedFallback = true
         }
 
-        guard let blurred = blur(sourceImage) else {
+        guard let blurred = blur(sourceImage, radius: radius) else {
             if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_TESSERA_BACKGROUND"] == "1" {
                 DiagnosticsLog.launcher.info("TesseraWallpaperImageCache: blur failed for url=\(url?.path ?? "nil", privacy: .public)")
             }
@@ -65,7 +71,7 @@ enum TesseraWallpaperImageCache {
         return blurred
     }
 
-    private static func blur(_ image: CIImage) -> CGImage? {
+    private static func blur(_ image: CIImage, radius: CGFloat) -> CGImage? {
         // Downsample to a fixed max dimension before the (expensive)
         // Gaussian blur — standard Core Image practice for a background
         // that will be displayed heavily blurred/dimmed regardless.
@@ -74,12 +80,15 @@ enum TesseraWallpaperImageCache {
         let scale = maxDimension / max(extent.width, extent.height, 1)
         let downsampled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
-        let blurFilter = CIFilter.gaussianBlur()
-        blurFilter.inputImage = downsampled
-        blurFilter.radius = 44 // scaled down proportionally from the reference's 60-70pt at full resolution
-
         let colorFilter = CIFilter.colorControls()
-        colorFilter.inputImage = blurFilter.outputImage
+        if radius > 0 {
+            let blurFilter = CIFilter.gaussianBlur()
+            blurFilter.inputImage = downsampled
+            blurFilter.radius = Float(radius) // scaled down proportionally from the reference's 60-70pt at full resolution
+            colorFilter.inputImage = blurFilter.outputImage
+        } else {
+            colorFilter.inputImage = downsampled
+        }
         colorFilter.saturation = 1.15
 
         guard let output = colorFilter.outputImage else { return nil }

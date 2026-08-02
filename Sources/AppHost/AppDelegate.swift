@@ -29,11 +29,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.launcherWindowController.hide()
         }
     )
-    private lazy var settingsWindowController = SettingsWindowController(
+    private lazy var settingsWindowController: SettingsWindowController = SettingsWindowController(
         model: launcherWindowController.model,
         onTriggerSettingsChanged: { [weak self] in self?.applyCurrentTriggerSettings() ?? false },
         onDockVisibilityChanged: { [weak self] hideDock in self?.launcherWindowController.updateDockVisibilityPreference(hideDock) },
+        onShowsMenuBarIconChanged: { [weak self] visible in self?.menuBarIconController.setVisible(visible) },
+        onShowsHiddenAppsInSearchChanged: { [weak self] in self?.launcherWindowController.refreshSearchableRecords() },
+        onBackgroundSettingsChanged: { [weak self] in
+            guard let self else { return }
+            let model = launcherWindowController.model
+            launcherWindowController.updateBackgroundSettings(
+                mode: model.backgroundMode,
+                materialIntensity: model.glassMaterialIntensity,
+                blursWallpaper: model.blursWallpaper
+            )
+        },
         onWillClose: { [weak self] in self?.launcherWindowController.reclaimKeyIfVisible() }
+    )
+    private lazy var menuBarIconController: MenuBarIconController = MenuBarIconController(
+        onOpenLauncher: { [weak self] in self?.launcherWindowController.show() },
+        onOpenSettings: { [weak self] in
+            guard let self else { return }
+            launcherWindowController.show()
+            settingsWindowController.show(on: launcherWindowController.currentScreen)
+        }
     )
     /// Same floating-over-the-launcher mechanics as `settingsWindowController`
     /// (level, outside-click dismiss) but rebuilt per target app rather than
@@ -115,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // be re-applied here every time, not just when they pick a new
             // one in Settings.
             AppIconStyleApplier.apply(launcherWindowController.model.appIconStyle)
+            menuBarIconController.setVisible(launcherWindowController.model.showsMenuBarIcon)
 
             // Trigger registration and the first show() used to wait for
             // performFullScan() below to finish -- neither actually depends
