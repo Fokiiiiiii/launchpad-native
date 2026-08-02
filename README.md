@@ -1963,6 +1963,118 @@ menu, the gesture auto-disable actually silencing the OS gesture) needs
 the user's own hardware — this remains a standing, disclosed limit of
 this session's environment, not a claim of full verification.
 
+## Settings/Uninstall/Onboarding + a new "What's New" panel, ported to the "Tessera" reference (2026-08-02)
+
+The "Tessera" ZIP (see previous section) had two more un-ported surfaces —
+Settings, the Uninstall confirmation panel, the first-run Onboarding wizard —
+plus a "What's New" panel the reference has but this app never had. Scoped
+via two `AskUserQuestion` confirmations: include What's New (yes), and give
+Settings both a visual restyle *and* the reference's settings items this app
+was missing (yes to both), while explicitly excluding the large backend
+features flagged as separate, riskier work in the previous round's own
+"Round 14" risk assessment (windowed mode, display selection, auto-return
+timer, legacy-data restore, backup import/export, log export).
+
+**Shared glass-chrome foundation.** `GlassBackgroundHelper.makeFolderCardBackground`
+(previously hardcoded to the folder panel's own values) became `public` with
+defaulted `tint`/`borderAlpha`/`shadowOpacity`/`shadowRadius`/`shadowOffset`
+parameters — the folder panel's call site is unaffected by the defaults,
+while Settings/Uninstall now pass their own tuned values. Every panel window
+(`SettingsWindowController`, `UninstallPanelWindowController`,
+`OnboardingWindowController`, the new `WhatsNewWindowController`) now builds
+a borderless `NSWindow` whose content view is a plain `root` `NSView` holding
+`background` (the glass card) and the SwiftUI `NSHostingController.view` as
+*siblings*, both pinned to `root`'s four edges — the same pattern
+`LauncherWindow` already established, rather than a container relationship
+(`NSGlassEffectView.contentView`'s z-order isn't guaranteed, a lesson from an
+earlier round's search-field click-eating bug).
+
+**Settings.** Every tab's `Form { Section { ... } }.formStyle(.grouped)`
+(the system's own Preferences-pane chrome, with no public API to restyle a
+section's background/corner-radius) became a plain `ScrollView { VStack {
+SettingsCard { SettingsCardRow { ... existing Toggle/Picker/Stepper/Slider,
+unchanged } } } }` — `SettingsCard`/`SettingsCardRow`/`SettingsCardDivider`
+(`Sources/Settings/SettingsCard.swift`) reproduce the reference's exact card
+look (translucent white background, hairline border, 10pt corners, 46pt row
+height) purely as wrapper markup; every control's binding is untouched.
+Five new settings items were added, each backed by a new `LayoutDocument`
+field with the project's standard `decodeIfPresent(...) ?? default`
+backward-compat pattern: launch-at-login (`SMAppService.mainApp`, state read
+live from the OS rather than persisted — the same "OS is the source of
+truth" pattern as the existing F4 status), a menu-bar icon
+(`MenuBarIconController`, a 3-item `NSStatusItem` menu), showing hidden apps
+in search (a real, newly-implemented filter — the prior doc comment claiming
+hidden apps were already excluded from search turned out to be aspirational,
+not actual, confirmed by reading `LauncherWindowController.updateRecords`),
+and a wallpaper/glass background-mode toggle with a material-intensity
+slider and a blur toggle (`TesseraBackgroundView.Configuration` gained
+`mode`/`materialIntensity`/`blursWallpaper`, all defaulted to reproduce the
+pre-existing hardcoded glass look exactly — zero visual change for anyone
+who never opens the new controls).
+
+**What's New.** A new `WhatsNew` SPM module (mirrors `Onboarding`'s shape —
+depends only on `Diagnostics`/`Localization`, not `Grid`, to avoid pulling in
+the SQLite link) shows a version-gated panel (`WhatsNewState`, a UserDefaults
+flag storing the last-shown `CFBundleShortVersionString`) the first time the
+launcher opens after an update. Presented with the same window-level/outside-
+click-dismiss/key-reclaim mechanics as Settings/Uninstall (it appears over an
+already-visible launcher, unlike Onboarding's "nothing else is showing yet"
+assumption). `CFBundleShortVersionString` bumped 0.1.0 → 0.2.0 to give the
+version comparison something to actually compare against.
+
+**Uninstall panel.** A real, confirmed bug: `UninstallPanelView.swift`'s
+interior had a hardcoded `.frame(width: 420)` that never matched the
+reference's 586pt — fixed in both the SwiftUI interior and the window's
+`setContentSize`. The window-chrome conversion here needed one extra step
+the others didn't: the controller replaces its content wholesale after an
+async icon fetch completes, which would have discarded the new `root`/
+`background` glass card along with the old hosting view. `rootContentView`/
+`currentHostingView` are now kept as stored properties so the completion
+handler swaps in only the new hosting view as a subview of the still-alive
+`root`, leaving the card underneath untouched. The header/checklist/footer
+interior is otherwise unchanged.
+
+**Onboarding.** Gained the same glass-chrome treatment (a local
+`OnboardingGlassBackground`/`DismissableWindow` pair — `Onboarding`
+deliberately doesn't depend on `Grid`, so these are small duplicates of the
+same AppKit helpers, matching the project's existing precedent of
+`Launcher`/`Grid` each keeping their own copy for the same reason). The
+4-page content/transition logic is untouched; only the outer frame widened
+(560pt → 660pt, padding-based rather than a hardcoded width) to match the
+reference's proportions.
+
+**Localization.** All new strings (menu-bar items, the 5 new Settings
+controls, What's New's title/badge/continue button/3 feature blurbs) were
+added to `L10n.swift` and both `en`/`ja` `.strings` files — a real gap was
+caught before commit: several keys existed in `L10n.swift` calling
+`Bundle.localizedString(forKey:value:table:)` but had no matching `.strings`
+entry, meaning they were silently falling back to their English `value`
+argument even under Japanese. `whatsnew.badge` is deliberately *not* given a
+`.strings` entry — its call site passes the live version string itself as
+the fallback `value`, and adding a literal `"%@"` entry would've broken that
+(this API does plain key lookup, not `String(format:)` substitution).
+
+**Verification.** `swift build`/`swift test` (113/113) after each of the
+four sections (glass-chrome foundation + new `LayoutDocument` fields, What's
+New + Onboarding, Settings, Uninstall + localization), plus an offscreen
+`NSHostingController` → `cacheDisplay(in:to:)` PNG render (temporary test
+file, deleted after inspection) for each new/changed window to confirm
+corner radius, border, and — for Uninstall specifically — the corrected
+586pt width, before ever touching the real app. Every release-build smoke
+test followed the project's established real-data discipline: back up
+`layout.json`, launch, confirm no errors/crashes via `log stream --level
+info`, confirm the process stays alive, then diff `pages`/`folders` by
+structure (not raw JSON, since Swift's dictionary key order is
+non-deterministic) against the backup — unchanged (8 folders, same page
+layout) after every run in this round. **Not yet verified**: the actual
+look and feel of any of these four surfaces — corner radius rendering
+correctly, the glass material's translucency reading as intended, the new
+Settings controls behaving as expected end-to-end, whether Onboarding's
+Escape-to-dismiss still feels right now that the traffic-light buttons are
+hidden — needs the user's own hands-on pass; this session's offscreen PNG
+renders and `log stream` checks establish "doesn't crash, geometry is
+correct," not "looks/feels right."
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
