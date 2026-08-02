@@ -1619,6 +1619,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         /// re-targets a peek that's still easing.
         var lastPeekOffset: CGFloat?
         var lastPeekTime: CFTimeInterval?
+        /// Real, confirmed report ("グループ化しようとするとアプリが逃げる
+        /// ...わかりやすくできない？"): a standalone overlay (same pattern
+        /// as `floatingView`/`edgePeekImageView` — never a sublayer added to
+        /// a reusable `GridCellItem`, since `prepareForReuse` only resets
+        /// that cell's own transform/opacity/animations, not arbitrary
+        /// sublayers someone else added) that shows the folder drop zone's
+        /// bounds and a hover-progress sweep. `nil` whenever the pointer
+        /// isn't currently over another app's center zone.
+        var folderZoneIndicatorView: NSView?
         let generation: Int
 
         init(sourcePage: Int, sourceOriginalIndex: Int, draggedItem: LayoutItem, originalFrame: NSRect, grabOffset: NSPoint, generation: Int) {
@@ -1960,8 +1969,25 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         layer.setValue(dy, forKeyPath: "transform.translation.y")
         CATransaction.commit()
 
-        evaluateReorderCandidate(session: session, point: point)
-        evaluateFolderCandidate(session: session, point: point)
+        // Real, confirmed report ("グループ化しようとするとアプリが逃げる
+        // ような感じがしてやりにくい"): evaluating reorder and folder
+        // candidates independently meant that moving toward another app to
+        // group it also crossed the reorder hysteresis radius around that
+        // same cell, so the target app itself got nudged aside by the
+        // reorder preview right as the user tried to hover over it — the
+        // thing being grabbed for kept moving. The folder zone check is now
+        // evaluated first, and while the pointer is inside another app's
+        // center zone, reorder candidate evaluation is skipped entirely
+        // (not just gated on the folder candidate having *committed* —
+        // gating this early, before the 0.5s hover delay fires, is what
+        // keeps the target from being nudged in the first place).
+        let folderTarget = folderZoneTarget(session: session, point: point)
+        if folderTarget != nil {
+            suppressReorderForFolderZone(session: session)
+        } else {
+            evaluateReorderCandidate(session: session, point: point)
+        }
+        evaluateFolderCandidate(session: session, point: point, zoneTarget: folderTarget)
         evaluateEdgeCandidate(session: session, point: point)
         updateEdgePeek(session: session, point: point)
     }
@@ -2153,30 +2179,41 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// Spec 11.1: only apps can be a folder-creation *source* onto another
     /// item — dragging a folder doesn't nest folders, matching
     /// `GridModel.createOrJoinFolder`'s existing app+app/app+folder-only
-    /// semantics (unchanged by this rewrite).
-    private func evaluateFolderCandidate(session: ItemDragSession, point: NSPoint) {
-        guard case .app = session.draggedItem, model.pages.indices.contains(currentPage) else {
-            clearFolderCandidate(session: session)
-            return
-        }
+    /// semantics (unchanged by this rewrite). Extracted out of
+    /// `evaluateFolderCandidate` so `updateItemDrag` can also consult it
+    /// *before* evaluating the reorder candidate — see that method's doc
+    /// comment for why the ordering matters.
+    private func folderZoneTarget(session: ItemDragSession, point: NSPoint) -> Int? {
+        guard case .app = session.draggedItem, model.pages.indices.contains(currentPage) else { return nil }
         let items = model.pages[currentPage]
-        var target: Int?
         for index in items.indices where index != session.sourceOriginalIndex {
             guard let frame = layout.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { continue }
             let inset = min(frame.width, frame.height) * Self.itemDragFolderZoneInset
             let centerZone = frame.insetBy(dx: inset, dy: inset)
-            if centerZone.contains(point) { target = index; break }
+            if centerZone.contains(point) { return index }
         }
-        guard target != session.pendingRawFolderCandidateIndex else { return }
-        session.pendingRawFolderCandidateIndex = target
+        return nil
+    }
+
+    private func evaluateFolderCandidate(session: ItemDragSession, point: NSPoint, zoneTarget: Int?) {
+        guard zoneTarget != session.pendingRawFolderCandidateIndex else { return }
+        session.pendingRawFolderCandidateIndex = zoneTarget
         session.folderTimer?.invalidate()
-        guard let target else {
+        guard let zoneTarget else {
             clearFolderCandidate(session: session)
             return
         }
+        // Real, confirmed report ("グループ化...ui的にも操作的にもわかり
+        // やすく"): the raw zone entry (before the hover delay commits)
+        // now gets its own immediate feedback — a visible drop-zone ring
+        // with a progress sweep timed to the hover delay, and the dragged
+        // icon itself pulling inward — instead of nothing changing until
+        // `commitFolderCandidate` fires 0.5s later.
+        showFolderZoneIndicator(session: session, targetIndex: zoneTarget)
+        beginFloatingViewFolderPull(session: session, engaged: true)
         session.folderTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragFolderHoverDelay, repeats: false) { [weak self, weak session] _ in
             guard let self, let session, session.generation == self.itemDragGeneration else { return }
-            self.commitFolderCandidate(session: session, index: target)
+            self.commitFolderCandidate(session: session, index: zoneTarget)
         }
     }
 
@@ -2184,16 +2221,46 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         guard session.folderCandidateOriginalIndex != index else { return }
         clearFolderCandidateHighlight(session: session)
         session.folderCandidateOriginalIndex = index
+        // The ring's job (showing "not yet committed, hover to confirm")
+        // is done — the target's own 1.06x growth below takes over as the
+        // "committed" signal.
+        clearFolderZoneIndicator(session: session)
         DiagnosticsLog.grid.notice("commitFolderCandidate: index \(index, privacy: .public)")
         guard let cell = collectionView.item(at: IndexPath(item: index, section: 0)) as? GridCellItem, let layer = cell.view.layer else { return }
         layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.0, to: 1.06, damping: 0.82, response: 0.2), forKey: "folderCandidate")
-        layer.transform = CATransform3DMakeScale(1.06, 1.06, 1)
+        // Keypath assignment, not a raw `layer.transform = ...` assignment
+        // — this file's consistent convention (see `updateItemDrag`'s doc
+        // comment) is translation via `transform.translation.x/y` and
+        // scale via `transform.scale`, never a bare `.transform` overwrite,
+        // so scale changes here compose cleanly with any translation this
+        // same layer might carry.
+        layer.setValue(1.06, forKeyPath: "transform.scale")
     }
 
     private func clearFolderCandidate(session: ItemDragSession) {
         session.pendingRawFolderCandidateIndex = nil
         session.folderTimer?.invalidate()
         clearFolderCandidateHighlight(session: session)
+        clearFolderZoneIndicator(session: session)
+        beginFloatingViewFolderPull(session: session, engaged: false)
+    }
+
+    /// Real, confirmed report ("グループ化しようとするとアプリが逃げる"):
+    /// called from `updateItemDrag` whenever the pointer is inside another
+    /// app's folder drop zone, *before* the 0.5s hover delay confirms a
+    /// folder candidate — pins the reorder preview back to its identity
+    /// state (every item at its own natural slot, zero visual
+    /// displacement) so the target app being hovered over never gets
+    /// nudged aside by a reorder candidate change while the user is trying
+    /// to hold the pointer over it.
+    private func suppressReorderForFolderZone(session: ItemDragSession) {
+        session.reorderTimer?.invalidate()
+        // Keeps `evaluateReorderCandidate`'s "same as last pending raw slot"
+        // guard from swallowing a real re-evaluation once the pointer
+        // leaves the folder zone again.
+        session.pendingRawSlot = session.sourceOriginalIndex
+        guard session.candidateSlot != session.sourceOriginalIndex else { return }
+        commitReorderCandidate(session: session, slot: session.sourceOriginalIndex)
     }
 
     private func clearFolderCandidateHighlight(session: ItemDragSession) {
@@ -2201,6 +2268,106 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         session.folderCandidateOriginalIndex = nil
         guard let cell = collectionView.item(at: IndexPath(item: index, section: 0)) as? GridCellItem else { return }
         resetItemTransform(cell.view)
+    }
+
+    /// Real, confirmed report ("グループ化...UI的にも操作的にもわかりや
+    /// すく"): the dragged icon itself never changed when it entered a
+    /// folder drop zone — only the far-away target cell grew slightly.
+    /// Since the user's eyes are usually on the icon they're actually
+    /// holding, that made the "this will make a folder" signal easy to
+    /// miss. Shrinking the floating icon toward the growing target (0.92x
+    /// vs. the target's 1.06x, same damping/response so both feel like
+    /// one gesture) gives a visible cue right where the user is looking.
+    /// Starts from the layer's current presentation value (same technique
+    /// `animateLayerTranslation` already uses) so this reads smoothly even
+    /// if the initial 1.0→1.06 lift spring from `createFloatingDragView`
+    /// hasn't finished yet.
+    private func beginFloatingViewFolderPull(session: ItemDragSession, engaged: Bool) {
+        guard let layer = session.floatingView?.layer else { return }
+        let liftScale: CGFloat = 1.06
+        let pullScale: CGFloat = 0.92
+        let targetScale = engaged ? pullScale : liftScale
+        let currentScale = (layer.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat) ?? (engaged ? liftScale : pullScale)
+        guard abs(currentScale - targetScale) > 0.001 else { return }
+        layer.setValue(targetScale, forKeyPath: "transform.scale")
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        layer.add(Self.springAnimation(keyPath: "transform.scale", from: currentScale, to: targetScale, damping: 0.82, response: 0.2), forKey: "folderPull")
+    }
+
+    /// Real, confirmed report ("グループ化...UI的にも操作的にもわかりや
+    /// すく"): the folder drop zone (the target cell's own center 60%,
+    /// same bounds `folderZoneTarget` tests against) had no visible
+    /// boundary, and the 0.5s hover-to-confirm delay showed no progress —
+    /// nothing changed until it suddenly committed. A standalone overlay
+    /// (never a sublayer added to the target `GridCellItem` itself —
+    /// `GridCellItem.prepareForReuse` only resets that cell's own
+    /// transform/opacity/animations, not sublayers something else added,
+    /// so appending here risks a stray ring surviving cell reuse onto an
+    /// unrelated app) shows the zone's bounds immediately, with an inner
+    /// stroke that sweeps over exactly `itemDragFolderHoverDelay` seconds —
+    /// the same duration the hover timer itself runs on.
+    private func showFolderZoneIndicator(session: ItemDragSession, targetIndex: Int) {
+        clearFolderZoneIndicator(session: session, animated: false)
+        guard let frame = layout.layoutAttributesForItem(at: IndexPath(item: targetIndex, section: 0))?.frame else { return }
+        let inset = min(frame.width, frame.height) * Self.itemDragFolderZoneInset
+        let zoneRectInRoot = collectionView.convert(frame.insetBy(dx: inset, dy: inset), to: view)
+
+        let indicator = NonInteractiveImageView(frame: zoneRectInRoot)
+        indicator.wantsLayer = true
+        indicator.layer?.cornerRadius = 12
+        indicator.layer?.cornerCurve = .continuous
+        indicator.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
+        indicator.layer?.borderWidth = 1.5
+        indicator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        indicator.layer?.opacity = 0
+        if let floatingView = session.floatingView {
+            view.addSubview(indicator, positioned: .below, relativeTo: floatingView)
+        } else {
+            view.addSubview(indicator)
+        }
+        session.folderZoneIndicatorView = indicator
+
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+        let progressRing = CAShapeLayer()
+        progressRing.path = CGPath(roundedRect: indicator.bounds.insetBy(dx: 1, dy: 1), cornerWidth: 11, cornerHeight: 11, transform: nil)
+        progressRing.fillColor = NSColor.clear.cgColor
+        progressRing.strokeColor = NSColor.white.withAlphaComponent(0.9).cgColor
+        progressRing.lineWidth = 1.5
+        progressRing.strokeEnd = reduceMotion ? 1 : 0
+        indicator.layer?.addSublayer(progressRing)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        indicator.layer?.opacity = 1
+        CATransaction.commit()
+        indicator.layer?.add(Self.springAnimation(keyPath: "opacity", from: 0, to: 1, damping: 1.0, response: 0.12), forKey: "zoneFadeIn")
+
+        guard !reduceMotion else { return }
+        let sweep = CABasicAnimation(keyPath: "strokeEnd")
+        sweep.fromValue = 0
+        sweep.toValue = 1
+        sweep.duration = Self.itemDragFolderHoverDelay
+        sweep.timingFunction = CAMediaTimingFunction(name: .linear)
+        sweep.isRemovedOnCompletion = false
+        sweep.fillMode = .forwards
+        progressRing.strokeEnd = 1
+        progressRing.add(sweep, forKey: "folderHoverProgress")
+    }
+
+    private func clearFolderZoneIndicator(session: ItemDragSession, animated: Bool = true) {
+        guard let indicator = session.folderZoneIndicatorView else { return }
+        session.folderZoneIndicatorView = nil
+        guard animated else {
+            indicator.removeFromSuperview()
+            return
+        }
+        let currentOpacity = indicator.layer?.presentation()?.opacity ?? 1
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { indicator.removeFromSuperview() }
+        indicator.layer?.add(Self.springAnimation(keyPath: "opacity", from: CGFloat(currentOpacity), to: 0, damping: 1.0, response: 0.1), forKey: "zoneFadeOut")
+        indicator.layer?.opacity = 0
+        CATransaction.commit()
     }
 
     // MARK: Page-edge turning while dragging
@@ -2396,6 +2563,19 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 session.pendingRawSlot = -1
                 session.candidateSlot = self.model.pages.indices.contains(targetPage) ? self.model.pages[targetPage].count : 0
                 session.edgeDirection = 0
+                // Real, confirmed latent bug (found while wiring up the
+                // folder zone indicator, not user-reported): this function
+                // already resets pendingRawSlot/candidateSlot/edgeDirection
+                // for the new page, but never reset the folder-candidate
+                // state — a folder candidate committed on the page being
+                // left would survive the page turn pointing at a now-
+                // unrelated index on the new page, and endItemDrag could
+                // call createOrJoinFolder against the wrong app. Same
+                // symmetric reset, added here for the same reason.
+                session.folderTimer?.invalidate()
+                session.pendingRawFolderCandidateIndex = nil
+                self.clearFolderCandidateHighlight(session: session)
+                self.clearFolderZoneIndicator(session: session, animated: false)
                 self.updateItemDrag(session: session, point: session.lastPoint)
             }
         }
@@ -2407,6 +2587,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         session.invalidateTimers()
         activeItemDrag = nil
         clearEdgePeek(session: session)
+        clearFolderZoneIndicator(session: session, animated: false)
         lastAnimatedValueByLayer.removeAll()
 
         let hasFolderTarget = session.folderCandidateOriginalIndex != nil
@@ -2467,8 +2648,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let dy = targetFrameInRoot.minY - session.floatingViewOriginalFrameInRoot.minY
 
         animateLayerTranslation(layer, toX: dx, toY: dy)
+        // Real, confirmed report ("グループ化...アプリが逃げる"): reads the
+        // layer's current presentation value instead of assuming 1.06 —
+        // while hovering over a folder target this layer may have been
+        // pulled to 0.92 by `beginFloatingViewFolderPull`, and settling
+        // from a hardcoded 1.06 would visibly jump backward before easing
+        // to 1.0.
+        let currentScale = (layer.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat) ?? 1.06
         layer.setValue(1.0, forKeyPath: "transform.scale")
-        layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.06, to: 1.0, damping: 1.0, response: 0.18), forKey: "settleScale")
+        layer.add(Self.springAnimation(keyPath: "transform.scale", from: currentScale, to: 1.0, damping: 1.0, response: 0.18), forKey: "settleScale")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             Task { @MainActor in
@@ -2486,6 +2674,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         session.invalidateTimers()
         activeItemDrag = nil
         clearEdgePeek(session: session)
+        clearFolderZoneIndicator(session: session, animated: false)
         lastAnimatedValueByLayer.removeAll()
         // See endItemDrag's doc comment: reset before stopWobble(), not
         // after, so the reset's own transform write still has an active
@@ -2496,8 +2685,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         guard let floatingView = session.floatingView, let layer = floatingView.layer else { return }
         animateLayerTranslation(layer, toX: 0, toY: 0)
+        // See settleFloatingView's doc comment — same "may have been pulled
+        // to 0.92 by a folder hover" reasoning applies to a cancel/revert.
+        let currentScale = (layer.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat) ?? 1.06
         layer.setValue(1.0, forKeyPath: "transform.scale")
-        layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.06, to: 1.0, damping: 1.0, response: 0.2), forKey: "revertScale")
+        layer.add(Self.springAnimation(keyPath: "transform.scale", from: currentScale, to: 1.0, damping: 1.0, response: 0.2), forKey: "revertScale")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
             Task { @MainActor in
