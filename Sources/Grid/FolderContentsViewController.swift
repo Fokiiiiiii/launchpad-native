@@ -334,7 +334,19 @@ final class FolderContentsViewController: NSViewController {
         else { return }
         model.moveItemWithinFolder(folderID, page: from.page, fromIndex: from.index, toIndex: to.index)
         Task { await model.save() }
-        refresh()
+        // Real, confirmed report ("フォルダ内のアプリ移動が違和感がある"):
+        // without an active animation transaction, `gridModel.tiles = tiles`
+        // below is an instant hard cut — the dropped tile and everything
+        // between its old and new position teleport into place in the same
+        // frame, with no sense of anything actually having moved. Wrapping
+        // just this reorder-triggered refresh (not every refresh() call —
+        // icon-arrival updates elsewhere shouldn't animate the whole grid)
+        // lets `LazyVGrid`'s own `ForEach(model.tiles)` reflow the affected
+        // tiles into their new positions, since `FolderOverlayTile` is
+        // `Identifiable` by a stable id that survives the reorder.
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+            refresh()
+        }
     }
 
     private func tileID(for item: LayoutItem) -> String? {
