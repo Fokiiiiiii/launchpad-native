@@ -130,7 +130,16 @@ struct FolderOverlayTileView: View {
         }
         .frame(width: iconSize, height: iconSize)
         .clipShape(shape)
-        .overlay(shape.strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+        // Real, confirmed report ("変な枠がある", reproduced against the
+        // real "ゲーム" folder — 5 items, matching the reported
+        // screenshot's 5 tiles exactly): this hairline stroke used to
+        // outline every tile's icon uniformly regardless of the icon's own
+        // artwork or color, which is exactly what made it read as an
+        // applied "frame" rather than part of any one icon. Matches the
+        // same "this codebase's own icon chrome reads as unwanted
+        // decoration against its dark theme" lesson as the shadow removed
+        // just below — the main grid's `GridCellItem.swift` draws no
+        // border around its icons either.
         // Real, confirmed report ("アプリの黒背景", reproduced with the
         // real DictionaryTool/ConfigDialog icons rendered through the
         // actual `FolderContentsViewController` against this panel's real
