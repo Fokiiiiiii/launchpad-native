@@ -1669,7 +1669,24 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private static let itemDragThresholdDistance: CGFloat = 6
     private static let itemDragEdgeZoneWidth: CGFloat = 70
     private static let itemDragEdgeHoverDelay: TimeInterval = 0.45
-    private static let itemDragFolderHoverDelay: TimeInterval = 0.5
+    /// Real, confirmed report ("フォルダ判定をもう少し遅く"): 0.5s let a
+    /// brief pass-over during reordering register as folder intent too
+    /// easily. Raised to 0.7s — still well under a full second (doesn't
+    /// read as unresponsive) but requires more deliberate dwell before
+    /// committing. The hover-progress ring's own sweep duration and the
+    /// debug-hook wait both read this constant directly, so both track the
+    /// new value automatically.
+    private static let itemDragFolderHoverDelay: TimeInterval = 0.7
+    /// iOS's own folder-creation highlight reads as "a little more than the
+    /// icon," not a separate shape — noticeably but not dramatically larger
+    /// than the icon it wraps. 1.18x keeps the padding visible without the
+    /// indicator ballooning into neighboring cells at tight column counts.
+    private static let itemDragFolderZoneIndicatorScale: CGFloat = 1.18
+    /// Deliberately rounder than `GridCellItem`'s own app-icon squircle
+    /// ratio (0.236, `applyIconSize`) — this is a plain rounded-square
+    /// backdrop, not an icon mask, and a plumper curve reads as
+    /// "background" rather than "blank icon."
+    private static let itemDragFolderZoneIndicatorCornerRatio: CGFloat = 0.28
     /// Real, confirmed report ("上からやってもなんの反応もない"): now that
     /// the 2D hysteresis radius below is the sole anti-chatter gate (see its
     /// doc comment), this additional time delay only added pure lag on top
@@ -2294,31 +2311,46 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         layer.add(Self.springAnimation(keyPath: "transform.scale", from: currentScale, to: targetScale, damping: 0.82, response: 0.2), forKey: "folderPull")
     }
 
-    /// Real, confirmed report ("グループ化...UI的にも操作的にもわかりや
-    /// すく"): the folder drop zone (the target cell's own center 60%,
-    /// same bounds `folderZoneTarget` tests against) had no visible
-    /// boundary, and the 0.5s hover-to-confirm delay showed no progress —
-    /// nothing changed until it suddenly committed. A standalone overlay
-    /// (never a sublayer added to the target `GridCellItem` itself —
-    /// `GridCellItem.prepareForReuse` only resets that cell's own
-    /// transform/opacity/animations, not sublayers something else added,
-    /// so appending here risks a stray ring surviving cell reuse onto an
-    /// unrelated app) shows the zone's bounds immediately, with an inner
-    /// stroke that sweeps over exactly `itemDragFolderHoverDelay` seconds —
-    /// the same duration the hover timer itself runs on.
+    /// Real, confirmed report ("フォルダ制作のUiがひどすぎる長方形だし
+    /// iphoneのような美しくわかりやすい素晴らしいデザインにして"): this
+    /// used to be sized from the *whole grid slot* rect (icon + label band
+    /// + padding, via `layout.layoutAttributesForItem`), which read as an
+    /// oversized rectangle instead of a ring around the icon. Now built
+    /// from `GridCellItem.iconFrame` (see that property's doc comment) —
+    /// a rounded square a little larger than the icon itself, matching how
+    /// iOS's own folder-creation highlight wraps just the icon, not the
+    /// name label underneath it. `folderZoneTarget`'s hit-test zone (still
+    /// the full cell's center 60%) is intentionally left wider than what's
+    /// drawn here — iOS does the same: the hit region is generous, the
+    /// visual feedback is tight to the icon.
     private func showFolderZoneIndicator(session: ItemDragSession, targetIndex: Int) {
         clearFolderZoneIndicator(session: session, animated: false)
-        guard let frame = layout.layoutAttributesForItem(at: IndexPath(item: targetIndex, section: 0))?.frame else { return }
-        let inset = min(frame.width, frame.height) * Self.itemDragFolderZoneInset
-        let zoneRectInRoot = collectionView.convert(frame.insetBy(dx: inset, dy: inset), to: view)
+        guard let cell = collectionView.item(at: IndexPath(item: targetIndex, section: 0)) as? GridCellItem else { return }
+        let iconFrameInRoot = cell.view.convert(cell.iconFrame, to: view)
+        guard iconFrameInRoot.width > 0, iconFrameInRoot.height > 0 else { return }
+
+        let indicatorSize = iconFrameInRoot.width * Self.itemDragFolderZoneIndicatorScale
+        let zoneRectInRoot = NSRect(
+            x: iconFrameInRoot.midX - indicatorSize / 2,
+            y: iconFrameInRoot.midY - indicatorSize / 2,
+            width: indicatorSize,
+            height: indicatorSize
+        )
 
         let indicator = NonInteractiveImageView(frame: zoneRectInRoot)
         indicator.wantsLayer = true
-        indicator.layer?.cornerRadius = 12
+        let cornerRadius = indicatorSize * Self.itemDragFolderZoneIndicatorCornerRatio
+        indicator.layer?.cornerRadius = cornerRadius
         indicator.layer?.cornerCurve = .continuous
-        indicator.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
-        indicator.layer?.borderWidth = 1.5
-        indicator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        // A soft filled backdrop, not a bordered box — iOS's own folder
+        // highlight reads as "a plate the icon rests on," not an outline.
+        // Stays within this grid's existing white-alpha vocabulary
+        // (`applySelection` uses 0.28 for its own border) — bumped above
+        // the previous 0.06 fill since this indicator now covers a much
+        // smaller area and needs to read clearly over arbitrary wallpaper.
+        indicator.layer?.borderColor = NSColor.white.withAlphaComponent(0.22).cgColor
+        indicator.layer?.borderWidth = 1
+        indicator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.18).cgColor
         indicator.layer?.opacity = 0
         if let floatingView = session.floatingView {
             view.addSubview(indicator, positioned: .below, relativeTo: floatingView)
@@ -2330,9 +2362,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
         let progressRing = CAShapeLayer()
-        progressRing.path = CGPath(roundedRect: indicator.bounds.insetBy(dx: 1, dy: 1), cornerWidth: 11, cornerHeight: 11, transform: nil)
+        let ringInset: CGFloat = 1
+        progressRing.path = CGPath(
+            roundedRect: indicator.bounds.insetBy(dx: ringInset, dy: ringInset),
+            cornerWidth: cornerRadius - ringInset,
+            cornerHeight: cornerRadius - ringInset,
+            transform: nil
+        )
         progressRing.fillColor = NSColor.clear.cgColor
-        progressRing.strokeColor = NSColor.white.withAlphaComponent(0.9).cgColor
+        progressRing.strokeColor = NSColor.white.withAlphaComponent(0.85).cgColor
         progressRing.lineWidth = 1.5
         progressRing.strokeEnd = reduceMotion ? 1 : 0
         indicator.layer?.addSublayer(progressRing)

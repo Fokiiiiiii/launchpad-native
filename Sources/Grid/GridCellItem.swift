@@ -240,6 +240,20 @@ final class GridCellItem: NSCollectionViewItem {
         highlightView.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
     }
 
+    /// The icon's own rendered frame, in this cell's own view coordinate
+    /// space (same coordinate space as `contentHitTestFrame` below).
+    /// Exposed so callers that need to align decoration to the icon itself
+    /// — not the whole cell, which is far taller than the icon once the
+    /// label band below it is included — have a single source of truth
+    /// instead of re-deriving the icon's top-inset/centering/size
+    /// independently (which would drift if this cell's own Auto Layout
+    /// constants ever changed). Real, confirmed report ("フォルダ制作の
+    /// Uiがひどすぎる長方形だし"): `GridViewController`'s folder-drop-zone
+    /// indicator used to be sized from the full cell slot rect (icon +
+    /// label + padding), reading as an oversized rectangle instead of a
+    /// ring around just the icon.
+    var iconFrame: NSRect { iconView.frame }
+
     /// The icon+label's actual rendered bounds, in this cell's own view
     /// coordinate space. A 7x5 grid's cells are far larger than any one
     /// icon, so treating the *whole cell* as clickable (NSCollectionView's
