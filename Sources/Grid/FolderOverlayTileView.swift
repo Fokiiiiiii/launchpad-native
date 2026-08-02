@@ -105,31 +105,24 @@ struct FolderOverlayTileView: View {
         .frame(width: iconSize, height: iconSize)
         .clipShape(shape)
         .overlay(shape.strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
-        // Real, confirmed report ("アプリの黒背景"/"フォルダ制作のUiが
-        // ひどすぎる長方形だし...何も改善されていない"): the previous
-        // fix here (conditioning the shadow's color on `tile.icon != nil`)
-        // only addressed the not-yet-loaded case — it didn't touch the
-        // real root cause, which persisted even after the icon loaded.
-        // The removed `shape.fill(LinearGradient(...))` line used to draw
-        // a translucent highlight across the *entire* square regardless of
-        // the real icon's own alpha — real macOS app icons (Big Sur-era
-        // templates onward) commonly have a transparent margin inside
-        // their canvas, so that fill lit up the margin as if it were
-        // opaque. Combined with `.shadow()` applying independently to each
-        // ZStack primitive (no `compositingGroup()` was present), that
-        // fill layer cast its own drop shadow shaped like the *whole
-        // square*, not the icon's actual artwork — which is what read as
-        // a solid black frame around every icon, even fully loaded ones.
-        // The sibling `FolderIconView.swift` hit the identical symptom
-        // once (commit 5247ea1, user report "フォルダだけ妙にでかいし
-        // なんかアプリがない部分に影をつけるのはやめて") and fixed it by
-        // deleting the fill outright — same fix here. `compositingGroup()`
-        // is added so the retained `.shadow()` casts from the actual
-        // composited result (image + hairline stroke) instead of each
-        // ZStack layer independently, so it now hugs the real icon's
-        // shape instead of the square bounding box.
+        // Real, confirmed report ("アプリの黒背景", reproduced with the
+        // real DictionaryTool/ConfigDialog icons rendered through the
+        // actual `FolderContentsViewController` against this panel's real
+        // dark backdrop — see the temp probe this fix was verified with):
+        // the previous pass correctly clipped `.shadow()` to the icon's
+        // real composited alpha shape via `compositingGroup()`, but even a
+        // *correctly shaped* shadow of a mostly-opaque rounded-square icon
+        // is itself a visibly darker rounded square — against this app's
+        // dark folder backdrop (not a light one), that reads exactly like
+        // a black frame, regardless of how tightly it hugs the icon. This
+        // codebase already hit and resolved the identical complaint twice
+        // before by removing the shadow outright rather than reshaping it:
+        // the closed-folder mosaic `FolderIconView.swift` has no shadow at
+        // all (see its own doc comment, commit 5247ea1), and the main
+        // grid's AppKit tiles (`GridCellItem.swift`) never apply one
+        // either. Matches that established, dark-theme-appropriate
+        // precedent here too.
         .compositingGroup()
-        .shadow(color: tile.icon != nil ? .black.opacity(0.35) : .clear, radius: 6, y: 3)
     }
 }
 
