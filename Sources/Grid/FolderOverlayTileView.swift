@@ -1,6 +1,7 @@
 import AppKit
 import Localization
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// One app tile inside an opened folder's grid — adapted directly from the
 /// user-supplied "Tessera" design reference's `AppTile` (icon branch) and
@@ -20,17 +21,48 @@ struct FolderOverlayTile: Identifiable {
     let onRemoveFromFolder: () -> Void
     /// Real, confirmed report ("フォルダ内だとアプリの並び替えができな
     /// い"): called when another tile (identified by its own `id`) is
-    /// dropped onto this one. Uses SwiftUI's own `.draggable`/
-    /// `.dropDestination` (`Transferable`-based, macOS 13+) rather than
-    /// the main grid's hand-rolled AppKit mouse-tracking state machine
-    /// (`GridViewController.ItemDragSession`) — that machine is written
-    /// directly against `NSCollectionViewItem`/`IndexPath` inside a live
-    /// `NSCollectionView` and has no way to address a folder's SwiftUI-
-    /// hosted contents, and this codebase's history with hand-rolled drag
-    /// state machines has been rocky enough (see that type's own doc
-    /// comments) that a folder's much smaller, lower-stakes reorder
-    /// surface uses the platform's own well-tested primitive instead.
+    /// dropped onto this one. Uses the older `NSItemProvider`-based
+    /// `.onDrag`/`.onDrop` rather than the newer `Transferable`-based
+    /// `.draggable`/`.dropDestination` (macOS 13+) — an earlier pass used
+    /// the latter and it silently never worked in practice, confirmed by
+    /// the user after shipping. The most likely cause: this tile is a
+    /// `Button` with its own `.simultaneousGesture(DragGesture(
+    /// minimumDistance: 0))` for press feedback, and on macOS a `Button`'s
+    /// AppKit-level mouseDown tracking loop can win out over
+    /// `.draggable`'s own (newer, less AppKit-interop-tested) drag
+    /// recognizer before it ever gets a chance to start a session.
+    /// `.onDrag`/`.onDrop` predates `Transferable` by years and has a much
+    /// longer track record coexisting with AppKit-hosted SwiftUI content
+    /// specifically (this codebase's `FolderOverlayTileView` is hosted via
+    /// `NSHostingView` inside a hand-built AppKit overlay, not a native
+    /// SwiftUI `App` lifecycle) — matches the main grid's own
+    /// `ItemDragSession` in *not* being the newest-available API, for the
+    /// same practical reason.
     let onReorder: (_ draggedID: String) -> Void
+}
+
+/// Real, confirmed report ("フォルダ内だとアプリの並び替えができない"):
+/// the tile used to derive its press-scale feedback from a hand-rolled
+/// `.simultaneousGesture(DragGesture(minimumDistance: 0))` that set a
+/// `@State` flag on `.onChanged`. `minimumDistance: 0` means that gesture
+/// claims the touch the instant `mouseDown` happens — on macOS specifically,
+/// competing with `.onDrag`'s own drag-session initiation (which itself
+/// needs to observe the *first* bit of pointer movement to decide "this is
+/// a drag, not a click") for the same touch. `ButtonStyle.isPressed` is the
+/// idiomatic way to get identical press feedback without adding any gesture
+/// of the tile's own at all — no competition, because there's nothing left
+/// to compete with.
+private let tileSnappy = Animation.spring(response: 0.26, dampingFraction: 0.90)
+
+private struct TileButtonStyle: ButtonStyle {
+    let hovering: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.90 : 1)
+            .offset(y: hovering ? -2 : 0)
+            .animation(tileSnappy, value: configuration.isPressed)
+            .animation(tileSnappy, value: hovering)
+    }
 }
 
 struct FolderOverlayTileView: View {
@@ -38,10 +70,8 @@ struct FolderOverlayTileView: View {
     let iconSize: CGFloat
 
     @State private var hovering = false
-    @State private var pressed = false
 
     private var corner: CGFloat { iconSize * 0.236 }
-    private static let snappy = Animation.spring(response: 0.26, dampingFraction: 0.90)
 
     var body: some View {
         Button(action: tile.onLaunch) {
@@ -58,25 +88,21 @@ struct FolderOverlayTileView: View {
             .padding(.top, 6)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .scaleEffect(pressed ? 0.90 : 1)
-        .offset(y: hovering ? -2 : 0)
-        .animation(Self.snappy, value: hovering)
-        .animation(Self.snappy, value: pressed)
+        .buttonStyle(TileButtonStyle(hovering: hovering))
         .onHover { hovering = $0 }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in pressed = true }
-                .onEnded { _ in pressed = false }
-        )
-        // `String` is `Transferable` out of the box (no custom wrapper
-        // type needed) — the payload is just this tile's own `id`, which
+        // `NSString` conforms to `NSItemProviderWriting`/`-Reading` out of
+        // the box — the payload is just this tile's own `id`, which
         // `FolderContentsViewController.reorderTile` uses to look up both
         // the dragged and dropped-on items' current positions.
-        .draggable(tile.id)
-        .dropDestination(for: String.self) { items, _ in
-            guard let draggedID = items.first, draggedID != tile.id else { return false }
-            tile.onReorder(draggedID)
+        .onDrag { NSItemProvider(object: tile.id as NSString) }
+        .onDrop(of: [.text], isTargeted: nil) { providers in
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: NSString.self) { reading, _ in
+                guard let draggedID = reading as? String, draggedID != tile.id else { return }
+                DispatchQueue.main.async {
+                    tile.onReorder(draggedID)
+                }
+            }
             return true
         }
         .contextMenu {
