@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import Diagnostics
 import Persistence
 import SwiftUI
 
@@ -142,7 +143,12 @@ final class FolderContentsViewController: NSViewController {
         titleShadow.shadowOffset = NSSize(width: 0, height: -2)
         titleField.shadow = titleShadow
 
-        let hosting = NSHostingView(rootView: FolderOverlayGridContent(model: gridModel, columns: columns, iconSize: CGFloat(iconSize)))
+        let hosting = NSHostingView(rootView: FolderOverlayGridContent(
+            model: gridModel,
+            columns: columns,
+            iconSize: CGFloat(iconSize),
+            onDragCancelled: { [weak self] in self?.cancelTileDrag() }
+        ))
         hosting.translatesAutoresizingMaskIntoConstraints = false
         // Defense in depth alongside the explicit widthAnchor below and the
         // forced layoutIfNeeded() calls in refresh() — never let SwiftUI's
@@ -282,9 +288,9 @@ final class FolderContentsViewController: NSViewController {
                     self.onItemDraggedOut(entry.page, entry.index)
                     self.refresh()
                 },
-                onReorder: { [weak self] draggedID in
-                    self?.reorderTile(draggedID: draggedID, droppedOnID: tileID)
-                }
+                onDragStart: { [weak self] in self?.beginTileDrag(id: tileID) },
+                onDragHoverEntered: { [weak self] in self?.hoverTileDrag(targetID: tileID) },
+                onDropCommit: { [weak self] in self?.commitTileDrag() ?? false }
             ))
             if cachedIcon == nil {
                 Task { @MainActor [weak self] in
@@ -316,41 +322,132 @@ final class FolderContentsViewController: NSViewController {
         view.window?.layoutIfNeeded()
     }
 
-    /// Real, confirmed report ("フォルダ内だとアプリの並び替えができな
-    /// い"): backs `FolderOverlayTile.onReorder`, called when
-    /// `draggedID` is dropped onto the tile identified by `droppedOnID`.
-    /// A plain "insert at the dropped-on tile's current position" — no
-    /// pixel-level insertion-point indicator (unlike the main grid's
-    /// `ItemDragSession`), matching the smaller stakes of a folder's
-    /// contents. Scoped to a single folder page — a drag across the
-    /// boundary of `gridSettings.folderGridSize` (rare; most folders never
-    /// fill even one page) silently no-ops rather than guessing how the
-    /// two pages' capacities should absorb the move.
-    private func reorderTile(draggedID: String, droppedOnID: String) {
-        guard draggedID != droppedOnID,
-              let from = flattenedItems.first(where: { tileID(for: $0.item) == draggedID }),
-              let to = flattenedItems.first(where: { tileID(for: $0.item) == droppedOnID }),
-              from.page == to.page
+    /// Real, confirmed report ("フォルダ内のアプリ移動が違和感がある...
+    /// 下にある実装からそのまま持ってきて"): a plain drop-to-reorder
+    /// (the previous, already-shipped implementation) landed correctly in
+    /// the model but gave no feedback *while* dragging — unlike the main
+    /// grid's `ItemDragSession`, where other icons visibly shift out of the
+    /// way in real time. These four methods split "model" from "live
+    /// preview" the same way `ItemDragSession` does: `model`/`layout.json`
+    /// is touched exactly once, in `commitTileDrag()`, when a drop actually
+    /// lands — never during hover. `gridModel.tiles` (the SwiftUI-visible
+    /// array) is the live-preview surface instead: `hoverTileDrag` reorders
+    /// *only* that array, under animation, as the drag passes over other
+    /// tiles. Because the real model is never touched mid-drag, a cancelled
+    /// drag reconciles for free — `cancelTileDrag()` just calls the
+    /// existing `refresh()`, which rebuilds `gridModel.tiles` from
+    /// `model.folders[folderID]`, untouched throughout.
+    private static let tileDragHoverSpring = Animation.spring(response: 0.30, dampingFraction: 0.85)
+
+    private func beginTileDrag(id: String) {
+        gridModel.draggingID = id
+        armFolderDragSafetyNet()
+    }
+
+    /// Live preview only — never touches `model`/`flattenedItems` (the real,
+    /// persisted order). Matches the same same-page restriction the
+    /// original drop-to-reorder already enforced: a tile whose real home
+    /// page differs from the dragged tile's real home page is never a valid
+    /// preview target.
+    private func hoverTileDrag(targetID: String) {
+        guard let draggedID = gridModel.draggingID, draggedID != targetID,
+              isSamePage(draggedID, targetID),
+              let fromIndex = gridModel.tiles.firstIndex(where: { $0.id == draggedID }),
+              let toIndex = gridModel.tiles.firstIndex(where: { $0.id == targetID })
         else { return }
-        model.moveItemWithinFolder(folderID, page: from.page, fromIndex: from.index, toIndex: to.index)
+        withAnimation(Self.tileDragHoverSpring) {
+            gridModel.tiles.insert(gridModel.tiles.remove(at: fromIndex), at: toIndex)
+        }
+    }
+
+    /// Fires from *any* tile's drop — deliberately doesn't care which tile
+    /// the drop physically landed on; wherever the live preview above has
+    /// already moved `draggingID` to IS the final position to persist.
+    @discardableResult
+    private func commitTileDrag() -> Bool {
+        defer { gridModel.draggingID = nil; disarmFolderDragSafetyNet() }
+        guard let draggedID = gridModel.draggingID,
+              let from = flattenedItems.first(where: { tileID(for: $0.item) == draggedID }),
+              let toIndex = pageLocalIndex(ofTileID: draggedID, page: from.page),
+              toIndex != from.index
+        else {
+            cancelTileDrag()
+            return false
+        }
+        model.moveItemWithinFolder(folderID, page: from.page, fromIndex: from.index, toIndex: toIndex)
         Task { await model.save() }
-        // Real, confirmed report ("フォルダ内のアプリ移動が違和感がある"):
-        // without an active animation transaction, `gridModel.tiles = tiles`
-        // below is an instant hard cut — the dropped tile and everything
-        // between its old and new position teleport into place in the same
-        // frame, with no sense of anything actually having moved. Wrapping
-        // just this reorder-triggered refresh (not every refresh() call —
-        // icon-arrival updates elsewhere shouldn't animate the whole grid)
-        // lets `LazyVGrid`'s own `ForEach(model.tiles)` reflow the affected
-        // tiles into their new positions, since `FolderOverlayTile` is
-        // `Identifiable` by a stable id that survives the reorder.
         withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
             refresh()
         }
+        return true
+    }
+
+    /// Reconciliation path for a drag that ends without a valid drop
+    /// (dragged out of the grid entirely, or the residual gap neither
+    /// `DropDelegate` callback covers — see `armFolderDragSafetyNet`'s doc
+    /// comment). Since the live preview above never touched `model`,
+    /// rebuilding `gridModel.tiles` from it via the existing `refresh()` is
+    /// always correct, regardless of how far the preview drifted.
+    private func cancelTileDrag() {
+        guard gridModel.draggingID != nil else { return }
+        gridModel.draggingID = nil
+        disarmFolderDragSafetyNet()
+        withAnimation(Self.tileDragHoverSpring) {
+            refresh()
+        }
+    }
+
+    private func isSamePage(_ idA: String, _ idB: String) -> Bool {
+        guard let a = flattenedItems.first(where: { tileID(for: $0.item) == idA }),
+              let b = flattenedItems.first(where: { tileID(for: $0.item) == idB })
+        else { return false }
+        return a.page == b.page
+    }
+
+    /// `id`'s current index within the live-preview order (`gridModel.tiles`),
+    /// restricted to just the tiles that really belong to `page` — the
+    /// correct `toIndex` for `moveItemWithinFolder`'s single-page semantics
+    /// (that API expects an index within `folder.pages[page]`, not a global
+    /// flat index across every page the panel happens to display together).
+    private func pageLocalIndex(ofTileID id: String, page: Int) -> Int? {
+        let idsOnPage = Set(flattenedItems.filter { $0.page == page }.compactMap { tileID(for: $0.item) })
+        return gridModel.tiles.map(\.id).filter(idsOnPage.contains).firstIndex(of: id)
     }
 
     private func tileID(for item: LayoutItem) -> String? {
         guard case .app(let id) = item, let record = model.record(for: id) else { return nil }
         return record.iconCacheKey
+    }
+
+    // MARK: - Drag safety net
+
+    private var folderDragGlobalMouseUpMonitor: Any?
+
+    /// Mirrors `GridViewController`'s own established `itemDragGlobalMouseUpMonitor`
+    /// pattern for the same reason it exists there: `DropDelegate` has no
+    /// callback for "the drag ended and nothing was ever dropped anywhere"
+    /// — `FolderGridOuterDropDelegate.dropExited` catches leaving the grid
+    /// entirely, but Escape (or any other path where the drag session ends
+    /// while still hovering *inside* the grid, over empty space rather than
+    /// a tile) isn't covered by any `DropDelegate` callback at all.
+    private func armFolderDragSafetyNet() {
+        guard folderDragGlobalMouseUpMonitor == nil else { return }
+        folderDragGlobalMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
+            // A real performDrop is delivered synchronously with the same
+            // mouseUp on the success path — this brief delay lets that win
+            // the race before assuming the drag was abandoned.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                guard let self, self.gridModel.draggingID != nil else { return }
+                DiagnosticsLog.grid.notice("folder drag: mouseUp fired with no performDrop — reconciling to persisted order")
+                self.cancelTileDrag()
+            }
+        }
+    }
+
+    private func disarmFolderDragSafetyNet() {
+        if let monitor = folderDragGlobalMouseUpMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        folderDragGlobalMouseUpMonitor = nil
     }
 }

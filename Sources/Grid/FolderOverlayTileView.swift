@@ -19,26 +19,45 @@ struct FolderOverlayTile: Identifiable {
     let onOpenNewInstance: (() -> Void)?
     let onShowInFinder: () -> Void
     let onRemoveFromFolder: () -> Void
-    /// Real, confirmed report ("フォルダ内だとアプリの並び替えができな
-    /// い"): called when another tile (identified by its own `id`) is
-    /// dropped onto this one. Uses the older `NSItemProvider`-based
-    /// `.onDrag`/`.onDrop` rather than the newer `Transferable`-based
-    /// `.draggable`/`.dropDestination` (macOS 13+) — an earlier pass used
-    /// the latter and it silently never worked in practice, confirmed by
-    /// the user after shipping. The most likely cause: this tile is a
-    /// `Button` with its own `.simultaneousGesture(DragGesture(
-    /// minimumDistance: 0))` for press feedback, and on macOS a `Button`'s
-    /// AppKit-level mouseDown tracking loop can win out over
-    /// `.draggable`'s own (newer, less AppKit-interop-tested) drag
-    /// recognizer before it ever gets a chance to start a session.
-    /// `.onDrag`/`.onDrop` predates `Transferable` by years and has a much
-    /// longer track record coexisting with AppKit-hosted SwiftUI content
-    /// specifically (this codebase's `FolderOverlayTileView` is hosted via
-    /// `NSHostingView` inside a hand-built AppKit overlay, not a native
-    /// SwiftUI `App` lifecycle) — matches the main grid's own
-    /// `ItemDragSession` in *not* being the newest-available API, for the
-    /// same practical reason.
-    let onReorder: (_ draggedID: String) -> Void
+    /// Real, confirmed report ("フォルダ内のアプリ移動が違和感がある"):
+    /// the previous single `onReorder` fired only on drop, with no live
+    /// feedback while dragging — unlike the main grid's `ItemDragSession`,
+    /// where other icons visibly shift out of the way in real time as the
+    /// dragged icon hovers near them. These three replace it, matching that
+    /// same split: `onDragStart` fires the instant a drag begins (set
+    /// synchronously inside the source tile's own `.onDrag` closure — see
+    /// `FolderOverlayGridModel.draggingID`'s doc comment for why that
+    /// timing matters), `onDragHoverEntered` fires every time the drag
+    /// enters a *different* tile's drop region (drives the live reorder
+    /// preview), and `onDropCommit` fires once, when a drop actually lands,
+    /// to persist whatever order the live preview has already settled on.
+    let onDragStart: () -> Void
+    let onDragHoverEntered: () -> Void
+    let onDropCommit: () -> Bool
+}
+
+private struct TileReorderDropDelegate: DropDelegate {
+    let onHoverEntered: () -> Void
+    let onCommit: () -> Bool
+    func dropEntered(info: DropInfo) { onHoverEntered() }
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+    func performDrop(info: DropInfo) -> Bool { onCommit() }
+}
+
+/// Wraps the whole tile grid (not any one tile) purely to catch `dropExited`
+/// when a drag leaves the reorderable area entirely without landing on any
+/// tile — the coarse "this drag is going nowhere" signal `DropDelegate`
+/// otherwise has no way to express, since neither `performDrop` nor any
+/// per-tile callback fires in that case. `FolderContentsViewController`'s
+/// own global-mouseUp safety net (mirroring the main grid's
+/// `itemDragGlobalMouseUpMonitor`) covers the residual gap this still
+/// doesn't — Escape, or the drag ending while still hovering *inside* the
+/// grid but over empty space rather than a tile.
+private struct FolderGridOuterDropDelegate: DropDelegate {
+    let onDragCancelled: () -> Void
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+    func performDrop(info: DropInfo) -> Bool { onDragCancelled(); return false }
+    func dropExited(info: DropInfo) { onDragCancelled() }
 }
 
 /// Real, confirmed report ("フォルダ内だとアプリの並び替えができない"):
@@ -68,6 +87,12 @@ private struct TileButtonStyle: ButtonStyle {
 struct FolderOverlayTileView: View {
     let tile: FolderOverlayTile
     let iconSize: CGFloat
+    /// Whether *this* tile is the one currently being dragged — passed down
+    /// from `FolderOverlayGridContent`'s `ForEach` (`tile.id ==
+    /// model.draggingID`) rather than observed here directly, matching this
+    /// view's existing "don't subscribe to more than you need" shape
+    /// (`hovering` is likewise purely local `@State`).
+    let isDragging: Bool
 
     @State private var hovering = false
 
@@ -90,21 +115,28 @@ struct FolderOverlayTileView: View {
         }
         .buttonStyle(TileButtonStyle(hovering: hovering))
         .onHover { hovering = $0 }
+        // Real, confirmed report ("フォルダ内のアプリ移動が違和感がある"):
+        // `.onDrag` already gives the dragged tile a translucent floating
+        // snapshot that follows the cursor for free (the SwiftUI analogue
+        // of the main grid's own `floatingView`) — what was missing is the
+        // *source* cell's own half of that lift: dimming/shrinking in place
+        // while its floating copy is what the user actually tracks. No new
+        // gesture is added here (still just `.opacity`/`.scaleEffect`
+        // driven by existing/new @Published state) — the earlier
+        // `.simultaneousGesture(DragGesture(minimumDistance: 0))` that once
+        // broke `.onDrag`'s own recognition is not reintroduced.
+        .opacity(isDragging ? 0.35 : 1)
+        .scaleEffect(isDragging ? 0.92 : 1)
+        .animation(tileSnappy, value: isDragging)
         // `NSString` conforms to `NSItemProviderWriting`/`-Reading` out of
         // the box — the payload is just this tile's own `id`, which
-        // `FolderContentsViewController.reorderTile` uses to look up both
-        // the dragged and dropped-on items' current positions.
-        .onDrag { NSItemProvider(object: tile.id as NSString) }
-        .onDrop(of: [.text], isTargeted: nil) { providers in
-            guard let provider = providers.first else { return false }
-            _ = provider.loadObject(ofClass: NSString.self) { reading, _ in
-                guard let draggedID = reading as? String, draggedID != tile.id else { return }
-                DispatchQueue.main.async {
-                    tile.onReorder(draggedID)
-                }
-            }
-            return true
+        // `FolderContentsViewController`'s drag callbacks use to look up
+        // both the dragged and hovered/dropped-on items' current positions.
+        .onDrag {
+            tile.onDragStart()
+            return NSItemProvider(object: tile.id as NSString)
         }
+        .onDrop(of: [.text], delegate: TileReorderDropDelegate(onHoverEntered: tile.onDragHoverEntered, onCommit: tile.onDropCommit))
         .contextMenu {
             Button { tile.onLaunch() } label: { Label(L10n.menuOpen, systemImage: "arrow.up.forward.app") }
             if let onOpenNewInstance = tile.onOpenNewInstance {
@@ -167,6 +199,14 @@ struct FolderOverlayTileView: View {
 /// side needing to know about the other's framework.
 final class FolderOverlayGridModel: ObservableObject {
     @Published var tiles: [FolderOverlayTile] = []
+    /// id of the tile currently mid-drag, or `nil` between drags. Set
+    /// synchronously inside the source tile's own `.onDrag` closure —
+    /// SwiftUI calls that closure on the main thread the instant a drag
+    /// begins, before any `DropDelegate` callback on any tile can possibly
+    /// fire, so every hover/drop callback below can just read this directly
+    /// instead of round-tripping the dragged `NSItemProvider`'s payload
+    /// asynchronously on every hover frame.
+    @Published var draggingID: String?
 }
 
 /// Adapted directly from the Tessera reference's `FolderOverlay`'s inner
@@ -181,6 +221,11 @@ struct FolderOverlayGridContent: View {
     @ObservedObject var model: FolderOverlayGridModel
     let columns: Int
     let iconSize: CGFloat
+    /// Fires when a drag leaves the grid without landing on any tile — see
+    /// `FolderGridOuterDropDelegate`'s own doc comment for why this exists
+    /// alongside (not instead of) the controller's global-mouseUp safety
+    /// net.
+    let onDragCancelled: () -> Void
 
     var body: some View {
         LazyVGrid(
@@ -188,10 +233,11 @@ struct FolderOverlayGridContent: View {
             spacing: 26
         ) {
             ForEach(model.tiles) { tile in
-                FolderOverlayTileView(tile: tile, iconSize: iconSize)
+                FolderOverlayTileView(tile: tile, iconSize: iconSize, isDragging: tile.id == model.draggingID)
             }
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 34)
+        .onDrop(of: [.text], delegate: FolderGridOuterDropDelegate(onDragCancelled: onDragCancelled))
     }
 }
