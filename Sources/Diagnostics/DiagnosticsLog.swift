@@ -14,4 +14,5 @@ public enum DiagnosticsLog {
     public static let triggers = Logger(subsystem: subsystem, category: "Triggers")
     public static let uninstall = Logger(subsystem: subsystem, category: "Uninstall")
     public static let settings = Logger(subsystem: subsystem, category: "Settings")
+    public static let whatsNew = Logger(subsystem: subsystem, category: "WhatsNew")
 }

@@ -2,10 +2,12 @@ import AppKit
 import Catalog
 import Diagnostics
 import Launcher
+import Localization
 import Onboarding
 import Persistence
 import Settings
 import Triggers
+import WhatsNew
 
 /// LaunchpadNative runs as a resident, Dock-icon-less utility (LSUIElement).
 /// When bundled as a proper `.app` this is declared via Info.plist; setting the
@@ -60,6 +62,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyCurrentTriggerSettings()
         launcherWindowController.show()
     }
+    /// Same floating-over-the-launcher mechanics as `settingsWindowController`
+    /// — see `WhatsNewWindowController`'s own doc comment for why it follows
+    /// that pattern rather than `onboardingWindowController`'s simpler one.
+    private lazy var whatsNewWindowController = WhatsNewWindowController { [weak self] in
+        self?.launcherWindowController.reclaimKeyIfVisible()
+    }
 
     /// `LAUNCHPAD_DEBUG_FORCE_ONBOARDING=1` forces the wizard for
     /// verification without needing to actually clear `OnboardingState`.
@@ -96,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             settingsWindowController.closeWithoutKeyReclaim()
             uninstallPanelWindowController.closeWithoutKeyReclaim()
+            whatsNewWindowController.closeWithoutKeyReclaim()
         }
 
         Task {
@@ -136,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 applyCurrentTriggerSettings()
                 launcherWindowController.show()
+                presentWhatsNewIfNeeded()
             }
 
             // Debug-only: drives a real search query into the launcher
@@ -337,6 +347,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await launcherWindowController.model.save() }
         }
         return report.f4Active
+    }
+
+    /// Shows the "What's New" panel once per version bump — never on a
+    /// genuine first run (this is only called from the non-onboarding
+    /// branch above; a first-time user has nothing "new" to compare
+    /// against) and never more than once per launch (this only runs from
+    /// `applicationDidFinishLaunching`, not from every subsequent
+    /// hotkey-triggered `show()`).
+    private func presentWhatsNewIfNeeded() {
+        let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        guard WhatsNewState.lastShownVersion() != currentVersion else { return }
+        whatsNewWindowController.show(
+            version: currentVersion,
+            features: [
+                WhatsNewFeature(
+                    symbolName: "square.grid.2x2.fill",
+                    title: L10n.whatsNewFeatureFolderReorderTitle,
+                    body: L10n.whatsNewFeatureFolderReorderBody
+                ),
+                WhatsNewFeature(
+                    symbolName: "hand.draw",
+                    title: L10n.whatsNewFeatureGestureConflictTitle,
+                    body: L10n.whatsNewFeatureGestureConflictBody
+                ),
+                WhatsNewFeature(
+                    symbolName: "rectangle.expand.vertical",
+                    title: L10n.whatsNewFeatureFolderFullScreenTitle,
+                    body: L10n.whatsNewFeatureFolderFullScreenBody
+                )
+            ],
+            on: launcherWindowController.currentScreen
+        )
+        WhatsNewState.markShown(version: currentVersion)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

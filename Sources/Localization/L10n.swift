@@ -202,4 +202,30 @@ public enum L10n {
     public static var searchPlaceholder: String { string("launcher.search.placeholder", "Search") }
     public static var searchAccessibilityLabel: String { string("launcher.search.accessibility", "Search applications") }
     public static var settingsButtonAccessibilityLabel: String { string("launcher.settingsbutton.accessibility", "Settings") }
+
+    // MARK: What's New
+
+    public static var whatsNewTitle: String { string("whatsnew.title", "What's New") }
+    public static func whatsNewVersionBadge(_ version: String) -> String {
+        string("whatsnew.badge", version)
+    }
+    public static var whatsNewContinueButton: String { string("whatsnew.continue", "Continue") }
+    public static var whatsNewFeatureFolderReorderTitle: String { string("whatsnew.feature.folderreorder.title", "Reorder Apps Inside Folders") }
+    public static var whatsNewFeatureFolderReorderBody: String { string("whatsnew.feature.folderreorder.body", "Drag an app onto another inside an open folder to rearrange them, just like on the main grid.") }
+    public static var whatsNewFeatureGestureConflictTitle: String { string("whatsnew.feature.gestureconflict.title", "Fewer Trackpad Conflicts") }
+    public static var whatsNewFeatureGestureConflictBody: String { string("whatsnew.feature.gestureconflict.body", "The app can now automatically prevent macOS's own trackpad gesture from competing with the launcher's.") }
+    public static var whatsNewFeatureFolderFullScreenTitle: String { string("whatsnew.feature.folderfullscreen.title", "Bigger Folder Windows") }
+    public static var whatsNewFeatureFolderFullScreenBody: String { string("whatsnew.feature.folderfullscreen.body", "Opened folders now scale to the screen, so large folders have more room to breathe.") }
+
+    // MARK: Settings — new items (Round 20)
+
+    public static var launchAtLoginToggleLabel: String { string("settings.general.launchatlogin", "Launch at Login") }
+    public static var showMenuBarIconToggleLabel: String { string("settings.general.showmenubaricon", "Show Menu Bar Icon") }
+    public static var showHiddenAppsInSearchToggleLabel: String { string("settings.apps.showhiddeninsearch", "Show Hidden Apps in Search") }
+    public static var backgroundSectionHeader: String { string("settings.screen.background", "Background") }
+    public static var backgroundModeLabel: String { string("settings.screen.background.mode", "Type") }
+    public static var backgroundModeWallpaper: String { string("settings.screen.background.wallpaper", "Wallpaper") }
+    public static var backgroundModeGlass: String { string("settings.screen.background.glass", "Glass") }
+    public static var glassMaterialLabel: String { string("settings.screen.background.material", "Glass Material") }
+    public static var blurWallpaperToggleLabel: String { string("settings.screen.background.blur", "Blur Wallpaper") }
 }
