@@ -78,22 +78,34 @@ struct FolderOverlayTileView: View {
             } else {
                 Color.white.opacity(0.08)
             }
-            shape.fill(LinearGradient(colors: [.white.opacity(0.16), .clear], startPoint: .top, endPoint: .center))
         }
         .frame(width: iconSize, height: iconSize)
         .clipShape(shape)
         .overlay(shape.strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
-        // Real, confirmed report ("フォルダの中身の枠線が消えたりまた黒色
-        // の枠が出てきて"): this shadow used to apply unconditionally, even
-        // while `tile.icon` is still nil (icons trickle in asynchronously —
-        // see `FolderContentsViewController.refresh()`) and the only thing
-        // occupying this square is a near-transparent (8% white) fill. With
-        // nothing opaque to cast it, the drop shadow alone was the most
-        // visible thing there — reading as a plain black square outline —
-        // until the real icon loaded a moment later and the shadow
-        // (correctly) receded behind it. Suppressing it while there's no
-        // real icon yet removes the phantom "black frame" without changing
-        // anything once the icon has actually loaded.
+        // Real, confirmed report ("アプリの黒背景"/"フォルダ制作のUiが
+        // ひどすぎる長方形だし...何も改善されていない"): the previous
+        // fix here (conditioning the shadow's color on `tile.icon != nil`)
+        // only addressed the not-yet-loaded case — it didn't touch the
+        // real root cause, which persisted even after the icon loaded.
+        // The removed `shape.fill(LinearGradient(...))` line used to draw
+        // a translucent highlight across the *entire* square regardless of
+        // the real icon's own alpha — real macOS app icons (Big Sur-era
+        // templates onward) commonly have a transparent margin inside
+        // their canvas, so that fill lit up the margin as if it were
+        // opaque. Combined with `.shadow()` applying independently to each
+        // ZStack primitive (no `compositingGroup()` was present), that
+        // fill layer cast its own drop shadow shaped like the *whole
+        // square*, not the icon's actual artwork — which is what read as
+        // a solid black frame around every icon, even fully loaded ones.
+        // The sibling `FolderIconView.swift` hit the identical symptom
+        // once (commit 5247ea1, user report "フォルダだけ妙にでかいし
+        // なんかアプリがない部分に影をつけるのはやめて") and fixed it by
+        // deleting the fill outright — same fix here. `compositingGroup()`
+        // is added so the retained `.shadow()` casts from the actual
+        // composited result (image + hairline stroke) instead of each
+        // ZStack layer independently, so it now hugs the real icon's
+        // shape instead of the square bounding box.
+        .compositingGroup()
         .shadow(color: tile.icon != nil ? .black.opacity(0.35) : .clear, radius: 6, y: 3)
     }
 }
