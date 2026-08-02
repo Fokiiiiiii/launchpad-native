@@ -29,174 +29,273 @@ public struct SettingsView: View {
             PanelCloseButton(action: onClose)
                 .padding(12)
         }
-        .background(.regularMaterial)
+        // Round 20: the window itself now hosts the glass card behind this
+        // content (see `SettingsWindowController`'s sibling-view pattern) —
+        // this side stays transparent so the AppKit-side glass shows
+        // through instead of a second, flatter SwiftUI material on top of
+        // it.
         .frame(width: 620, height: 600)
     }
 
     // MARK: Screen (was Grid)
 
     private var screenTab: some View {
-        Form {
-            Section {
-                Picker(L10n.layoutPickerLabel, selection: $viewModel.layoutMode) {
-                    Text(L10n.layoutModePaged).tag(LayoutMode.paged)
-                    Text(L10n.layoutModeVerticalScroll).tag(LayoutMode.verticalScroll)
-                }
-                .pickerStyle(.radioGroup)
-                .horizontalRadioGroupLayout()
-            } header: {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
                 Label(L10n.layoutPickerLabel, systemImage: "rectangle.3.group")
                     .foregroundStyle(.blue)
-            }
-
-            Section {
-                Stepper(value: $viewModel.columns, in: 3...12) {
-                    Label(L10n.columnsLabel(viewModel.columns), systemImage: "rectangle.grid.2x2")
-                }
-                Stepper(value: $viewModel.rows, in: 2...8) {
-                    Label(L10n.rowsLabel(viewModel.rows), systemImage: "rectangle.grid.1x2")
-                }
-            } header: {
-                Label(L10n.tabGrid, systemImage: "square.grid.3x3.fill")
-                    .foregroundStyle(.blue)
-            }
-
-            Section {
-                Picker(selection: $viewModel.sortMode) {
-                    Text(L10n.sortModeCustom).tag(SortMode.custom)
-                    Text(L10n.sortModeName).tag(SortMode.name)
-                    Text(L10n.sortModeDateAdded).tag(SortMode.dateAdded)
-                    Text(L10n.sortModeLastUsed).tag(SortMode.lastUsed)
-                } label: {
-                    Label(L10n.sortByLabel, systemImage: "arrow.up.arrow.down")
-                }
-                .pickerStyle(.radioGroup)
-
-                HStack {
-                    Spacer()
-                    Button {
-                        viewModel.reorganizePages()
-                    } label: {
-                        Label(L10n.reorganizeButton, systemImage: "square.grid.3x2.fill")
+                SettingsCard {
+                    SettingsCardRow {
+                        Picker(L10n.layoutPickerLabel, selection: $viewModel.layoutMode) {
+                            Text(L10n.layoutModePaged).tag(LayoutMode.paged)
+                            Text(L10n.layoutModeVerticalScroll).tag(LayoutMode.verticalScroll)
+                        }
+                        .pickerStyle(.radioGroup)
+                        .horizontalRadioGroupLayout()
+                        .labelsHidden()
                     }
                 }
 
-                Toggle(isOn: $viewModel.hideDockWhileLauncherOpen) {
-                    Label(L10n.hideDockToggleLabel, systemImage: "dock.rectangle")
+                Label(L10n.tabGrid, systemImage: "square.grid.3x3.fill")
+                    .foregroundStyle(.blue)
+                SettingsCard {
+                    SettingsCardRow {
+                        Stepper(value: $viewModel.columns, in: 3...12) {
+                            Label(L10n.columnsLabel(viewModel.columns), systemImage: "rectangle.grid.2x2")
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        Stepper(value: $viewModel.rows, in: 2...8) {
+                            Label(L10n.rowsLabel(viewModel.rows), systemImage: "rectangle.grid.1x2")
+                        }
+                    }
                 }
-            } header: {
+
                 Label(L10n.displaySectionHeader, systemImage: "macwindow.badge.plus")
                     .foregroundStyle(.blue)
+                SettingsCard {
+                    SettingsCardRow {
+                        Picker(selection: $viewModel.sortMode) {
+                            Text(L10n.sortModeCustom).tag(SortMode.custom)
+                            Text(L10n.sortModeName).tag(SortMode.name)
+                            Text(L10n.sortModeDateAdded).tag(SortMode.dateAdded)
+                            Text(L10n.sortModeLastUsed).tag(SortMode.lastUsed)
+                        } label: {
+                            Label(L10n.sortByLabel, systemImage: "arrow.up.arrow.down")
+                        }
+                        .pickerStyle(.radioGroup)
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        HStack {
+                            Spacer()
+                            Button {
+                                viewModel.reorganizePages()
+                            } label: {
+                                Label(L10n.reorganizeButton, systemImage: "square.grid.3x2.fill")
+                            }
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        Toggle(isOn: $viewModel.hideDockWhileLauncherOpen) {
+                            Label(L10n.hideDockToggleLabel, systemImage: "dock.rectangle")
+                        }
+                    }
+                }
+
+                Label(L10n.backgroundSectionHeader, systemImage: "photo.fill")
+                    .foregroundStyle(.blue)
+                SettingsCard {
+                    SettingsCardRow {
+                        Picker(selection: $viewModel.backgroundMode) {
+                            Text(L10n.backgroundModeWallpaper).tag(LauncherBackgroundMode.wallpaper)
+                            Text(L10n.backgroundModeGlass).tag(LauncherBackgroundMode.glass)
+                        } label: {
+                            Label(L10n.backgroundModeLabel, systemImage: "square.stack.3d.down.forward.fill")
+                        }
+                        .pickerStyle(.radioGroup)
+                        .horizontalRadioGroupLayout()
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(L10n.glassMaterialLabel, systemImage: "circle.lefthalf.filled")
+                            Slider(value: $viewModel.glassMaterialIntensity, in: 0...1, step: 0.05)
+                        }
+                        .disabled(viewModel.backgroundMode != .glass)
+                        .opacity(viewModel.backgroundMode == .glass ? 1 : 0.4)
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        Toggle(isOn: $viewModel.blursWallpaper) {
+                            Label(L10n.blurWallpaperToggleLabel, systemImage: "wand.and.rays")
+                        }
+                        .disabled(viewModel.backgroundMode != .wallpaper)
+                        .opacity(viewModel.backgroundMode == .wallpaper ? 1 : 0.4)
+                    }
+                }
             }
+            .padding(20)
         }
-        .formStyle(.grouped)
     }
 
     // MARK: General (was Triggers)
 
     private var generalTab: some View {
-        Form {
-            Section {
-                Toggle(isOn: $viewModel.f4Enabled) {
-                    Label(L10n.f4ToggleLabel, systemImage: "keyboard")
-                }
-                if viewModel.f4Enabled && !viewModel.f4Active {
-                    f4PermissionHint
-                }
-
-                Toggle(isOn: $viewModel.hotkeyEnabled) {
-                    Label(L10n.globalHotkeyToggleLabel, systemImage: "command")
-                }
-                if viewModel.hotkeyEnabled {
-                    HotkeyRecorderView(
-                        keyCode: $viewModel.hotkeyKeyCode,
-                        carbonModifiers: $viewModel.hotkeyCarbonModifiers,
-                        onCommit: { keyCode, modifiers in viewModel.recordHotkey(keyCode: keyCode, carbonModifiers: modifiers) }
-                    )
-                    .frame(width: 160, height: 24)
-                }
-            } header: {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
                 Label(L10n.tabTriggers, systemImage: "hand.tap.fill")
                     .foregroundStyle(.orange)
-            }
-
-            Section {
-                Toggle(isOn: $viewModel.hotCornerTopLeft) {
-                    Label(L10n.hotCornerTopLeft, systemImage: "arrow.up.left.square")
-                }
-                Toggle(isOn: $viewModel.hotCornerTopRight) {
-                    Label(L10n.hotCornerTopRight, systemImage: "arrow.up.right.square")
-                }
-                Toggle(isOn: $viewModel.hotCornerBottomLeft) {
-                    Label(L10n.hotCornerBottomLeft, systemImage: "arrow.down.left.square")
-                }
-                Toggle(isOn: $viewModel.hotCornerBottomRight) {
-                    Label(L10n.hotCornerBottomRight, systemImage: "arrow.down.right.square")
-                }
-            } header: {
-                Label(L10n.hotCornersGroupTitle, systemImage: "rectangle.inset.filled")
-                    .foregroundStyle(.orange)
-            }
-
-            Section {
-                Toggle(isOn: $viewModel.multitouchEnabled) {
-                    Label(L10n.multitouchToggleLabel, systemImage: "hand.draw")
-                }
-                Picker(selection: $viewModel.multitouchFingerCount) {
-                    Text(L10n.fingerCountFour).tag(4)
-                    Text(L10n.fingerCountFive).tag(5)
-                } label: {
-                    Label(L10n.fingerCountLabel, systemImage: "hand.raised.fingers.spread")
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(L10n.sensitivityLabel, systemImage: "dial.medium")
-                    Slider(value: $viewModel.multitouchSensitivity, in: 0.3...0.8)
-                        .accessibilityLabel(L10n.gestureSensitivityAccessibilityLabel)
-                }
-                if viewModel.multitouchEnabled {
-                    Toggle(isOn: $viewModel.gestureConflictPreventionEnabled) {
-                        Label(L10n.gestureConflictPreventionToggleLabel, systemImage: "shield.lefthalf.filled")
+                SettingsCard {
+                    SettingsCardRow {
+                        Toggle(isOn: $viewModel.launchAtLoginEnabled) {
+                            Label(L10n.launchAtLoginToggleLabel, systemImage: "power")
+                        }
                     }
-                    gestureConflictHint
-                }
-            } header: {
-                Label(L10n.trackpadGestureGroupTitle, systemImage: "hand.point.up.braille")
-                    .foregroundStyle(.orange)
-            }
-
-            Section {
-                HStack(spacing: 16) {
-                    ForEach(AppIconStyle.allCases, id: \.self) { style in
-                        Button {
-                            viewModel.appIconStyle = style
-                        } label: {
-                            VStack(spacing: 6) {
-                                Image(nsImage: AppIconStyleApplier.previewImage(for: style) ?? NSImage())
-                                    .resizable()
-                                    .frame(width: 48, height: 48)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .strokeBorder(viewModel.appIconStyle == style ? Color.accentColor : .clear, lineWidth: 2)
-                                    )
-                                Text(displayName(for: style))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle(isOn: $viewModel.f4Enabled) {
+                                Label(L10n.f4ToggleLabel, systemImage: "keyboard")
+                            }
+                            if viewModel.f4Enabled && !viewModel.f4Active {
+                                f4PermissionHint
                             }
                         }
-                        .buttonStyle(.plain)
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle(isOn: $viewModel.hotkeyEnabled) {
+                                Label(L10n.globalHotkeyToggleLabel, systemImage: "command")
+                            }
+                            if viewModel.hotkeyEnabled {
+                                HotkeyRecorderView(
+                                    keyCode: $viewModel.hotkeyKeyCode,
+                                    carbonModifiers: $viewModel.hotkeyCarbonModifiers,
+                                    onCommit: { keyCode, modifiers in viewModel.recordHotkey(keyCode: keyCode, carbonModifiers: modifiers) }
+                                )
+                                .frame(width: 160, height: 24)
+                            }
+                        }
                     }
                 }
-                Text(L10n.appIconLimitedEffectNotice)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } header: {
+
+                Label(L10n.hotCornersGroupTitle, systemImage: "rectangle.inset.filled")
+                    .foregroundStyle(.orange)
+                SettingsCard {
+                    SettingsCardRow {
+                        Toggle(isOn: $viewModel.hotCornerTopLeft) {
+                            Label(L10n.hotCornerTopLeft, systemImage: "arrow.up.left.square")
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        Toggle(isOn: $viewModel.hotCornerTopRight) {
+                            Label(L10n.hotCornerTopRight, systemImage: "arrow.up.right.square")
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        Toggle(isOn: $viewModel.hotCornerBottomLeft) {
+                            Label(L10n.hotCornerBottomLeft, systemImage: "arrow.down.left.square")
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        Toggle(isOn: $viewModel.hotCornerBottomRight) {
+                            Label(L10n.hotCornerBottomRight, systemImage: "arrow.down.right.square")
+                        }
+                    }
+                }
+
+                Label(L10n.trackpadGestureGroupTitle, systemImage: "hand.point.up.braille")
+                    .foregroundStyle(.orange)
+                SettingsCard {
+                    SettingsCardRow {
+                        Toggle(isOn: $viewModel.multitouchEnabled) {
+                            Label(L10n.multitouchToggleLabel, systemImage: "hand.draw")
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        Picker(selection: $viewModel.multitouchFingerCount) {
+                            Text(L10n.fingerCountFour).tag(4)
+                            Text(L10n.fingerCountFive).tag(5)
+                        } label: {
+                            Label(L10n.fingerCountLabel, systemImage: "hand.raised.fingers.spread")
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(L10n.sensitivityLabel, systemImage: "dial.medium")
+                            Slider(value: $viewModel.multitouchSensitivity, in: 0.3...0.8)
+                                .accessibilityLabel(L10n.gestureSensitivityAccessibilityLabel)
+                        }
+                    }
+                    if viewModel.multitouchEnabled {
+                        SettingsCardDivider()
+                        SettingsCardRow {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Toggle(isOn: $viewModel.gestureConflictPreventionEnabled) {
+                                    Label(L10n.gestureConflictPreventionToggleLabel, systemImage: "shield.lefthalf.filled")
+                                }
+                                gestureConflictHint
+                            }
+                        }
+                    }
+                }
+
+                Label(L10n.appearanceSectionHeader, systemImage: "eye.fill")
+                    .foregroundStyle(.orange)
+                SettingsCard {
+                    SettingsCardRow {
+                        Toggle(isOn: $viewModel.showsMenuBarIcon) {
+                            Label(L10n.showMenuBarIconToggleLabel, systemImage: "menubar.rectangle")
+                        }
+                    }
+                }
+
                 Label(L10n.appIconSectionHeader, systemImage: "app.badge")
                     .foregroundStyle(.purple)
+                SettingsCard {
+                    SettingsCardRow {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 16) {
+                                ForEach(AppIconStyle.allCases, id: \.self) { style in
+                                    Button {
+                                        viewModel.appIconStyle = style
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            Image(nsImage: AppIconStyleApplier.previewImage(for: style) ?? NSImage())
+                                                .resizable()
+                                                .frame(width: 48, height: 48)
+                                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 10)
+                                                        .strokeBorder(viewModel.appIconStyle == style ? Color.accentColor : .clear, lineWidth: 2)
+                                                )
+                                            Text(displayName(for: style))
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            Text(L10n.appIconLimitedEffectNotice)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
             }
+            .padding(20)
         }
-        .formStyle(.grouped)
     }
 
     private func displayName(for style: AppIconStyle) -> String {
@@ -261,72 +360,93 @@ public struct SettingsView: View {
     // MARK: Sources
 
     private var sourcesTab: some View {
-        Form {
-            Section {
-                if viewModel.customSources.isEmpty {
-                    Text(L10n.chooseFolderPanelMessage)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.customSources, id: \.id) { source in
-                        HStack {
-                            Label {
-                                Text(source.rootPath)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            } icon: {
-                                Image(systemName: "folder.fill")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                Label(L10n.tabSources, systemImage: "folder.fill.badge.plus")
+                    .foregroundStyle(.green)
+                SettingsCard {
+                    if viewModel.customSources.isEmpty {
+                        SettingsCardRow {
+                            Text(L10n.chooseFolderPanelMessage)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        ForEach(Array(viewModel.customSources.enumerated()), id: \.element.id) { index, source in
+                            if index > 0 { SettingsCardDivider() }
+                            SettingsCardRow {
+                                HStack {
+                                    Label {
+                                        Text(source.rootPath)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    } icon: {
+                                        Image(systemName: "folder.fill")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Button(role: .destructive) {
+                                        viewModel.removeCustomSource(id: source.id)
+                                    } label: {
+                                        Image(systemName: "minus.circle.fill")
+                                    }
+                                    .buttonStyle(.plain)
                                     .foregroundStyle(.secondary)
+                                }
                             }
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        HStack {
                             Spacer()
-                            Button(role: .destructive) {
-                                viewModel.removeCustomSource(id: source.id)
+                            Button {
+                                addFolder()
                             } label: {
-                                Image(systemName: "minus.circle.fill")
+                                Label(L10n.addFolderButton, systemImage: "plus.circle.fill")
                             }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
                         }
                     }
                 }
-                HStack {
-                    Spacer()
-                    Button {
-                        addFolder()
-                    } label: {
-                        Label(L10n.addFolderButton, systemImage: "plus.circle.fill")
-                    }
-                }
-            } header: {
-                Label(L10n.tabSources, systemImage: "folder.fill.badge.plus")
-                    .foregroundStyle(.green)
             }
+            .padding(20)
         }
-        .formStyle(.grouped)
     }
 
     // MARK: Apps (was Hidden)
 
     private var appsTab: some View {
-        Form {
-            Section {
-                if viewModel.hiddenApps.isEmpty {
-                    Text(L10n.noHiddenAppsMessage)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.hiddenApps, id: \.identifier) { entry in
-                        HStack {
-                            Label(entry.name, systemImage: "eye.slash.fill")
-                            Spacer()
-                            Button(L10n.unhideButton) { viewModel.unhide(entry.identifier) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                Label(L10n.tabHidden, systemImage: "eye.slash.circle.fill")
+                    .foregroundStyle(.gray)
+                SettingsCard {
+                    if viewModel.hiddenApps.isEmpty {
+                        SettingsCardRow {
+                            Text(L10n.noHiddenAppsMessage)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        ForEach(Array(viewModel.hiddenApps.enumerated()), id: \.element.identifier) { index, entry in
+                            if index > 0 { SettingsCardDivider() }
+                            SettingsCardRow {
+                                HStack {
+                                    Label(entry.name, systemImage: "eye.slash.fill")
+                                    Spacer()
+                                    Button(L10n.unhideButton) { viewModel.unhide(entry.identifier) }
+                                }
+                            }
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow {
+                        Toggle(isOn: $viewModel.showsHiddenAppsInSearch) {
+                            Label(L10n.showHiddenAppsInSearchToggleLabel, systemImage: "magnifyingglass")
                         }
                     }
                 }
-            } header: {
-                Label(L10n.tabHidden, systemImage: "eye.slash.circle.fill")
-                    .foregroundStyle(.gray)
             }
+            .padding(20)
         }
-        .formStyle(.grouped)
     }
 
     // MARK: Advanced (Sources only — the Uninstall feature that used to

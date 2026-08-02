@@ -99,7 +99,42 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         viewModel.refreshF4Status()
         self.viewModel = viewModel
         let hosting = NSHostingController(rootView: SettingsView(viewModel: viewModel, onClose: { [weak self] in self?.close() }))
-        let window = DismissableWindow(contentViewController: hosting)
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+
+        // Round 20: real glass-card chrome behind the SwiftUI content,
+        // matching the reference — same `root`/`background`/`hosting.view`
+        // sibling pattern `LauncherWindow.swift` already establishes
+        // (`makeWindow(on:)`, lines ~447-481). Reuses `Grid`'s own
+        // `makeFolderCardBackground` recipe (already value-matched to the
+        // reference's small-card material) rather than inventing a second
+        // one — `Settings` already depends on `Grid` per `Package.swift`.
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 600))
+        let background = GlassBackgroundHelper.makeFolderCardBackground(
+            cornerRadius: 12,
+            tint: NSColor(srgbRed: 28 / 255, green: 28 / 255, blue: 30 / 255, alpha: 0.86),
+            borderAlpha: 0.12,
+            shadowOpacity: 0.66,
+            shadowRadius: 50,
+            shadowOffset: CGSize(width: 0, height: -27)
+        )
+        background.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(background)
+        root.addSubview(hosting.view)
+        NSLayoutConstraint.activate([
+            background.topAnchor.constraint(equalTo: root.topAnchor),
+            background.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            background.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            hosting.view.topAnchor.constraint(equalTo: root.topAnchor),
+            hosting.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+        ])
+
+        let containerController = NSViewController()
+        containerController.view = root
+
+        let window = DismissableWindow(contentViewController: containerController)
         window.onCancel = { [weak self] in self?.close() }
         // Round 13 §A: no native chrome at all — matches the reference
         // design's borderless floating-card look. `.titled` is kept (not
@@ -116,6 +151,13 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
         window.isMovableByWindowBackground = true
+        // Round 20: the glass card itself now draws the window's visible
+        // shape/shadow — the window frame must be transparent/shadowless
+        // so it doesn't composite a second, square, opaque layer behind
+        // the rounded card (same trio `LauncherWindow.swift` already uses).
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
         window.setContentSize(NSSize(width: 620, height: 600))
         window.isReleasedWhenClosed = false
         window.delegate = self

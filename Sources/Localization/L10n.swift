@@ -220,6 +220,7 @@ public enum L10n {
     // MARK: Settings — new items (Round 20)
 
     public static var launchAtLoginToggleLabel: String { string("settings.general.launchatlogin", "Launch at Login") }
+    public static var appearanceSectionHeader: String { string("settings.general.appearance", "Appearance") }
     public static var showMenuBarIconToggleLabel: String { string("settings.general.showmenubaricon", "Show Menu Bar Icon") }
     public static var showHiddenAppsInSearchToggleLabel: String { string("settings.apps.showhiddeninsearch", "Show Hidden Apps in Search") }
     public static var backgroundSectionHeader: String { string("settings.screen.background", "Background") }
