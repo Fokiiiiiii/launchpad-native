@@ -155,6 +155,21 @@ final class FolderContentsViewController: NSViewController {
         scrollView.documentView = hosting
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
+        // Real, confirmed report ("フォルダの中身の枠線が消えたりまた
+        // 黒色の枠が出てきて"): neither `scrollerStyle` nor `borderType`
+        // was ever set explicitly, so both silently followed the system's
+        // own settings. With "always show scrollbars" enabled, `.legacy`
+        // draws a persistent tracked scroller whose dark track reads as a
+        // stray border against this panel's own blurred/dimmed backdrop;
+        // even under "show on scroll," the fade in/out as content height
+        // crosses the 480pt cap in `updatePreferredContentSize` looks like
+        // a border flickering in and out. Forcing `.overlay` makes the
+        // scroller a thin, content-hugging indicator that only appears
+        // during an actual scroll gesture and fades away immediately after,
+        // regardless of the user's system setting. `borderType` is made
+        // explicit too, closing the same kind of implicit-default gap.
+        scrollView.scrollerStyle = .overlay
+        scrollView.borderType = .noBorder
 
         root.addSubview(titleField)
         root.addSubview(scrollView)

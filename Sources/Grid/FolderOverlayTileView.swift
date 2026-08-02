@@ -83,7 +83,18 @@ struct FolderOverlayTileView: View {
         .frame(width: iconSize, height: iconSize)
         .clipShape(shape)
         .overlay(shape.strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
+        // Real, confirmed report ("フォルダの中身の枠線が消えたりまた黒色
+        // の枠が出てきて"): this shadow used to apply unconditionally, even
+        // while `tile.icon` is still nil (icons trickle in asynchronously —
+        // see `FolderContentsViewController.refresh()`) and the only thing
+        // occupying this square is a near-transparent (8% white) fill. With
+        // nothing opaque to cast it, the drop shadow alone was the most
+        // visible thing there — reading as a plain black square outline —
+        // until the real icon loaded a moment later and the shadow
+        // (correctly) receded behind it. Suppressing it while there's no
+        // real icon yet removes the phantom "black frame" without changing
+        // anything once the icon has actually loaded.
+        .shadow(color: tile.icon != nil ? .black.opacity(0.35) : .clear, radius: 6, y: 3)
     }
 }
 
