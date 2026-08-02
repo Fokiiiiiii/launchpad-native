@@ -171,9 +171,32 @@ final class FolderContentsViewController: NSViewController {
         scrollView.scrollerStyle = .overlay
         scrollView.borderType = .noBorder
 
+        // Light, barely-tinted frosted-glass card background — a decorative
+        // sibling behind the grid only (not the title, which floats
+        // directly on the backdrop above it — see the constraint below).
+        // Real, confirmed report ("フォルダの背景を再度表示させて"): this
+        // was removed in an earlier pass under the mistaken belief it was
+        // the "black background" a prior report meant; see
+        // `GlassBackgroundHelper.makeFolderCardBackground`'s doc comment.
+        let background = GlassBackgroundHelper.makeFolderCardBackground(cornerRadius: 34)
+        background.translatesAutoresizingMaskIntoConstraints = false
+
+        root.addSubview(background)
         root.addSubview(titleField)
         root.addSubview(scrollView)
         NSLayoutConstraint.activate([
+            // The reference applies the card background *only* to the
+            // grid, matching `scrollView`'s own bounds exactly — the title
+            // above it floats directly on the backdrop with no card behind
+            // it. Pinning `background` to `root`'s full bounds instead put
+            // the title *inside* the same boxed card as the grid, a real,
+            // confirmed regression ("その他の文字が枠内にはいてるのが気
+            // になる") from an earlier pass.
+            background.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            background.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            background.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+
             titleField.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
             titleField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             titleField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
