@@ -1,43 +1,87 @@
+import AppKit
 import SwiftUI
 
-/// Round 20: replaces `.formStyle(.grouped)`'s native System-Settings-style
-/// look with the Tessera reference's own section-card styling
-/// (`SettingsWindowView.swift`'s HTML cross-check: section background
-/// `rgba(255,255,255,.055)`, `1px solid rgba(255,255,255,.06)` border,
-/// `10px` corner radius, `46pt` row height, inter-row divider inset
-/// `13pt`) — macOS's `Form`/`Section` APIs have no public way to restyle a
-/// section's own background/corner radius, so this is a plain `VStack`
-/// standing in for `Section`'s *container*, while every `Toggle`/`Picker`/
-/// `Stepper`/`Slider` already inside each tab is unchanged (only the
-/// surrounding markup moved from `Form { Section { ... } }` to
-/// `SettingsCard { SettingsCardRow { ... } }`).
+/// A restrained hierarchy layer above the window's native Liquid Glass.
 struct SettingsCard<Content: View>: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var colorScheme
+
     @ViewBuilder var content: () -> Content
+
+    private var fill: Color {
+        if reduceTransparency {
+            return Color(nsColor: .windowBackgroundColor)
+        }
+        return Color.white.opacity(colorScheme == .dark ? 0.055 : 0.34)
+    }
+
+    private var border: Color {
+        Color.white.opacity(colorScheme == .dark ? 0.06 : 0.42)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             content()
         }
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                .strokeBorder(border, lineWidth: 1)
         )
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+struct SettingsSectionHeader: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+
+    init(_ title: String, systemImage: String, tint: Color) {
+        self.title = title
+        self.systemImage = systemImage
+        self.tint = tint
+    }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: systemImage)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 16, height: 16)
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 2)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
 struct SettingsCardRow<Content: View>: View {
+    @ScaledMetric(relativeTo: .body) private var scaledMinHeight: CGFloat = 40
     @ViewBuilder var content: () -> Content
+
+    init(minHeight: CGFloat = 40, @ViewBuilder content: @escaping () -> Content) {
+        _scaledMinHeight = ScaledMetric(wrappedValue: minHeight, relativeTo: .body)
+        self.content = content
+    }
 
     var body: some View {
         content()
-            .padding(.horizontal, 13)
-            .frame(minHeight: 46, alignment: .leading)
+            .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity, minHeight: scaledMinHeight, alignment: .leading)
+            .toggleStyle(.switch)
     }
 }
 
 struct SettingsCardDivider: View {
     var body: some View {
-        Divider().padding(.leading, 13)
+        Divider()
+            .opacity(0.55)
+            .padding(.horizontal, 11)
     }
 }

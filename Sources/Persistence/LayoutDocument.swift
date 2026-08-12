@@ -94,6 +94,10 @@ public struct GridSettings: Codable, Sendable, Hashable {
     public var pageMargins: Double
     public var folderGridSize: Int
     public var sortMode: SortMode
+    /// Multiplier applied to the icon's computed cell ceiling. Kept in the
+    /// persisted grid settings so icon-size choices survive relaunches without
+    /// changing the page-capacity reflow model.
+    public var iconScale: Double
 
     public init(
         columns: Int,
@@ -104,7 +108,8 @@ public struct GridSettings: Codable, Sendable, Hashable {
         labelLineCount: Int,
         pageMargins: Double,
         folderGridSize: Int,
-        sortMode: SortMode = .custom
+        sortMode: SortMode = .custom,
+        iconScale: Double = 1.0
     ) {
         self.columns = columns
         self.rows = rows
@@ -115,10 +120,11 @@ public struct GridSettings: Codable, Sendable, Hashable {
         self.pageMargins = pageMargins
         self.folderGridSize = folderGridSize
         self.sortMode = sortMode
+        self.iconScale = iconScale
     }
 
     private enum CodingKeys: String, CodingKey {
-        case columns, rows, horizontalSpacing, verticalSpacing, labelVisible, labelLineCount, pageMargins, folderGridSize, sortMode
+        case columns, rows, horizontalSpacing, verticalSpacing, labelVisible, labelLineCount, pageMargins, folderGridSize, sortMode, iconScale
     }
 
     public init(from decoder: Decoder) throws {
@@ -132,18 +138,20 @@ public struct GridSettings: Codable, Sendable, Hashable {
         pageMargins = try container.decode(Double.self, forKey: .pageMargins)
         folderGridSize = try container.decode(Int.self, forKey: .folderGridSize)
         sortMode = try container.decodeIfPresent(SortMode.self, forKey: .sortMode) ?? .custom
+        iconScale = try container.decodeIfPresent(Double.self, forKey: .iconScale) ?? 1.05
     }
 
     public static let `default` = GridSettings(
         columns: 7,
         rows: 5,
         horizontalSpacing: 24,
-        verticalSpacing: 32,
+        verticalSpacing: 24,
         labelVisible: true,
         labelLineCount: 2,
-        pageMargins: 48,
+        pageMargins: 40,
         folderGridSize: 9,
-        sortMode: .custom
+        sortMode: .custom,
+        iconScale: 1.05
     )
 }
 
@@ -184,19 +192,113 @@ public struct CustomSourceConfig: Codable, Sendable, Hashable {
 /// `layout.json` missing that key.
 /// A snapshot of what this app overwrote in another app's own trackpad
 /// preference domains (`com.apple.AppleMultitouchTrackpad`/
-/// `com.apple.driver.AppleBluetoothMultitouch.trackpad`) to disable a
-/// conflicting system pinch gesture — see `Triggers.ConflictingGestureManager`.
+/// `com.apple.driver.AppleBluetoothMultitouch.trackpad`) and the related Dock
+    /// preferences to disable conflicting system gestures — see
+/// `Triggers.ConflictingGestureManager`.
 /// `values`' entries being `nil` (i.e. the dictionary's optional Int value,
 /// not a missing key) means "this domain didn't have the key set at all
 /// before" — distinct from `0` ("existed, was already off") — so restoring
 /// can put back the exact prior state rather than assuming a default.
 public struct GestureConflictBackup: Codable, Sendable, Equatable {
+    /// The finger count that was selected when the restore point was made.
+    /// Kept for compatibility with documents written before both pinch keys
+    /// were managed together.
     public var fingerCount: Int
+    /// Legacy per-domain values for `fingerCount`.  New restore points also
+    /// populate `valuesByFingerCount`; retaining this field keeps older
+    /// callers and on-disk documents source-compatible.
     public var values: [String: Int?]
+    /// Exact pre-change values for both supported system pinch keys.  The
+    /// outer key is the finger count (4 or 5), and the inner key is one of
+    /// `ConflictingGestureManager.domains`.
+    public var valuesByFingerCount: [Int: [String: Int?]]?
+    /// The Dock preference that controls macOS Launchpad's own pinch action.
+    /// This is kept separate from the per-finger trackpad map because it is a
+    /// different domain and may be absent (nil) before the user ever changed
+    /// the setting.
+    public var launchpadGestureValue: Int?
+    public var launchpadGestureWasPresent: Bool
+    /// False for legacy backups written before the Dock key was part of the
+    /// transaction. This distinguishes "captured and originally absent" from
+    /// "not captured at all" so restoring an old backup never deletes a key it
+    /// did not own.
+    public var launchpadGestureCaptured: Bool
+    /// Exact values for the four/five-finger navigation keys that can compete
+    /// with the app's trackpad gesture. The outer key is the preference key;
+    /// the inner key is one of `ConflictingGestureManager.domains`.
+    public var trackpadGestureValues: [String: [String: Int?]]?
+    /// Dock gesture values managed in the same reversible transaction.
+    /// `dockGesturesCaptured` distinguishes a new snapshot (where nil means
+    /// "absent") from older backups that never owned these keys.
+    public var dockGestureValues: [String: Int?]?
+    public var dockGesturesCaptured: Bool
 
-    public init(fingerCount: Int, values: [String: Int?]) {
+    public init(
+        fingerCount: Int,
+        values: [String: Int?],
+        valuesByFingerCount: [Int: [String: Int?]]? = nil,
+        launchpadGestureValue: Int? = nil,
+        launchpadGestureWasPresent: Bool = false,
+        launchpadGestureCaptured: Bool = false,
+        trackpadGestureValues: [String: [String: Int?]]? = nil,
+        dockGestureValues: [String: Int?]? = nil,
+        dockGesturesCaptured: Bool = false
+    ) {
         self.fingerCount = fingerCount
         self.values = values
+        self.valuesByFingerCount = valuesByFingerCount
+        self.launchpadGestureValue = launchpadGestureValue
+        self.launchpadGestureWasPresent = launchpadGestureWasPresent
+        self.launchpadGestureCaptured = launchpadGestureCaptured
+        self.trackpadGestureValues = trackpadGestureValues
+        self.dockGestureValues = dockGestureValues
+        self.dockGesturesCaptured = dockGesturesCaptured
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fingerCount, values, valuesByFingerCount, launchpadGestureValue, launchpadGestureWasPresent, launchpadGestureCaptured, trackpadGestureValues, dockGestureValues, dockGesturesCaptured
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fingerCount = try container.decode(Int.self, forKey: .fingerCount)
+        values = try container.decode([String: Int?].self, forKey: .values)
+        valuesByFingerCount = try container.decodeIfPresent(
+            [Int: [String: Int?]].self,
+            forKey: .valuesByFingerCount
+        )
+        launchpadGestureValue = try container.decodeIfPresent(Int.self, forKey: .launchpadGestureValue)
+        launchpadGestureWasPresent = try container.decodeIfPresent(Bool.self, forKey: .launchpadGestureWasPresent)
+            ?? container.contains(.launchpadGestureValue)
+        launchpadGestureCaptured = try container.decodeIfPresent(Bool.self, forKey: .launchpadGestureCaptured)
+            ?? container.contains(.launchpadGestureValue)
+        trackpadGestureValues = try container.decodeIfPresent(
+            [String: [String: Int?]].self,
+            forKey: .trackpadGestureValues
+        )
+        dockGestureValues = try container.decodeIfPresent([String: Int?].self, forKey: .dockGestureValues)
+        dockGesturesCaptured = try container.decodeIfPresent(Bool.self, forKey: .dockGesturesCaptured) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fingerCount, forKey: .fingerCount)
+        try container.encode(values, forKey: .values)
+        try container.encodeIfPresent(valuesByFingerCount, forKey: .valuesByFingerCount)
+        if launchpadGestureCaptured {
+            try container.encode(true, forKey: .launchpadGestureCaptured)
+            try container.encode(launchpadGestureWasPresent, forKey: .launchpadGestureWasPresent)
+            if let launchpadGestureValue {
+                try container.encode(launchpadGestureValue, forKey: .launchpadGestureValue)
+            } else {
+                try container.encodeNil(forKey: .launchpadGestureValue)
+            }
+        }
+        try container.encodeIfPresent(trackpadGestureValues, forKey: .trackpadGestureValues)
+        if dockGesturesCaptured {
+            try container.encode(true, forKey: .dockGesturesCaptured)
+            try container.encodeIfPresent(dockGestureValues, forKey: .dockGestureValues)
+        }
     }
 }
 
@@ -208,15 +310,13 @@ public struct TriggerSettings: Codable, Sendable, Equatable {
     public var f4Enabled: Bool
     public var multitouchGestureEnabled: Bool
     public var multitouchSensitivity: Double
-    /// 4 or 5 — Settings only offers those two (3-finger was dropped as a
-    /// selectable option per explicit user request; see
-    /// `PinchGestureRecognizer`'s doc comment for the history).
+    /// Selected Launchpad finger count. The sibling count remains available to
+    /// macOS, matching the system arbitration model; this scalar stays
+    /// Codable-compatible with older documents.
     public var multitouchFingerCount: Int
-    /// Whether this app should keep macOS's own conflicting trackpad pinch
-    /// gesture (for whichever finger count is currently configured) forced
-    /// off — see `Triggers.ConflictingGestureManager`. `gestureConflictBackup`
-    /// is the corresponding restore-point, non-nil exactly while this is
-    /// actively applied.
+    /// Legacy persisted compatibility bit. Runtime conflict suppression is
+    /// derived from `multitouchGestureEnabled`; `gestureConflictBackup` is the
+    /// corresponding reversible restore point while that trigger is active.
     public var gestureConflictPreventionEnabled: Bool
     public var gestureConflictBackup: GestureConflictBackup?
 
@@ -343,6 +443,11 @@ public struct LayoutDocument: Codable, Sendable {
     /// (no Dock icon), this is the one persistently-visible entry point
     /// while the launcher itself is hidden.
     public var showsMenuBarIcon: Bool
+    /// Whether LSUIElement (menu-bar) applications are eligible for the grid
+    /// and launcher search. LSBackgroundOnly records remain excluded
+    /// regardless of this setting. Missing keys in older layout files decode
+    /// to true so existing users see menu-bar apps after the upgrade.
+    public var showMenuBarApplications: Bool
     /// When off (the default), hidden apps (`hiddenApplicationIDs`) are
     /// excluded from search results, matching how they're already excluded
     /// from the grid itself. Real, confirmed gap found while implementing
@@ -375,6 +480,7 @@ public struct LayoutDocument: Codable, Sendable {
         lastUsedByID: [StableAppIdentifier: Date] = [:],
         appIconStyle: AppIconStyle = .classic,
         showsMenuBarIcon: Bool = true,
+        showMenuBarApplications: Bool = true,
         showsHiddenAppsInSearch: Bool = false,
         backgroundMode: LauncherBackgroundMode = .glass,
         glassMaterialIntensity: Double = 0.35,
@@ -397,6 +503,7 @@ public struct LayoutDocument: Codable, Sendable {
         self.lastUsedByID = lastUsedByID
         self.appIconStyle = appIconStyle
         self.showsMenuBarIcon = showsMenuBarIcon
+        self.showMenuBarApplications = showMenuBarApplications
         self.showsHiddenAppsInSearch = showsHiddenAppsInSearch
         self.backgroundMode = backgroundMode
         self.glassMaterialIntensity = glassMaterialIntensity
@@ -404,7 +511,7 @@ public struct LayoutDocument: Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, layoutMode, gridSettings, pages, folders, itemOrder, aliases, hiddenApplicationIDs, customSources, triggerSettings, lastSelectedPage, lastScrollPosition, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle, showsMenuBarIcon, showsHiddenAppsInSearch, backgroundMode, glassMaterialIntensity, blursWallpaper
+        case schemaVersion, layoutMode, gridSettings, pages, folders, itemOrder, aliases, hiddenApplicationIDs, customSources, triggerSettings, lastSelectedPage, lastScrollPosition, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle, showsMenuBarIcon, showMenuBarApplications, showsHiddenAppsInSearch, backgroundMode, glassMaterialIntensity, blursWallpaper
     }
 
     public init(from decoder: Decoder) throws {
@@ -426,6 +533,7 @@ public struct LayoutDocument: Codable, Sendable {
         lastUsedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .lastUsedByID) ?? [:]
         appIconStyle = try container.decodeIfPresent(AppIconStyle.self, forKey: .appIconStyle) ?? .classic
         showsMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showsMenuBarIcon) ?? true
+        showMenuBarApplications = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarApplications) ?? true
         showsHiddenAppsInSearch = try container.decodeIfPresent(Bool.self, forKey: .showsHiddenAppsInSearch) ?? false
         backgroundMode = try container.decodeIfPresent(LauncherBackgroundMode.self, forKey: .backgroundMode) ?? .glass
         glassMaterialIntensity = try container.decodeIfPresent(Double.self, forKey: .glassMaterialIntensity) ?? 0.35
@@ -450,6 +558,7 @@ public struct LayoutDocument: Codable, Sendable {
         hideDockWhileLauncherOpen: false,
         dateAddedByID: [:],
         lastUsedByID: [:],
-        appIconStyle: .classic
+        appIconStyle: .classic,
+        showMenuBarApplications: true
     )
 }

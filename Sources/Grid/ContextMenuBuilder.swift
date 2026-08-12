@@ -9,7 +9,7 @@ public enum ContextMenuBuilder {
         public var open: () -> Void
         public var openNewInstance: (() -> Void)?
         public var showInFinder: () -> Void
-        public var addToDock: () -> Void
+        public var addToDock: (() -> Void)? = nil
         public var rename: () -> Void
         public var hide: () -> Void
         public var removeFromFolder: (() -> Void)?
@@ -29,7 +29,9 @@ public enum ContextMenuBuilder {
 
         menu.addItem(.separator())
         menu.addItem(makeItem(L10n.menuShowInFinder, symbolName: "folder", action: actions.showInFinder))
-        menu.addItem(makeItem(L10n.menuAddToDock, symbolName: "dock.rectangle", action: actions.addToDock))
+        if let addToDock = actions.addToDock {
+            menu.addItem(makeItem(L10n.menuAddToDock, symbolName: "dock.rectangle", action: addToDock))
+        }
 
         menu.addItem(.separator())
         menu.addItem(makeItem(L10n.menuRename, symbolName: "pencil", action: actions.rename))

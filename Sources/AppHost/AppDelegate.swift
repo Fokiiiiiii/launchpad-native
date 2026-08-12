@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.launcherWindowController.toggle()
         },
         onPinchClose: { [weak self] in
-            self?.launcherWindowController.show()
+            self?.openLauncherFromMultitouch()
         },
         onSpreadOpen: { [weak self] in
             self?.launcherWindowController.hide()
@@ -31,10 +31,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private lazy var settingsWindowController: SettingsWindowController = SettingsWindowController(
         model: launcherWindowController.model,
-        onTriggerSettingsChanged: { [weak self] in self?.applyCurrentTriggerSettings() ?? false },
+        onTriggerSettingsChanged: { [weak self] settings in
+            guard let self else { return .failed }
+            return await self.applyCurrentTriggerSettings(settings)
+        },
         onDockVisibilityChanged: { [weak self] hideDock in self?.launcherWindowController.updateDockVisibilityPreference(hideDock) },
         onShowsMenuBarIconChanged: { [weak self] visible in self?.menuBarIconController.setVisible(visible) },
+        onAppIconStyleChanged: { [weak self] _ in self?.menuBarIconController.refreshIcon() },
         onShowsHiddenAppsInSearchChanged: { [weak self] in self?.launcherWindowController.refreshSearchableRecords() },
+        onMenuBarApplicationsChanged: { [weak self] in self?.launcherWindowController.refreshSearchableRecords() },
         onBackgroundSettingsChanged: { [weak self] in
             guard let self else { return }
             let model = launcherWindowController.model
@@ -43,6 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 materialIntensity: model.glassMaterialIntensity,
                 blursWallpaper: model.blursWallpaper
             )
+        },
+        onCustomSourcesChanged: { [weak self] in
+            self?.refreshScannerSources()
         },
         onWillClose: { [weak self] in self?.launcherWindowController.reclaimKeyIfVisible() }
     )
@@ -78,8 +86,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the same time as this wizard.
     private lazy var onboardingWindowController = OnboardingWindowController { [weak self] in
         guard let self else { return }
-        applyCurrentTriggerSettings()
-        launcherWindowController.show()
+        Task { @MainActor in
+            _ = await self.applyCurrentTriggerSettingsAndPersist(launcherWindowController.triggerSettings)
+            launcherWindowController.show()
+        }
     }
     /// Same floating-over-the-launcher mechanics as `settingsWindowController`
     /// — see `WhatsNewWindowController`'s own doc comment for why it follows
@@ -94,6 +104,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// so both agree on whether onboarding still owns this launch.
     private var shouldShowOnboarding: Bool {
         ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_FORCE_ONBOARDING"] == "1" || !OnboardingState.hasCompleted()
+    }
+
+    private func applicationSources() -> [ApplicationSource] {
+        let customSources = launcherWindowController.model.customSources
+            .filter(\.enabled)
+            .map { config in
+                ApplicationSource(
+                    id: config.id,
+                    rootURL: URL(fileURLWithPath: config.rootPath),
+                    recursive: config.recursive,
+                    priority: config.priority,
+                    includeGlobs: config.includeGlobs,
+                    excludeGlobs: config.excludeGlobs
+                )
+            }
+        return ApplicationSource.standardSources + customSources
+    }
+
+    private func refreshScannerSources() {
+        guard let scanner else { return }
+        let sources = applicationSources()
+        Task {
+            await scanner.replaceSources(sources)
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -160,12 +194,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // `onboardingWindowController`'s doc comment) — otherwise the
             // default-on hot corner could pop the launcher open right on
             // top of the wizard.
+            // Restore the bounded last-known-good catalog before the first
+            // frame. This path only reads JSON and cheap filesystem metadata;
+            // the expensive Bundle/Security work remains in the background scan.
+            let configuredSources = applicationSources()
+            let scanner = ApplicationScanner(sources: configuredSources)
+            self.scanner = scanner
+            let cachedRecords = CatalogSnapshotStore.load(sources: configuredSources)
+            await scanner.restoreCachedRecords(cachedRecords)
+            if !cachedRecords.isEmpty {
+                launcherWindowController.updateRecords(cachedRecords)
+            }
+            await scanner.startWatching()
+
             if shouldShowOnboarding {
                 onboardingWindowController.show()
             } else {
-                applyCurrentTriggerSettings()
+                _ = await applyCurrentTriggerSettingsAndPersist(launcherWindowController.triggerSettings)
                 launcherWindowController.show()
                 presentWhatsNewIfNeeded()
+
+                if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_SETTINGS"] == "1" {
+                    whatsNewWindowController.closeWithoutKeyReclaim()
+                    settingsWindowController.show(on: launcherWindowController.currentScreen)
+                }
             }
 
             // Debug-only: drives a real search query into the launcher
@@ -205,28 +257,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
-            // Custom sources (2.13) are only known once the document has
-            // loaded, so the scanner is created here rather than at
-            // declaration time.
-            let customSources = launcherWindowController.model.customSources
-                .filter(\.enabled)
-                .map { config in
-                    ApplicationSource(
-                        id: config.id,
-                        rootURL: URL(fileURLWithPath: config.rootPath),
-                        recursive: config.recursive,
-                        priority: config.priority,
-                        includeGlobs: config.includeGlobs,
-                        excludeGlobs: config.excludeGlobs
-                    )
-                }
-            let scanner = ApplicationScanner(sources: ApplicationSource.standardSources + customSources)
-            self.scanner = scanner
-
-            let snapshot = await scanner.performFullScan()
-            DiagnosticsLog.appHost.info("Catalog ready: \(snapshot.records.count, privacy: .public) applications")
-            launcherWindowController.updateRecords(snapshot.records)
-            await scanner.startWatching()
+            // Reconcile the live catalog after the first frame. The scan runs
+            // on the Catalog actor from a utility task, so Bundle metadata and
+            // code-signing inspection never block the launcher window.
+            Task.detached(priority: .utility) { [scanner, configuredSources] in
+                let snapshot = await scanner.performFullScan()
+                CatalogSnapshotStore.save(records: snapshot.records, sources: configuredSources)
+                DiagnosticsLog.appHost.info(
+                    "Catalog ready: \(snapshot.records.count, privacy: .public) applications"
+                )
+            }
 
             // Debug-only: drives beginPageDrag/updatePageDrag/endPageDrag
             // with synthetic input so the state-machine transition can be
@@ -302,7 +342,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+            var skippedRestoredSnapshot = false
+            let restoredIDs = Set(cachedRecords.map { $0.id })
             for await update in await scanner.updates() {
+                if !skippedRestoredSnapshot {
+                    skippedRestoredSnapshot = true
+                    if Set(update.records.map { $0.id }) == restoredIDs {
+                        continue
+                    }
+                }
                 launcherWindowController.updateRecords(update.records)
             }
         }
@@ -311,9 +359,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // launcher window regained key status — exercises the fix for a
         // real, confirmed regression (user report: the search field stopped
         // accepting clicks/keyboard input after closing Settings).
-        // `LauncherWindow` is a `.nonactivatingPanel`; AppKit's automatic
-        // "hand key status to the next window" behavior doesn't pick those
-        // back up the way it would an ordinary window when the window that
+        // The launcher is a same-desktop overlay; AppKit's automatic
+        // "hand key status to the next window" behavior does not always pick
+        // it back up after the window that
         // took key status over (Settings) closes, so
         // `SettingsWindowController.onWillClose` ->
         // `LauncherWindowController.reclaimKeyIfVisible()` now does it
@@ -333,14 +381,144 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Re-applies trigger settings — called at launch and whenever the
-    /// Settings window saves a change, since `TriggerCoordinator.apply`
-    /// unregisters/reregisters everything idempotently. Returns whether F4
-    /// actually activated, so Settings can tell "enabled but not granted
-    /// Input Monitoring" apart from "genuinely working."
+    /// Applies a candidate trigger configuration as a transaction: capture
+    /// and persist the restore point before mutating CFPreferences, then
+    /// persist the verified result. Finger-count transitions first restore the
+    /// old point, capture the new point, and only then disable the new key.
+    /// Any failure restores both the external preference and this model to the
+    /// prior settings before reporting failure to Settings.
     @discardableResult
-    private func applyCurrentTriggerSettings() -> Bool {
-        var settings = launcherWindowController.triggerSettings
+    private func applyCurrentTriggerSettings(_ requested: TriggerSettings) async -> TriggerSettingsApplyResult {
+        let model = launcherWindowController.model
+        let previous = model.triggerSettings
+        let runtimeSettings = normalizedTriggerSettings(requested)
+        let isFingerSwitch = isGestureConflictFingerSwitch(
+            from: previous,
+            to: runtimeSettings
+        )
+
+        let preparedRuntimeSettings: TriggerSettings
+        if isFingerSwitch {
+            // Restore the old key before reading the new key. This makes the
+            // next capture reflect the true pre-disable value for the target
+            // finger count, rather than mixing two active transitions.
+            guard triggerCoordinator.restoreGestureConflictForTransition(
+                fallback: previous.gestureConflictBackup
+            ) else {
+                DiagnosticsLog.persistence.error("Existing trigger restore point could not be restored before finger switch")
+                return .failed
+            }
+            guard let prepared = triggerCoordinator.prepareRestorePoint(for: runtimeSettings) else {
+                await rollbackTriggerSettings(to: previous)
+                DiagnosticsLog.persistence.error("New trigger restore point could not be prepared after finger switch restore")
+                return .failed
+            }
+            preparedRuntimeSettings = prepared
+        } else {
+            guard let prepared = triggerCoordinator.prepareRestorePoint(for: runtimeSettings) else {
+                DiagnosticsLog.persistence.error("Trigger settings restore point could not be prepared")
+                return .failed
+            }
+            preparedRuntimeSettings = prepared
+        }
+
+        // Debug overrides affect runtime registration only. Keep the user's
+        // requested trigger values as the durable source of truth while
+        // carrying over the restore point captured for the runtime candidate.
+        var prepared = requested
+        prepared.gestureConflictPreventionEnabled = runtimeSettings.gestureConflictPreventionEnabled
+        prepared.gestureConflictBackup = preparedRuntimeSettings.gestureConflictBackup
+
+        if isFingerSwitch {
+            // The old restore point was kept durable until the old key was
+            // restored above. Persist the new restore point before the new
+            // key is disabled, so a crash cannot lose either transition's
+            // source value before the side effect begins.
+            model.updateTriggerSettings(prepared)
+            guard await model.saveResult() else {
+                await rollbackTriggerSettings(to: previous)
+                DiagnosticsLog.persistence.error("New trigger restore point could not be persisted before finger switch disable")
+                return .failed
+            }
+        } else {
+            // For initial enable, same-finger re-apply, and disable/restore,
+            // the restore point is intentionally durable before `apply`,
+            // because that call can change another app's CFPreferences
+            // immediately.
+            model.updateTriggerSettings(prepared)
+            guard await model.saveResult() else {
+                model.updateTriggerSettings(previous)
+                DiagnosticsLog.persistence.error("Trigger settings restore point could not be persisted")
+                return .failed
+            }
+        }
+
+        let runtimeResult = applyCurrentTriggerSettingsRuntime(preparedRuntimeSettings)
+        let result: TriggerSettingsApplyResult
+        if isFingerSwitch, runtimeResult.gestureConflictStatus == .unchanged {
+            // The transition was split into an explicit restore and a
+            // pre-captured disable, so the coordinator's final phase is
+            // intentionally `.unchanged`; preserve the public status that a
+            // new conflict backup was applied for Settings/reporting.
+            result = TriggerSettingsApplyResult(
+                f4Active: runtimeResult.f4Active,
+                multitouchActive: runtimeResult.multitouchActive,
+                multitouchEventArbitrationActive: runtimeResult.multitouchEventArbitrationActive,
+                gestureConflictStatus: .applied,
+                gestureConflictBackup: runtimeResult.gestureConflictBackup
+            )
+        } else {
+            result = runtimeResult
+        }
+        guard result.gestureConflictStatus != .failed else {
+            await rollbackTriggerSettings(
+                to: previous,
+                preservingBackup: prepared.gestureConflictBackup
+            )
+            return .failed
+        }
+
+        var persisted = prepared
+        switch result.gestureConflictStatus {
+        case .restored:
+            persisted.gestureConflictBackup = nil
+        case .applied, .unchanged:
+            persisted.gestureConflictBackup = result.gestureConflictBackup
+        case .failed:
+            // Guarded above; keep the switch exhaustive if a new status is
+            // added later.
+            await rollbackTriggerSettings(
+                to: previous,
+                preservingBackup: prepared.gestureConflictBackup
+            )
+            return .failed
+        }
+        model.updateTriggerSettings(persisted)
+        guard await model.saveResult() else {
+            DiagnosticsLog.persistence.error("Trigger settings result could not be persisted; restoring prior state")
+            await rollbackTriggerSettings(
+                to: previous,
+                preservingBackup: persisted.gestureConflictBackup
+            )
+            return .failed
+        }
+        return result
+    }
+
+    private func isGestureConflictFingerSwitch(
+        from previous: TriggerSettings,
+        to candidate: TriggerSettings
+    ) -> Bool {
+        guard previous.multitouchGestureEnabled,
+              candidate.multitouchGestureEnabled,
+              let previousBackup = previous.gestureConflictBackup else {
+            return false
+        }
+        return previousBackup.fingerCount != candidate.multitouchFingerCount
+    }
+
+    private func normalizedTriggerSettings(_ requested: TriggerSettings) -> TriggerSettings {
+        var settings = requested
         // Debug-only override so triggers can be forced on for verification
         // without going through the Settings window.
         if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_ALL_TRIGGERS"] == "1" {
@@ -348,25 +526,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings.hotCornersEnabled["bottomRight"] = true
             settings.multitouchGestureEnabled = true
         }
+        // The raw MultitouchSupport listener is passive. A multitouch
+        // trigger therefore owns the matching macOS conflict policy as one
+        // transaction; a stale persisted opt-out lets the system consume the
+        // same physical gesture first.
+        settings.gestureConflictPreventionEnabled = settings.multitouchGestureEnabled
+        return settings
+    }
+
+    private func openLauncherFromMultitouch() {
+        if !triggerCoordinator.reinforceGestureConflict() {
+            DiagnosticsLog.triggers.error("Multitouch activation could not reassert the macOS conflict policy")
+        }
+        launcherWindowController.show()
+    }
+
+    @discardableResult
+    private func applyCurrentTriggerSettingsRuntime(_ settings: TriggerSettings) -> TriggerSettingsApplyResult {
         let report = triggerCoordinator.apply(settings)
         DiagnosticsLog.triggers.info(
-            "Triggers applied: hotkey=\(report.hotkeyRegistered, privacy: .public) f4=\(report.f4Active, privacy: .public) multitouch=\(report.multitouchActive, privacy: .public)"
+            "Triggers applied: hotkey=\(report.hotkeyRegistered, privacy: .public) f4=\(report.f4Active, privacy: .public) multitouch=\(report.multitouchActive, privacy: .public) arbitration=\(report.multitouchEventArbitrationActive, privacy: .public) conflict=\(String(describing: report.gestureConflictUpdate), privacy: .public)"
         )
-        if report.gestureConflictUpdate != .unchanged {
-            // Re-read a fresh copy rather than reusing the possibly
-            // debug-mutated `settings` above — LAUNCHPAD_DEBUG_ALL_TRIGGERS
-            // must never get permanently written back to the real
-            // on-disk document.
-            var persisted = launcherWindowController.triggerSettings
-            switch report.gestureConflictUpdate {
-            case .unchanged: break
-            case .cleared: persisted.gestureConflictBackup = nil
-            case .updated(let backup): persisted.gestureConflictBackup = backup
-            }
-            launcherWindowController.model.updateTriggerSettings(persisted)
-            Task { await launcherWindowController.model.save() }
+        let conflictStatus: GestureConflictApplyStatus
+        let backup: GestureConflictBackup?
+        switch report.gestureConflictUpdate {
+        case .unchanged:
+            conflictStatus = .unchanged
+            backup = settings.gestureConflictBackup
+        case .cleared:
+            conflictStatus = .restored
+            backup = nil
+        case .updated(let newBackup):
+            conflictStatus = .applied
+            backup = newBackup
+        case .failed:
+            conflictStatus = .failed
+            backup = settings.gestureConflictBackup
         }
-        return report.f4Active
+        return TriggerSettingsApplyResult(
+            f4Active: report.f4Active,
+            multitouchActive: report.multitouchActive,
+            multitouchEventArbitrationActive: report.multitouchEventArbitrationActive,
+            gestureConflictStatus: conflictStatus,
+            gestureConflictBackup: backup
+        )
+    }
+
+    private func rollbackTriggerSettings(
+        to previous: TriggerSettings,
+        preservingBackup candidateBackup: GestureConflictBackup? = nil
+    ) async {
+        let rollbackResult = applyCurrentTriggerSettingsRuntime(previous)
+        let rollbackFailed = rollbackResult.gestureConflictStatus == .failed
+        if rollbackFailed {
+            DiagnosticsLog.persistence.error("Trigger settings external rollback failed")
+        }
+        let model = launcherWindowController.model
+        var durableSettings = previous
+        if rollbackFailed {
+            // Never erase the only restore point while CFPreferences is in an
+            // indeterminate/partial state. Keeping it on disk lets the next
+            // apply retry the exact values instead of treating the current
+            // zero as the user's original preference.
+            durableSettings.gestureConflictBackup =
+                candidateBackup ?? model.triggerSettings.gestureConflictBackup ?? previous.gestureConflictBackup
+        }
+        model.updateTriggerSettings(durableSettings)
+        guard await model.saveResult() else {
+            DiagnosticsLog.persistence.error("Trigger settings model rollback could not be persisted")
+            return
+        }
+    }
+
+    /// Startup has no SettingsViewModel to commit a verified restore point.
+    /// Persist the runtime result before showing the launcher so a crash after
+    /// a successful CFPreferences write does not discard the backup.
+    private func applyCurrentTriggerSettingsAndPersist(_ requested: TriggerSettings) async -> TriggerSettingsApplyResult {
+        await applyCurrentTriggerSettings(requested)
     }
 
     /// Shows the "What's New" panel once per version bump — never on a
@@ -403,6 +639,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        launcherWindowController.prepareForTermination()
         triggerCoordinator.stopAll()
     }
 

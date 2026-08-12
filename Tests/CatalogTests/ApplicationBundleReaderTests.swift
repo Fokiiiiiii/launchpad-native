@@ -9,6 +9,7 @@ private func makeFixtureApp(
     bundleIdentifier: String,
     in directory: URL,
     uiElement: Bool = false,
+    backgroundOnly: Bool = false,
     multipleInstancesProhibited: Bool = false
 ) throws -> URL {
     let bundleURL = directory.appendingPathComponent("\(name).app")
@@ -25,6 +26,7 @@ private func makeFixtureApp(
         "CFBundlePackageType": "APPL"
     ]
     if uiElement { info["LSUIElement"] = true }
+    if backgroundOnly { info["LSBackgroundOnly"] = true }
     if multipleInstancesProhibited { info["LSMultipleInstancesProhibited"] = true }
 
     let plistData = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
@@ -73,8 +75,30 @@ private func makeFixtureApp(
     let source = ApplicationSource(id: "fixture", rootURL: tempDir, recursive: false, priority: 0)
     let record = try #require(ApplicationBundleReader.scan(source: source).first)
 
-    #expect(record.isBackgroundOnly == true)
+    #expect(record.isBackgroundOnly == false)
+    #expect(record.isMenuBarApp == true)
     #expect(record.canOpenNewInstance == false)
+}
+
+@Test func backgroundOnlyAndMenuBarFlagsRemainIndependent() throws {
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    _ = try makeFixtureApp(
+        named: "BackgroundAgent",
+        bundleIdentifier: "com.example.background-agent",
+        in: tempDir,
+        backgroundOnly: true
+    )
+
+    let record = try #require(
+        ApplicationBundleReader.scan(
+            source: ApplicationSource(id: "fixture", rootURL: tempDir, recursive: false, priority: 0)
+        ).first
+    )
+    #expect(record.isBackgroundOnly == true)
+    #expect(record.isMenuBarApp == false)
 }
 
 @Test func stableIDDiffersForSameBundleIdentifierAtDifferentPaths() throws {

@@ -25,6 +25,11 @@ public final class HotCornerTrigger {
     private var monitor: Any?
     private var armedCorners: Set<ScreenCorner> = Set(ScreenCorner.allCases)
     private var pendingActivation: DispatchWorkItem?
+    /// Invalidates delayed activations that have been cancelled by `stop()`
+    /// or by leaving a corner. `DispatchWorkItem.cancel()` does not guarantee
+    /// that an already-enqueued closure will never run, so the generation is
+    /// checked again on MainActor immediately before invoking `onActivate`.
+    private var activationGeneration = 0
     private let onActivate: () -> Void
 
     public init(onActivate: @escaping () -> Void) {
@@ -38,7 +43,13 @@ public final class HotCornerTrigger {
     public func start() {
         guard monitor == nil else { return }
         monitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
-            self?.handleMouseMoved(event)
+            // AppKit invokes global-monitor callbacks outside the actor
+            // isolation of this `@MainActor` trigger. Hop explicitly before
+            // touching any trigger state to avoid crossing the actor
+            // boundary from an AppKit callback.
+            Task { @MainActor [weak self] in
+                self?.handleMouseMoved(event)
+            }
         }
         if monitor == nil {
             DiagnosticsLog.triggers.error("Global mouseMoved monitor unavailable (likely missing Accessibility/Input Monitoring permission)")
@@ -46,11 +57,13 @@ public final class HotCornerTrigger {
     }
 
     public func stop() {
+        activationGeneration &+= 1
         if let monitor {
             NSEvent.removeMonitor(monitor)
         }
         monitor = nil
         pendingActivation?.cancel()
+        pendingActivation = nil
     }
 
     private func handleMouseMoved(_ event: NSEvent) {
@@ -58,6 +71,9 @@ public final class HotCornerTrigger {
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) }) else { return }
 
         if HotCornerGeometry.hasExitedCorners(point, in: screen.frame) {
+            activationGeneration &+= 1
+            pendingActivation?.cancel()
+            pendingActivation = nil
             armedCorners = Set(ScreenCorner.allCases)
             return
         }
@@ -70,8 +86,19 @@ public final class HotCornerTrigger {
         else { return }
 
         armedCorners.remove(corner)
+        activationGeneration &+= 1
+        let generation = activationGeneration
         pendingActivation?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.onActivate() }
+        let work = DispatchWorkItem { [weak self] in
+            // The work item may still execute after cancellation. Re-check
+            // the generation on MainActor so `stop()`/corner-exit wins any
+            // race with the delayed callback before activation is emitted.
+            Task { @MainActor [weak self] in
+                guard let self, self.activationGeneration == generation else { return }
+                self.pendingActivation = nil
+                self.onActivate()
+            }
+        }
         pendingActivation = work
         DispatchQueue.main.asyncAfter(deadline: .now() + config.activationDelay, execute: work)
     }

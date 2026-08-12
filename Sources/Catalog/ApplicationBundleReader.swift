@@ -58,7 +58,12 @@ enum ApplicationBundleReader {
         let executableURL = bundle.executableURL
         let canLaunch = executableURL.map { FileManager.default.isExecutableFile(atPath: $0.path) } ?? false
 
-        let isBackgroundOnly = boolish(info["LSUIElement"]) || boolish(info["LSBackgroundOnly"])
+        // LSUIElement marks a menu-bar/agent app, not necessarily an app that
+        // should be dropped from the catalog. Keep it separate from the
+        // stronger LSBackgroundOnly flag so tools such as CodexBar remain
+        // discoverable while background-only helpers stay filtered.
+        let isMenuBarApp = boolish(info["LSUIElement"])
+        let isBackgroundOnly = boolish(info["LSBackgroundOnly"])
         let canOpenNewInstance = !boolish(info["LSMultipleInstancesProhibited"])
 
         return ApplicationRecord(
@@ -74,6 +79,7 @@ enum ApplicationBundleReader {
             sourceID: sourceID,
             isSystemProtected: bundleURL.path.hasPrefix("/System/"),
             isBackgroundOnly: isBackgroundOnly,
+            isMenuBarApp: isMenuBarApp,
             iconCacheKey: "\(bundleIdentifier)-\(Int(modDate.timeIntervalSince1970))",
             canLaunch: canLaunch,
             canOpenNewInstance: canOpenNewInstance,

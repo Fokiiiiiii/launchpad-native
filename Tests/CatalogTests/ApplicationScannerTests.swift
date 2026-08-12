@@ -50,3 +50,36 @@ import Testing
     let first = await iterator.next()
     #expect(first?.records.isEmpty == true)
 }
+
+
+@Test func replacingSourcesRebuildsCatalogWithoutRelaunch() async throws {
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let emptyDir = tempDir.appendingPathComponent("empty")
+    let appsDir = tempDir.appendingPathComponent("apps")
+    try FileManager.default.createDirectory(at: emptyDir, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: appsDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let bundleURL = appsDir.appendingPathComponent("Dynamic.app")
+    let macOS = bundleURL.appendingPathComponent("Contents/MacOS")
+    try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
+    let info: [String: Any] = [
+        "CFBundleIdentifier": "com.example.dynamic",
+        "CFBundleName": "Dynamic",
+        "CFBundleExecutable": "Dynamic"
+    ]
+    try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        .write(to: bundleURL.appendingPathComponent("Contents/Info.plist"))
+    try Data().write(to: macOS.appendingPathComponent("Dynamic"))
+
+    let scanner = ApplicationScanner(sources: [
+        ApplicationSource(id: "empty", rootURL: emptyDir, recursive: false, priority: 0)
+    ])
+    #expect((await scanner.performFullScan()).records.isEmpty)
+
+    await scanner.replaceSources([
+        ApplicationSource(id: "apps", rootURL: appsDir, recursive: false, priority: 0)
+    ])
+    let snapshot = await scanner.currentSnapshot()
+    #expect(snapshot.records.map(\.bundleIdentifier) == ["com.example.dynamic"])
+}

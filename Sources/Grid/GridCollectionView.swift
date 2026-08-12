@@ -74,6 +74,7 @@ final class GridCollectionView: NSCollectionView {
     private var swipeAccumulatedDeltaY: CGFloat = 0
     private var swipeAxis: SwipeAxis?
     private var swipeEngaged = false
+    private var swipeCompletedForGesture = false
     private var recentSamples: [(delta: CGFloat, time: CFTimeInterval)] = []
     /// A single confirmed-horizontal `.changed` sample used to fire
     /// `onSwipeBegan` unconditionally last time — ambient trackpad jitter
@@ -161,50 +162,42 @@ final class GridCollectionView: NSCollectionView {
     /// overridden purely to recognize the swipe gesture and translate it
     /// into a page change, not to move any content.
     override func scrollWheel(with event: NSEvent) {
-        guard event.phase != [] || event.momentumPhase != [] else {
-            // Not a trackpad gesture. Could still be a plain mouse's
-            // discrete wheel tick (no phase info either way) — handle that
-            // case explicitly instead of swallowing everything without a
-            // phase. `hasPreciseScrollingDeltas` is false for legacy
-            // notch-wheel mice and true for trackpads/Magic Mouse's
-            // continuous surface, so this is a defensive second check
-            // alongside the phase test above, not the primary discriminator.
-            guard !event.hasPreciseScrollingDeltas else { return }
-            // Most non-Apple mice only have a vertical wheel, so fall back
-            // to scrollingDeltaY when there's no horizontal component —
-            // this is what actually makes a plain mouse usable for paging.
+        let hasPhase = event.phase != [] || event.momentumPhase != []
+        if !hasPhase && !event.hasPreciseScrollingDeltas {
+            // Plain wheel ticks have no phase and no precise deltas.
             let delta = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.scrollingDeltaY
             guard delta != 0 else { return }
             let now = CACurrentMediaTime()
             guard now - lastDiscreteWheelPageChange > discreteWheelCooldown else { return }
             lastDiscreteWheelPageChange = now
-            // Temporary diagnostic (see this type's doc comment on the
-            // "looks like a fade" user report): if a real trackpad swipe
-            // ever ends up here instead of the .began/.changed/.ended
-            // switch below, that alone would explain it — this branch is
-            // meant only for hardware with no phase info at all.
-            DiagnosticsLog.grid.notice("scrollWheel: discrete branch fired (phase=\(String(describing: event.phase), privacy: .public), momentumPhase=\(String(describing: event.momentumPhase), privacy: .public), hasPreciseScrollingDeltas=\(event.hasPreciseScrollingDeltas, privacy: .public))")
             onSwipePage?(delta < 0 ? 1 : -1)
             return
         }
 
-        switch event.phase {
-        case .began:
+        // Trackpad drivers may put the useful samples in momentumPhase or
+        // leave both phase fields empty. Normalize all of those forms into
+        // the same continuous state machine instead of dropping the frames.
+        if event.phase.contains(.mayBegin) || event.phase.contains(.began) {
             swipeAccumulatedDeltaX = 0
             swipeAccumulatedDeltaY = 0
             swipeAxis = nil
             swipeEngaged = false
+            swipeCompletedForGesture = false
             recentSamples.removeAll()
-            DiagnosticsLog.grid.notice("scrollWheel: .began")
-        case .changed:
+            DiagnosticsLog.grid.notice("scrollWheel: began/mayBegin")
+        }
+
+        let momentumOnly = event.phase == [] && event.momentumPhase != []
+        let isChanged = event.phase.contains(.changed)
+            || (momentumOnly && event.momentumPhase.contains(.changed) && !swipeCompletedForGesture)
+            || (!hasPhase && event.hasPreciseScrollingDeltas && !swipeCompletedForGesture)
+        if isChanged {
             swipeAccumulatedDeltaX += event.scrollingDeltaX
             swipeAccumulatedDeltaY += event.scrollingDeltaY
             if !swipeEngaged {
-                // Horizontal gets unconditional priority (see the type's
-                // doc comment) — engages the moment its own cumulative
-                // distance clears the threshold, regardless of Y. Vertical
-                // only gets a look-in when horizontal hasn't already
-                // crossed and clearly dominates.
+                // Horizontal gets priority. Vertical only engages when it
+                // clearly dominates, so a landing blip cannot steal a
+                // horizontal page gesture.
                 if abs(swipeAccumulatedDeltaX) >= minimumEngageDistance {
                     swipeAxis = .horizontal
                     swipeEngaged = true
@@ -218,34 +211,32 @@ final class GridCollectionView: NSCollectionView {
                     DiagnosticsLog.grid.notice("scrollWheel: engaged vertical at cumulative dy=\(self.swipeAccumulatedDeltaY, privacy: .public)")
                 }
             }
-            guard let axis = swipeAxis else { break }
-            let effectiveDelta = axis == .horizontal ? swipeAccumulatedDeltaX : swipeAccumulatedDeltaY
-            let now = CACurrentMediaTime()
-            recentSamples.append((effectiveDelta, now))
-            if recentSamples.count > 6 {
-                recentSamples.removeFirst(recentSamples.count - 6)
-            }
-            onSwipeChanged?(effectiveDelta)
-        case .ended, .cancelled:
-            DiagnosticsLog.grid.notice("scrollWheel: .ended/.cancelled, engaged=\(self.swipeEngaged, privacy: .public), dx=\(self.swipeAccumulatedDeltaX, privacy: .public), dy=\(self.swipeAccumulatedDeltaY, privacy: .public)")
-            if swipeEngaged, let axis = swipeAxis {
+            if let axis = swipeAxis {
                 let effectiveDelta = axis == .horizontal ? swipeAccumulatedDeltaX : swipeAccumulatedDeltaY
-                onSwipeEnded?(effectiveDelta, Self.estimateVelocity(recentSamples))
+                let now = CACurrentMediaTime()
+                recentSamples.append((effectiveDelta, now))
+                if recentSamples.count > 6 {
+                    recentSamples.removeFirst(recentSamples.count - 6)
+                }
+                onSwipeChanged?(effectiveDelta)
             }
-            swipeAccumulatedDeltaX = 0
-            swipeAccumulatedDeltaY = 0
-            swipeAxis = nil
-            swipeEngaged = false
-            recentSamples.removeAll()
-        default:
-            // Temporary diagnostic: this is where a momentum-only event
-            // (real fingers already lifted, phase == [], momentumPhase
-            // carrying .began/.changed/.ended) would land, since the
-            // switch above keys on `event.phase`, not `momentumPhase`.
-            // If this fires a lot during a real swipe, that's a strong
-            // candidate for why the drag path silently does nothing.
-            DiagnosticsLog.grid.notice("scrollWheel: unhandled phase=\(String(describing: event.phase), privacy: .public) momentumPhase=\(String(describing: event.momentumPhase), privacy: .public)")
         }
+
+        let isEnded = event.phase.contains(.ended) || event.phase.contains(.cancelled)
+            || (momentumOnly && (event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled)))
+        guard isEnded, !swipeCompletedForGesture else { return }
+
+        DiagnosticsLog.grid.notice("scrollWheel: ended/cancelled, engaged=\(self.swipeEngaged, privacy: .public), dx=\(self.swipeAccumulatedDeltaX, privacy: .public), dy=\(self.swipeAccumulatedDeltaY, privacy: .public)")
+        if swipeEngaged, let axis = swipeAxis {
+            let effectiveDelta = axis == .horizontal ? swipeAccumulatedDeltaX : swipeAccumulatedDeltaY
+            onSwipeEnded?(effectiveDelta, Self.estimateVelocity(recentSamples))
+        }
+        swipeAccumulatedDeltaX = 0
+        swipeAccumulatedDeltaY = 0
+        swipeAxis = nil
+        swipeEngaged = false
+        swipeCompletedForGesture = true
+        recentSamples.removeAll()
     }
 
     /// Points-per-second estimate from the oldest and newest of the last

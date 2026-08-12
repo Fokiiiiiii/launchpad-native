@@ -4,7 +4,12 @@ import Persistence
 import Testing
 @testable import Grid
 
-private func record(_ name: String, id: String) -> ApplicationRecord {
+private func record(
+    _ name: String,
+    id: String,
+    backgroundOnly: Bool = false,
+    menuBarApp: Bool = false
+) -> ApplicationRecord {
     ApplicationRecord(
         id: StableAppID(bundleURL: URL(fileURLWithPath: "/tmp/\(name).app"), bundleIdentifier: id, teamIdentifier: nil),
         bundleIdentifier: id,
@@ -17,7 +22,8 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
         category: nil,
         sourceID: "test",
         isSystemProtected: false,
-        isBackgroundOnly: false,
+        isBackgroundOnly: backgroundOnly,
+        isMenuBarApp: menuBarApp,
         iconCacheKey: id,
         canLaunch: true,
         canOpenNewInstance: true,
@@ -28,6 +34,22 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
 @MainActor
 private func makeModel(directory: URL) -> GridModel {
     GridModel(layoutStore: LayoutStore(directory: directory))
+}
+
+@Test @MainActor func hiddenApplicationChangesNotifyObservers() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let app = record("A", id: "a")
+    model.reconcile(with: [app])
+
+    var changes = 0
+    model.onHiddenApplicationsChange = { changes += 1 }
+    model.hideApplication(app.id)
+    #expect(changes == 1)
+    model.unhideApplication(StableAppIdentifier(value: "a"))
+    #expect(changes == 2)
 }
 
 @Test @MainActor func reconcileAppendsNewAppsAlphabetically() async throws {
@@ -45,6 +67,73 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(appIDs.count == 2)
     #expect(model.record(for: StableAppIdentifier(value: appIDs[0]))?.displayName == "Apple")
     #expect(model.record(for: StableAppIdentifier(value: appIDs[1]))?.displayName == "Zebra")
+}
+
+@Test @MainActor func menuBarAndBackgroundAppsFollowGridPlacementPolicy() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+
+    let normal = record("Normal", id: "normal")
+    let menuBar = record("CodexBar", id: "menubar", menuBarApp: true)
+    let background = record("Agent", id: "agent", backgroundOnly: true)
+    model.reconcile(with: [normal, menuBar, background])
+
+    let defaultIDs = Set(model.pages.flatMap { $0 }.compactMap { item -> String? in
+        guard case .app(let id) = item else { return nil }
+        return model.record(for: id)?.bundleIdentifier
+    })
+    #expect(defaultIDs == Set(["normal", "menubar"]))
+
+    model.setShowMenuBarApplications(false)
+    let disabledIDs = Set(model.pages.flatMap { $0 }.compactMap { item -> String? in
+        guard case .app(let id) = item else { return nil }
+        return model.record(for: id)?.bundleIdentifier
+    })
+    #expect(disabledIDs == Set(["normal"]))
+    #expect(model.showMenuBarApplications == false)
+
+    model.setShowMenuBarApplications(true)
+    let restoredIDs = Set(model.pages.flatMap { $0 }.compactMap { item -> String? in
+        guard case .app(let id) = item else { return nil }
+        return model.record(for: id)?.bundleIdentifier
+    })
+    #expect(restoredIDs == Set(["normal", "menubar"]))
+}
+
+@Test @MainActor func legacyAndPersistedItemsPruneBackgroundOnlyRecords() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+
+    let normal = record("Normal", id: "normal")
+    let background = record("Agent", id: "agent", backgroundOnly: true)
+    let normalID = normal.id.asPersistenceIdentifier
+    let backgroundID = background.id.asPersistenceIdentifier
+    let importedFolder = Folder(
+        name: "Imported",
+        pages: [[.app(backgroundID), .app(normalID)]]
+    )
+    let result = LegacyImportResult(
+        folders: [importedFolder],
+        unplacedAppOrder: [.app(backgroundID), .app(normalID)],
+        unresolvedBundleIDs: []
+    )
+
+    #expect(model.applyLegacyImportIfFirstRun(result))
+    model.reconcile(with: [normal, background])
+
+    let pageIDs = model.pages.flatMap { $0 }.compactMap { item -> StableAppIdentifier? in
+        guard case .app(let id) = item else { return nil }
+        return id
+    }
+    #expect(pageIDs == [normalID])
+    #expect(model.folders.values.flatMap { $0.pages }.flatMap { $0 }.allSatisfy { item in
+        guard case .app(let id) = item else { return true }
+        return id == normalID
+    })
 }
 
 @Test @MainActor func reconcilePrunesUninstalledApps() async throws {

@@ -142,8 +142,10 @@ import Testing
     json.removeValue(forKey: "hideDockWhileLauncherOpen")
     json.removeValue(forKey: "dateAddedByID")
     json.removeValue(forKey: "lastUsedByID")
+    json.removeValue(forKey: "showMenuBarApplications")
     var gridSettings = json["gridSettings"] as! [String: Any]
     gridSettings.removeValue(forKey: "sortMode")
+    gridSettings.removeValue(forKey: "iconScale")
     json["gridSettings"] = gridSettings
     var triggerSettings = json["triggerSettings"] as! [String: Any]
     triggerSettings.removeValue(forKey: "multitouchFingerCount")
@@ -160,7 +162,9 @@ import Testing
 
     #expect(loaded.lastSelectedPage == 5) // proves the file actually decoded, not a fallback to .empty
     #expect(loaded.hideDockWhileLauncherOpen == false)
+    #expect(loaded.showMenuBarApplications == true)
     #expect(loaded.gridSettings.sortMode == .custom)
+    #expect(loaded.gridSettings.iconScale == 1.05)
     #expect(loaded.triggerSettings.multitouchFingerCount == 4)
     #expect(loaded.triggerSettings.gestureConflictPreventionEnabled == false)
     #expect(loaded.triggerSettings.gestureConflictBackup == nil)
@@ -185,4 +189,53 @@ import Testing
     let backupData = try Data(contentsOf: dir.appendingPathComponent("layout.lastknowngood.json"))
     let backupDoc = try JSONDecoder().decode(LayoutDocument.self, from: backupData)
     #expect(backupDoc.lastSelectedPage == 1)
+}
+
+@Test func saveReportsDirectoryCreationFailure() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let blocker = root.appendingPathComponent("not-a-directory")
+    try Data("blocker".utf8).write(to: blocker)
+
+    let store = LayoutStore(directory: blocker)
+    var didFailWithDirectoryError = false
+    do {
+        try await store.save(.empty)
+    } catch LayoutStoreError.directoryCreationFailed(_) {
+        didFailWithDirectoryError = true
+    } catch {
+        #expect(Bool(false), "unexpected error: \(error)")
+    }
+
+    #expect(didFailWithDirectoryError)
+}
+
+@Test func backupPreparationFailureDoesNotReplacePrimary() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = LayoutStore(directory: dir)
+
+    var first = LayoutDocument.empty
+    first.lastSelectedPage = 1
+    try await store.save(first)
+
+    // Removing write permission from the parent makes creation of the
+    // temporary backup fail before the old primary can be replaced.
+    try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o555)], ofItemAtPath: dir.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: dir.path) }
+
+    var second = LayoutDocument.empty
+    second.lastSelectedPage = 2
+    var didFailWithBackupError = false
+    do {
+        try await store.save(second)
+    } catch LayoutStoreError.backupFailed(_) {
+        didFailWithBackupError = true
+    } catch {
+        #expect(Bool(false), "unexpected error: \(error)")
+    }
+
+    #expect(didFailWithBackupError)
+    #expect((await store.load()).lastSelectedPage == 1)
 }

@@ -10,6 +10,12 @@ import AppKit
 final class DismissableWindow: NSWindow {
     var onCancel: (() -> Void)?
 
+    // Borderless Liquid Glass panels have no native titlebar to grant key
+    // status. Keep the same keyboard and control behavior as the old titled
+    // panel after the chrome is removed.
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
     }

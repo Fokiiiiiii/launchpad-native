@@ -30,9 +30,7 @@ public final class MenuBarIconController {
     private func show() {
         guard statusItem == nil else { return }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(named: NSImage.applicationIconName)
-        item.button?.image?.isTemplate = false
-        item.button?.image?.size = NSSize(width: 18, height: 18)
+        applyIcon(to: item)
 
         let menu = NSMenu()
         menu.addItem(makeItem(L10n.menuBarOpenLauncherItem, action: #selector(handleOpenLauncher)))
@@ -42,6 +40,25 @@ public final class MenuBarIconController {
         item.menu = menu
 
         statusItem = item
+    }
+
+    /// Re-reads the process icon after Settings changes `AppIconStyle` so an
+    /// already-visible status item does not keep the stale image captured at
+    /// creation time. No-op while the menu-bar item is hidden.
+    public func refreshIcon() {
+        guard let statusItem else { return }
+        applyIcon(to: statusItem)
+    }
+
+    private func applyIcon(to item: NSStatusItem) {
+        guard let image = (NSApp.applicationIconImage ?? NSImage(named: NSImage.applicationIconName)) else {
+            item.button?.image = nil
+            return
+        }
+        let icon = image.copy() as? NSImage ?? image
+        icon.isTemplate = false
+        icon.size = NSSize(width: 18, height: 18)
+        item.button?.image = icon
     }
 
     private func hide() {

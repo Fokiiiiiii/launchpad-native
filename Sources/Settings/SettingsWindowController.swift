@@ -1,7 +1,17 @@
 import AppKit
 import CoreGraphics
 import Grid
+import Persistence
 import SwiftUI
+
+enum SettingsWindowMetrics {
+    // Tessera's reference card is 400pt wide. A 360pt card keeps the same
+    // hierarchy at a compact scale while leaving enough width for localized
+    // labels; rows grow vertically when a Dynamic Type size needs more room.
+    static let width: CGFloat = 360
+    static let height: CGFloat = 480
+    static let size = NSSize(width: width, height: height)
+}
 
 /// A normal (non-panel) window — unlike the launcher, Settings should behave
 /// like an ordinary Mac preferences window: it can be the key/main window
@@ -30,15 +40,18 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// returns whether F4 actually activated — so the Triggers tab can tell
     /// "enabled but missing Input Monitoring permission" apart from
     /// "genuinely working," not just record what the user asked for.
-    private let onTriggerSettingsChanged: () -> Bool
+    private let onTriggerSettingsChanged: (TriggerSettings) async -> TriggerSettingsApplyResult
     /// Re-applies the Hide Dock preference to the live `LauncherWindow`
     /// immediately — `GridModel` alone can persist the setting, but only
     /// `LauncherWindowController` (which owns the actual window) can update
     /// its live `level`.
     private let onDockVisibilityChanged: (Bool) -> Void
     private let onShowsMenuBarIconChanged: (Bool) -> Void
+    private let onAppIconStyleChanged: (AppIconStyle) -> Void
     private let onShowsHiddenAppsInSearchChanged: () -> Void
+    private let onMenuBarApplicationsChanged: () -> Void
     private let onBackgroundSettingsChanged: () -> Void
+    private let onCustomSourcesChanged: () -> Void
     /// Fired when this window closes — lets the composition root hand key
     /// status back to the still-visible launcher underneath (see
     /// `windowWillClose`'s doc comment for why this is needed at all).
@@ -56,19 +69,25 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     public init(
         model: GridModel,
-        onTriggerSettingsChanged: @escaping () -> Bool,
+        onTriggerSettingsChanged: @escaping (TriggerSettings) async -> TriggerSettingsApplyResult,
         onDockVisibilityChanged: @escaping (Bool) -> Void,
         onShowsMenuBarIconChanged: @escaping (Bool) -> Void = { _ in },
+        onAppIconStyleChanged: @escaping (AppIconStyle) -> Void = { _ in },
         onShowsHiddenAppsInSearchChanged: @escaping () -> Void = {},
+        onMenuBarApplicationsChanged: @escaping () -> Void = {},
         onBackgroundSettingsChanged: @escaping () -> Void = {},
+        onCustomSourcesChanged: @escaping () -> Void = {},
         onWillClose: @escaping () -> Void = {}
     ) {
         self.model = model
         self.onTriggerSettingsChanged = onTriggerSettingsChanged
         self.onDockVisibilityChanged = onDockVisibilityChanged
         self.onShowsMenuBarIconChanged = onShowsMenuBarIconChanged
+        self.onAppIconStyleChanged = onAppIconStyleChanged
         self.onShowsHiddenAppsInSearchChanged = onShowsHiddenAppsInSearchChanged
+        self.onMenuBarApplicationsChanged = onMenuBarApplicationsChanged
         self.onBackgroundSettingsChanged = onBackgroundSettingsChanged
+        self.onCustomSourcesChanged = onCustomSourcesChanged
         self.onWillClose = onWillClose
         super.init()
     }
@@ -82,7 +101,15 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     ///   launcher moved to a different screen since it was last shown.
     public func show(on screen: NSScreen?) {
         if let window {
+            viewModel?.refresh()
             positionWindow(window, on: screen)
+            if outsideClickMonitor == nil {
+                let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak window] in
+                    window?.close()
+                }
+                monitor.start()
+                outsideClickMonitor = monitor
+            }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -93,13 +120,24 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
             onTriggerSettingsChanged: onTriggerSettingsChanged,
             onDockVisibilityChanged: onDockVisibilityChanged,
             onShowsMenuBarIconChanged: onShowsMenuBarIconChanged,
+            onAppIconStyleChanged: onAppIconStyleChanged,
             onShowsHiddenAppsInSearchChanged: onShowsHiddenAppsInSearchChanged,
-            onBackgroundSettingsChanged: onBackgroundSettingsChanged
+            onMenuBarApplicationsChanged: onMenuBarApplicationsChanged,
+            onBackgroundSettingsChanged: onBackgroundSettingsChanged,
+            onCustomSourcesChanged: onCustomSourcesChanged
         )
         viewModel.refreshF4Status()
         self.viewModel = viewModel
-        let hosting = NSHostingController(rootView: SettingsView(viewModel: viewModel, onClose: { [weak self] in self?.close() }))
+        let hosting = NSHostingController(
+            rootView: SettingsView(viewModel: viewModel, onClose: { [weak self] in self?.close() })
+                .environment(\.colorScheme, .dark)
+        )
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        // The card uses a fixed dark Liquid Glass tint to match Tessera. Keep
+        // AppKit and SwiftUI on the same appearance so adaptive `.primary`
+        // and `.secondary` text never resolve to dark ink on the dark card in
+        // macOS Light appearance.
+        hosting.view.appearance = NSAppearance(named: .darkAqua)
 
         // Round 20: real glass-card chrome behind the SwiftUI content,
         // matching the reference — same `root`/`background`/`hosting.view`
@@ -108,9 +146,9 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         // `makeFolderCardBackground` recipe (already value-matched to the
         // reference's small-card material) rather than inventing a second
         // one — `Settings` already depends on `Grid` per `Package.swift`.
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 600))
+        let root = NSView(frame: NSRect(origin: .zero, size: SettingsWindowMetrics.size))
         let background = GlassBackgroundHelper.makeFolderCardBackground(
-            cornerRadius: 12,
+            cornerRadius: 13,
             tint: NSColor(srgbRed: 28 / 255, green: 28 / 255, blue: 30 / 255, alpha: 0.86),
             borderAlpha: 0.12,
             shadowOpacity: 0.66,
@@ -136,20 +174,12 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let window = DismissableWindow(contentViewController: containerController)
         window.onCancel = { [weak self] in self?.close() }
-        // Round 13 §A: no native chrome at all — matches the reference
-        // design's borderless floating-card look. `.titled` is kept (not
-        // `.borderless`) since `.fullSizeContentView` needs it to behave
-        // sensibly, but the titlebar itself is made fully transparent/
-        // titleless and every standard button is force-hidden — a
-        // transparent titlebar alone still leaves the traffic-light buttons
-        // visible, it only hides the bar's background.
+        // Round 13 §A: no native chrome at all — the reference is a
+        // borderless floating card, so avoid reserving an invisible titlebar
+        // region above the SwiftUI tabs. `DismissableWindow` explicitly keeps
+        // key status for toggles, pickers, and keyboard dismissal.
         window.title = ""
-        window.styleMask = [.titled, .closable, .fullSizeContentView]
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.standardWindowButton(.closeButton)?.isHidden = true
-        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        window.standardWindowButton(.zoomButton)?.isHidden = true
+        window.styleMask = [.borderless]
         window.isMovableByWindowBackground = true
         // Round 20: the glass card itself now draws the window's visible
         // shape/shadow — the window frame must be transparent/shadowless
@@ -158,7 +188,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
-        window.setContentSize(NSSize(width: 620, height: 600))
+        window.setContentSize(SettingsWindowMetrics.size)
         window.isReleasedWhenClosed = false
         window.delegate = self
         positionWindow(window, on: screen)
@@ -207,6 +237,8 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// automatically. The visible symptom: the search field (and every
     /// other control) stops accepting clicks/keyboard input entirely after
     /// Settings is closed, even though the launcher is still on screen.
+    /// The launcher is now a fullscreen primary window, but the same explicit
+    /// reclaim remains necessary when a panel temporarily owns key status.
     ///
     /// `onWillClose` is dispatched to the *next* run-loop turn, not called
     /// synchronously here — confirmed via the `LAUNCHPAD_DEBUG_SETTINGS_
@@ -227,21 +259,6 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.onWillClose()
         }
-    }
-
-    /// Real, confirmed bug (a user screenshot showed the real macOS menu bar
-    /// sitting over the launcher while Settings was open): `LauncherWindowController.show()`
-    /// sets `NSApp.presentationOptions.insert(.autoHideMenuBar)` once, but
-    /// that bit gets silently dropped by AppKit the moment a *different*,
-    /// ordinary `.titled` window (this one) becomes key — `collectionBehavior`'s
-    /// `.fullScreenAuxiliary` lets this window appear *alongside* a
-    /// full-screen-style presentation, but doesn't itself preserve the
-    /// "auto-hide menu bar" application-wide state across a key-window
-    /// change. Re-asserting it on every `windowDidBecomeKey` (not just once
-    /// in `show()`) is what actually keeps the menu bar hidden while this
-    /// panel has focus.
-    public func windowDidBecomeKey(_ notification: Notification) {
-        NSApp.presentationOptions.insert(.autoHideMenuBar)
     }
 
     /// Closes Settings if it's open — a no-op otherwise. Used by the

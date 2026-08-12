@@ -14,12 +14,18 @@ public struct ApplicationRecord: Hashable, Codable, Sendable, Identifiable {
     public var category: String?
     public var sourceID: String
     public var isSystemProtected: Bool
-    /// True when the bundle's own Info.plist declares itself as a background/
-    /// menu-bar/agent app (`LSUIElement`/`LSBackgroundOnly`), i.e. not meant
-    /// to appear as a regular launchable app. Distinct from the user-driven
-    /// "hidden" feature (2.16), which is stored per-identity in
-    /// `LayoutDocument.hiddenApplicationIDs`, not here.
+    /// True when the bundle's own Info.plist declares `LSBackgroundOnly`.
+    /// Background-only agents never appear in the launcher.
+    ///
+    /// This remains the compatibility field used by older callers;
+    /// `isMenuBarApp` separately represents `LSUIElement` bundles, which can
+    /// be shown when the user's menu-bar-app setting is enabled. Distinct from
+    /// the user-driven "hidden" feature (2.16), which is stored per-identity
+    /// in `LayoutDocument.hiddenApplicationIDs`.
     public var isBackgroundOnly: Bool
+    /// True when the bundle declares `LSUIElement` (a menu-bar/background
+    /// agent that still has a normal launchable bundle).
+    public var isMenuBarApp: Bool
     public var iconCacheKey: String
     public var canLaunch: Bool
     public var canOpenNewInstance: Bool
@@ -38,6 +44,7 @@ public struct ApplicationRecord: Hashable, Codable, Sendable, Identifiable {
         sourceID: String,
         isSystemProtected: Bool,
         isBackgroundOnly: Bool,
+        isMenuBarApp: Bool = false,
         iconCacheKey: String,
         canLaunch: Bool,
         canOpenNewInstance: Bool,
@@ -55,6 +62,7 @@ public struct ApplicationRecord: Hashable, Codable, Sendable, Identifiable {
         self.sourceID = sourceID
         self.isSystemProtected = isSystemProtected
         self.isBackgroundOnly = isBackgroundOnly
+        self.isMenuBarApp = isMenuBarApp
         self.iconCacheKey = iconCacheKey
         self.canLaunch = canLaunch
         self.canOpenNewInstance = canOpenNewInstance

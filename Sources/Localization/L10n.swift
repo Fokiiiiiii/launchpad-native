@@ -34,6 +34,7 @@ public enum L10n {
     }
     public static var aboutLicenseLabel: String { string("settings.about.license", "Released under the MIT License.") }
     public static var aboutOpenSourceLabel: String { string("settings.about.opensource", "Open source, no third-party dependencies.") }
+    public static var aboutDesignCredit: String { string("settings.about.designcredit", "Designed for macOS · Liquid Glass") }
 
     // MARK: Settings — Grid tab
 
@@ -52,6 +53,31 @@ public enum L10n {
     /// which read oddly once Reorganize/Hide Dock (unrelated to sorting)
     /// shared the same section.
     public static var displaySectionHeader: String { string("settings.grid.display", "Display") }
+    public static var gridPresetSectionHeader: String { string("settings.grid.preset.header", "Grid density") }
+    public static var gridPresetSpacious: String { string("settings.grid.preset.spacious", "Spacious") }
+    public static var gridPresetBalanced: String { string("settings.grid.preset.balanced", "Balanced") }
+    public static var gridPresetCompact: String { string("settings.grid.preset.compact", "Compact") }
+    public static var gridPresetCustom: String { string("settings.grid.preset.custom", "Custom") }
+    public static var gridLayoutSectionHeader: String { string("settings.grid.layout.header", "Grid layout") }
+    public static var iconScaleSectionHeader: String { string("settings.grid.iconscale.header", "Icon size") }
+    public static var iconScalePresetSmart: String { string("settings.grid.iconscale.smart", "Smart") }
+    public static var iconScalePresetLarge: String { string("settings.grid.iconscale.large", "Large") }
+    public static var iconScalePresetStandard: String { string("settings.grid.iconscale.standard", "Standard") }
+    public static var iconScalePresetCompact: String { string("settings.grid.iconscale.compact", "Compact") }
+    public static var iconScaleManualLabel: String { string("settings.grid.iconscale.manual", "Manual size") }
+    public static var gridPresetHint: String {
+        string("settings.grid.preset.hint", "Columns and rows are independent; icon-size presets change only the icon scale.")
+    }
+    public static var iconGridLabel: String { string("settings.grid.icongrid", "Icon grid") }
+    public static var layoutModePagedHint: String {
+        string("settings.grid.layout.paged.hint", "Paged browsing is enabled for this build.")
+    }
+    public static var reorganizeHint: String {
+        string("settings.grid.reorganize.hint", "Moves apps forward to fill empty spaces.")
+    }
+    public static var iconScaleHint: String {
+        string("settings.grid.iconscale.hint", "Smart recommends an icon size for the current grid. Manual changes use Custom.")
+    }
     public static var sortModeCustom: String { string("settings.grid.sortby.custom", "Custom") }
     public static var sortModeName: String { string("settings.grid.sortby.name", "Name") }
     public static var sortModeDateAdded: String { string("settings.grid.sortby.dateadded", "Date Added") }
@@ -65,7 +91,7 @@ public enum L10n {
     public static var appIconLimitedEffectNotice: String {
         string(
             "settings.appicon.limitednotice",
-            "This app runs without a Dock icon by default — the new icon mainly shows here, in Finder, and in Get Info, unless you keep it pinned to the Dock."
+            "This changes the running app's Dock/App Switcher and menu-bar icon only. The default LSUIElement build has no Dock icon, and the change resets when the app relaunches."
         )
     }
     public static var appIconStyleClassic: String { string("settings.appicon.style.classic", "Classic") }
@@ -76,6 +102,7 @@ public enum L10n {
     public static var quickMenuAccessibilityLabel: String { string("launcher.quickmenu.accessibility", "View options") }
     public static var openSettingsMenuItem: String { string("launcher.quickmenu.opensettings", "Open Settings…") }
     public static var closePanelAccessibilityLabel: String { string("panel.close.accessibility", "Close") }
+    public static var selectedAccessibilityValue: String { string("settings.accessibility.selected", "Selected") }
 
     // MARK: Settings — Triggers tab
 
@@ -87,29 +114,17 @@ public enum L10n {
     public static var hotCornerBottomLeft: String { string("settings.triggers.hotcorner.bottomleft", "Bottom Left") }
     public static var hotCornerBottomRight: String { string("settings.triggers.hotcorner.bottomright", "Bottom Right") }
     public static var trackpadGestureGroupTitle: String { string("settings.triggers.trackpadgesture", "Trackpad Gesture") }
-    public static var multitouchToggleLabel: String { string("settings.triggers.multitouch", "Pinch to open, spread to close") }
+    public static var multitouchToggleLabel: String { string("settings.triggers.multitouch", "Enable") }
     public static var fingerCountLabel: String { string("settings.triggers.fingercount", "Fingers") }
     public static var fingerCountFour: String { string("settings.triggers.fingercount.four", "4") }
     public static var fingerCountFive: String { string("settings.triggers.fingercount.five", "5") }
     public static var sensitivityLabel: String { string("settings.triggers.sensitivity", "Sensitivity") }
     public static var gestureSensitivityAccessibilityLabel: String { string("settings.triggers.sensitivity.accessibility", "Gesture sensitivity") }
     public static var f4PermissionHint: String { string("settings.triggers.f4hint", "F4 needs Input Monitoring permission") }
+    public static var trackpadPermissionHint: String { string("settings.triggers.trackpadhint", "Trackpad gesture needs Accessibility and Input Monitoring permission") }
     public static var openPrivacySettingsButton: String { string("settings.triggers.openprivacysettings", "Open Privacy Settings…") }
-    public static var gestureConflictHint: String {
-        string(
-            "settings.triggers.gestureconflicthint",
-            "This gesture may conflict with macOS's own Launchpad/Mission Control trackpad gestures. If it feels unreliable, open Trackpad settings and disable the matching system gesture."
-        )
-    }
-    public static var openTrackpadSettingsButton: String { string("settings.triggers.opentrackpadsettings", "Open Trackpad Settings…") }
-    public static var gestureConflictPreventionToggleLabel: String { string("settings.triggers.gestureconflictpreventiontoggle", "Auto-disable macOS's conflicting gesture") }
-    public static var gestureConflictPreventionActiveHint: String {
-        string(
-            "settings.triggers.gestureconflictpreventionactivehint",
-            "LaunchpadNative has told macOS to turn off its matching pinch gesture. A logout (or restart) may be required before this fully takes effect — you can still check System Settings › Trackpad to confirm."
-        )
-    }
-
+    public static var searchNoResultsTitle: String { string("launcher.search.empty.title", "No Results") }
+    public static var searchNoResultsMessage: String { string("launcher.search.empty.message", "Try a different app name.") }
     // MARK: Settings — Sources tab
 
     public static var removeButton: String { string("settings.sources.remove", "Remove") }
@@ -119,6 +134,7 @@ public enum L10n {
     // MARK: Settings — Hidden tab
 
     public static var noHiddenAppsMessage: String { string("settings.hidden.empty", "No hidden apps.") }
+    public static var noHiddenAppsHint: String { string("settings.hidden.empty.hint", "Hide an app from its context menu to list it here.") }
     public static var unhideButton: String { string("settings.hidden.unhide", "Unhide") }
 
     // MARK: Onboarding
@@ -136,7 +152,7 @@ public enum L10n {
     }
     public static var onboardingPermissionsTitle: String { string("onboarding.permissions.title", "One optional permission") }
     public static var onboardingPermissionsBody: String {
-        string("onboarding.permissions.body", "The F4/Spotlight-key trigger needs Input Monitoring permission. Everything else works without it.")
+        string("onboarding.permissions.body", "The F4/Spotlight-key and trackpad gesture need Accessibility and Input Monitoring permission. Everything else works without it.")
     }
     public static var onboardingDoneTitle: String { string("onboarding.done.title", "You're all set") }
     public static var onboardingDoneBody: String {
@@ -182,6 +198,12 @@ public enum L10n {
     public static var uninstallMoveToTrashButton: String { string("uninstall.movetotrash", "Move to Trash") }
     public static var uninstallNeedsPermissionNotice: String { string("uninstall.needspermission", "needs admin permission — skipped") }
     public static var uninstallComputingSizesLabel: String { string("uninstall.computingsizes", "Calculating…") }
+    public static var uninstallReportSaveFailedNotice: String {
+        string(
+            "uninstall.reportsavefailed",
+            "The selected items were moved to Trash, but the operation history could not be saved."
+        )
+    }
 
     // MARK: Grid — rename alert, folders
 
@@ -199,7 +221,7 @@ public enum L10n {
 
     // MARK: Launcher
 
-    public static var searchPlaceholder: String { string("launcher.search.placeholder", "Search") }
+    public static var searchPlaceholder: String { string("launcher.search.placeholder", "Search applications") }
     public static var searchAccessibilityLabel: String { string("launcher.search.accessibility", "Search applications") }
     public static var settingsButtonAccessibilityLabel: String { string("launcher.settingsbutton.accessibility", "Settings") }
 
@@ -222,6 +244,7 @@ public enum L10n {
     public static var launchAtLoginToggleLabel: String { string("settings.general.launchatlogin", "Launch at Login") }
     public static var appearanceSectionHeader: String { string("settings.general.appearance", "Appearance") }
     public static var showMenuBarIconToggleLabel: String { string("settings.general.showmenubaricon", "Show Menu Bar Icon") }
+    public static var showMenuBarApplicationsToggleLabel: String { string("settings.apps.showmenubarapplications", "Show Menu Bar Applications") }
     public static var showHiddenAppsInSearchToggleLabel: String { string("settings.apps.showhiddeninsearch", "Show Hidden Apps in Search") }
     public static var backgroundSectionHeader: String { string("settings.screen.background", "Background") }
     public static var backgroundModeLabel: String { string("settings.screen.background.mode", "Type") }

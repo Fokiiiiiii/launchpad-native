@@ -34,9 +34,10 @@ private func pair(spread: Float) -> [TouchSample] {
     recognizer.onPinchDetected = { pinchCount += 1 }
     recognizer.onSpreadDetected = { spreadCount += 1 }
 
-    recognizer.ingest(quad(spread: 1.0)) // establishes initial spread
-    recognizer.ingest(quad(spread: 0.9))
-    recognizer.ingest(quad(spread: 0.5)) // below 60% of initial -> fires pinch
+    recognizer.ingest(quad(spread: 1.0)) // baseline frame 1
+    recognizer.ingest(quad(spread: 1.0)) // baseline frame 2
+    recognizer.ingest(quad(spread: 1.0)) // baseline frame 3
+    recognizer.ingest(quad(spread: 0.5)) // below 60% of baseline -> fires pinch
     recognizer.ingest(quad(spread: 0.3)) // still closed -> must not refire
 
     #expect(pinchCount == 1)
@@ -50,9 +51,10 @@ private func pair(spread: Float) -> [TouchSample] {
     recognizer.onPinchDetected = { pinchCount += 1 }
     recognizer.onSpreadDetected = { spreadCount += 1 }
 
-    recognizer.ingest(quad(spread: 1.0)) // establishes initial spread
-    recognizer.ingest(quad(spread: 1.2))
-    recognizer.ingest(quad(spread: 1.5)) // above 140% of initial -> fires spread
+    recognizer.ingest(quad(spread: 1.0)) // baseline frame 1
+    recognizer.ingest(quad(spread: 1.0)) // baseline frame 2
+    recognizer.ingest(quad(spread: 1.0)) // baseline frame 3
+    recognizer.ingest(quad(spread: 1.5)) // above 140% of baseline -> fires spread
     recognizer.ingest(quad(spread: 1.8)) // still spread -> must not refire
 
     #expect(spreadCount == 1)
@@ -66,7 +68,8 @@ private func pair(spread: Float) -> [TouchSample] {
     recognizer.onSpreadDetected = { fireCount += 1 }
 
     recognizer.ingest(quad(spread: 1.0))
-    recognizer.ingest(quad(spread: 0.95))
+    recognizer.ingest(quad(spread: 1.0))
+    recognizer.ingest(quad(spread: 1.0))
     recognizer.ingest(quad(spread: 1.1))
 
     #expect(fireCount == 0)
@@ -78,9 +81,13 @@ private func pair(spread: Float) -> [TouchSample] {
     recognizer.onPinchDetected = { pinchCount += 1 }
 
     recognizer.ingest(quad(spread: 1.0))
+    recognizer.ingest(quad(spread: 1.0))
+    recognizer.ingest(quad(spread: 1.0))
     recognizer.ingest(quad(spread: 0.4)) // fires
     recognizer.ingest([]) // all fingers lift -> re-arm
-    recognizer.ingest(quad(spread: 1.0)) // new gesture starts
+    recognizer.ingest(quad(spread: 1.0)) // new gesture baseline frame 1
+    recognizer.ingest(quad(spread: 1.0)) // baseline frame 2
+    recognizer.ingest(quad(spread: 1.0)) // baseline frame 3
     recognizer.ingest(quad(spread: 0.4)) // fires again
 
     #expect(pinchCount == 2)
@@ -108,6 +115,8 @@ private func pair(spread: Float) -> [TouchSample] {
 
     recognizer.ingest(quad(spread: 1.0)) // 4 fingers, ignored when 5 are required
     recognizer.ingest(quintet(spread: 1.0))
+    recognizer.ingest(quintet(spread: 1.0))
+    recognizer.ingest(quintet(spread: 1.0))
     recognizer.ingest(quintet(spread: 0.4))
 
     #expect(pinchCount == 1)
@@ -126,7 +135,139 @@ private func pair(spread: Float) -> [TouchSample] {
     recognizer.ingest(quad(spread: 0.4)) // still 4 contacts -> now ignored
     #expect(pinchCount == 0)
 
-    recognizer.ingest(quintet(spread: 1.0)) // establishes initial spread at 5
+    recognizer.ingest(quintet(spread: 1.0)) // baseline frame 1 at 5
+    recognizer.ingest(quintet(spread: 1.0)) // baseline frame 2
+    recognizer.ingest(quintet(spread: 1.0)) // baseline frame 3
     recognizer.ingest(quintet(spread: 0.4)) // fires under the new count
     #expect(pinchCount == 1)
+}
+
+
+/// The sensitivity slider is a live setting: changing the closing ratio
+/// resets any in-flight gesture and the next gesture uses the new threshold.
+@Test func updateClosingRatioSwitchesThresholdAtRuntime() {
+    let recognizer = PinchGestureRecognizer(closingRatio: 0.6, openingRatio: 1.4)
+    var pinchCount = 0
+    recognizer.onPinchDetected = { pinchCount += 1 }
+
+    recognizer.ingest(quad(spread: 1.0))
+    recognizer.ingest(quad(spread: 1.0))
+    recognizer.ingest(quad(spread: 1.0))
+    recognizer.updateClosingRatio(0.8)
+    recognizer.ingest(quad(spread: 1.0)) // baseline frame 1 under new ratio
+    recognizer.ingest(quad(spread: 1.0)) // baseline frame 2
+    recognizer.ingest(quad(spread: 1.0)) // baseline frame 3
+    recognizer.ingest(quad(spread: 0.75)) // 75% is now below the 80% threshold
+    #expect(pinchCount == 1)
+}
+
+@Test func acceptsFourAndFiveContactsWithOneRecognizer() {
+    let recognizer = PinchGestureRecognizer(
+        closingRatio: 0.6,
+        acceptedContactCounts: [4, 5]
+    )
+    var pinchCount = 0
+    recognizer.onPinchDetected = { pinchCount += 1 }
+
+    for _ in 0..<3 { recognizer.ingest(quad(spread: 1.0)) }
+    recognizer.ingest(quad(spread: 0.4))
+    recognizer.ingest([])
+    for _ in 0..<3 { recognizer.ingest(quintet(spread: 1.0)) }
+    recognizer.ingest(quintet(spread: 0.4))
+
+    #expect(pinchCount == 2)
+}
+
+@Test func mismatchedCountResetsBaselineBeforeNextGesture() {
+    let recognizer = PinchGestureRecognizer(closingRatio: 0.6)
+    var pinchCount = 0
+    recognizer.onPinchDetected = { pinchCount += 1 }
+
+    for _ in 0..<3 { recognizer.ingest(quad(spread: 1.0)) }
+    recognizer.ingest(pair(spread: 0.1)) // mismatch resets the candidate
+    recognizer.ingest(quad(spread: 0.4)) // first frame of a fresh baseline
+    #expect(pinchCount == 0)
+    for _ in 0..<2 { recognizer.ingest(quad(spread: 1.0)) }
+    recognizer.ingest(quad(spread: 0.4))
+
+    #expect(pinchCount == 1)
+}
+
+@Test func contactIDChangeResetsBaseline() {
+    let recognizer = PinchGestureRecognizer(closingRatio: 0.6)
+    var pinchCount = 0
+    recognizer.onPinchDetected = { pinchCount += 1 }
+
+    for _ in 0..<3 { recognizer.ingest(quad(spread: 1.0)) }
+    let changedIDs = quad(spread: 0.4).enumerated().map { index, touch in
+        TouchSample(id: touch.id + (index == 0 ? 100 : 0), x: touch.x, y: touch.y, size: touch.size)
+    }
+    recognizer.ingest(changedIDs)
+    #expect(pinchCount == 0)
+    for _ in 0..<2 {
+        recognizer.ingest(quad(spread: 1.0).enumerated().map { index, touch in
+            TouchSample(id: touch.id + (index == 0 ? 100 : 0), x: touch.x, y: touch.y, size: touch.size)
+        })
+    }
+    recognizer.ingest(changedIDs)
+
+    #expect(pinchCount == 1)
+}
+
+@Test func defaultOpeningRatioIsOnePointThreeFive() {
+    let recognizer = PinchGestureRecognizer()
+    var spreadCount = 0
+    recognizer.onSpreadDetected = { spreadCount += 1 }
+
+    for _ in 0..<3 { recognizer.ingest(quad(spread: 1.0)) }
+    recognizer.ingest(quad(spread: 1.35))
+
+    #expect(spreadCount == 1)
+}
+
+@Test func deviceRouterKeepsActiveGestureIsolatedFromOtherDevices() {
+    var router = GestureDeviceRouter()
+
+    let first = router.accepts(deviceID: 11, sampleCount: 4, hasUniqueIDs: true)
+    let foreignEmpty = router.accepts(deviceID: 22, sampleCount: 0, hasUniqueIDs: true)
+    let foreignInvalid = router.accepts(deviceID: 22, sampleCount: 3, hasUniqueIDs: true)
+    #expect(first)
+    #expect(!foreignEmpty)
+    #expect(!foreignInvalid)
+    #expect(router.activeDeviceID == 11)
+    let continuation = router.accepts(deviceID: 11, sampleCount: 4, hasUniqueIDs: true)
+    #expect(continuation)
+
+    let end = router.accepts(deviceID: 11, sampleCount: 0, hasUniqueIDs: true)
+    #expect(end)
+    #expect(router.activeDeviceID == nil)
+    let nextDevice = router.accepts(deviceID: 22, sampleCount: 5, hasUniqueIDs: true)
+    #expect(nextDevice)
+}
+
+@Test func deviceRouterDropsInvalidFramesBeforeClaimingDevice() {
+    var router = GestureDeviceRouter()
+
+    let invalidCount = router.accepts(deviceID: 11, sampleCount: 3, hasUniqueIDs: true)
+    let duplicateIDs = router.accepts(deviceID: 11, sampleCount: 4, hasUniqueIDs: false)
+    #expect(!invalidCount)
+    #expect(!duplicateIDs)
+    #expect(router.activeDeviceID == nil)
+    let valid = router.accepts(deviceID: 11, sampleCount: 4, hasUniqueIDs: true)
+    #expect(valid)
+}
+
+@Test func deviceRouterReservesOnlySelectedFingerCount() {
+    var router = GestureDeviceRouter(acceptedContactCounts: [5])
+
+    let fourBeforeClaim = router.accepts(deviceID: 11, sampleCount: 4, hasUniqueIDs: true)
+    let fiveClaim = router.accepts(deviceID: 11, sampleCount: 5, hasUniqueIDs: true)
+    let fourDuringGesture = router.accepts(deviceID: 11, sampleCount: 4, hasUniqueIDs: true)
+    let activeAfterInvalid = router.activeDeviceID
+    let reclaim = router.accepts(deviceID: 11, sampleCount: 5, hasUniqueIDs: true)
+    #expect(!fourBeforeClaim)
+    #expect(fiveClaim)
+    #expect(fourDuringGesture)
+    #expect(activeAfterInvalid == nil)
+    #expect(reclaim)
 }

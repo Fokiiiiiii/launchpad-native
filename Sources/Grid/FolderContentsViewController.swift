@@ -50,12 +50,9 @@ final class FolderContentsViewController: NSViewController {
     /// (`LazyVGrid(columns: Array(repeating: ..., count: metrics.columns))`
     /// — always exactly `metrics.columns`).
     private let columns: Int
-    /// The full outer card width the caller wants (`GridViewController.openFolder`
-    /// computes this as `screenWidth - 192`, matching the reference's own
-    /// `.padding(.horizontal, TSLayout.folderPanelInsetH)`), fed into
-    /// `preferredContentSize.width` by `updatePreferredContentSize()` below
-    /// so the caller can read it back via `preferredContentSize` without
-    /// duplicating the row/height math this controller owns. See
+    /// The bounded outer-card width selected by `GridViewController.openFolder`,
+    /// fed into `preferredContentSize.width` by `updatePreferredContentSize()`
+    /// so the caller can read it back without duplicating layout metrics. See
     /// `loadView()`'s doc comment for why `root`'s own outer frame is set
     /// directly by the caller rather than via Auto Layout constraints.
     private let panelWidth: CGFloat
@@ -63,7 +60,20 @@ final class FolderContentsViewController: NSViewController {
     /// exactly — the previous 16pt was an invented value, not taken from
     /// the reference.
     private static let cellSpacing: CGFloat = 26
+    private static let gridHorizontalInset: CGFloat = 22
+    private static let tileLabelAllowance: CGFloat = 56
+    private static let minimumPanelWidth: CGFloat = 240
     private var itemHeight: CGFloat { CGFloat(iconSize) + 40 }
+
+    static func panelWidth(availableWidth: CGFloat, itemCount: Int, columns: Int, iconSize: CGFloat) -> CGFloat {
+        let columnCount = max(columns, 1)
+        let occupiedColumns = min(max(itemCount, 1), columnCount)
+        let compactWidth = CGFloat(occupiedColumns) * (max(iconSize, 1) + Self.tileLabelAllowance)
+            + 2 * Self.gridHorizontalInset
+        let maximumWidth = max(availableWidth, Self.minimumPanelWidth)
+        guard itemCount < columnCount else { return maximumWidth }
+        return min(max(compactWidth, Self.minimumPanelWidth), maximumWidth)
+    }
 
     /// Flattened (folderPage, folderIndex, item) so "Remove from Folder" can
     /// address the exact underlying position.
@@ -91,7 +101,7 @@ final class FolderContentsViewController: NSViewController {
         self.iconCache = iconCache
         self.iconSize = iconSize
         self.columns = max(columns, 1)
-        self.panelWidth = max(panelWidth, 240)
+        self.panelWidth = max(panelWidth, Self.minimumPanelWidth)
         self.onLaunch = onLaunch
         self.onItemDraggedOut = onItemDraggedOut
         super.init(nibName: nil, bundle: nil)

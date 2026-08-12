@@ -41,11 +41,30 @@ private final class NonInteractiveImageView: NSImageView {
 /// as being made functional; it's removed here in favor of *guaranteed
 /// correctness* for basic page navigation, which is what actually blocked
 /// the user.
+/// Opaque AppKit monitor tokens are not statically Sendable. Wrapping the
+/// token lets the controller release it from its nonisolated deinit without
+/// exposing the erased Any value to Swift 6's deinitialization checks.
+private final class EventMonitorToken: @unchecked Sendable {
+    private let token: Any
+
+    init(_ token: Any) {
+        self.token = token
+    }
+
+    func remove() {
+        NSEvent.removeMonitor(token)
+    }
+}
+
 public final class GridViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate {
     private let itemIdentifier = NSUserInterfaceItemIdentifier("GridCellItem")
 
     private let model: GridModel
     private let iconCache: IconCache
+    private var prefetchTask: Task<Void, Never>?
+    private var prefetchGeneration = 0
+    private var dockReflowTask: Task<Void, Never>?
+    private static let maxPrefetchIcons = 24
     private let onLaunch: (ApplicationRecord) -> Void
     private let onBackgroundClick: () -> Void
     private let onRequestUninstall: (String) -> Void
@@ -55,6 +74,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private let pageControl = PageControlView()
     private var pageControlBottomConstraint: NSLayoutConstraint?
     private let layout = PagedGridLayout()
+    private var dockReservedHeight: CGFloat = 0
 
     private var currentPage = 0
     private var folderOverlayBackdrop: FolderOverlayBackdropView?
@@ -126,6 +146,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unavailable") }
+
+    deinit {
+        prefetchTask?.cancel()
+        dockReflowTask?.cancel()
+        itemDragGlobalMouseUpMonitor?.remove()
+    }
 
     public override func loadView() {
         let root = NSView()
@@ -227,24 +253,72 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         updatePageControlBottomMargin()
     }
 
-    /// Real, confirmed bug (a user screenshot showed no page dots at all,
-    /// on a 4-page grid): `LauncherWindow` deliberately spans the screen's
-    /// full `frame` (not `visibleFrame`) so the real system Dock — a
-    /// separate, higher-window-level surface — can render on top of it
-    /// (Round 4 §14). But this view's own `pageControl` was pinned a fixed
-    /// 24pt above *this view's* bottom edge, which is the *screen's* bottom
-    /// edge — with the Dock actually on screen (not auto-hidden), that fixed
-    /// 24pt margin sits well underneath the Dock's own real height, so the
-    /// dots were being drawn but immediately covered up. `NSScreen.visibleFrame`
-    /// is the public, always-current source of truth for how much of the
-    /// screen's bottom the Dock is actually reserving right now (0 if
-    /// auto-hidden, its real height otherwise) — recomputed here (not just
-    /// once) since the Dock's size/auto-hide setting, or the screen itself,
-    /// can change while the launcher stays open across `show()` calls.
-    private func updatePageControlBottomMargin() {
-        guard let screen = view.window?.screen else { return }
-        let dockReservedHeight = max(screen.visibleFrame.minY - screen.frame.minY, 0)
-        pageControlBottomConstraint?.constant = -(dockReservedHeight + 24)
+    public override func viewDidLayout() {
+        super.viewDidLayout()
+        // `LauncherWindowController.show()` changes a reused panel from its
+        // previous screen/size immediately before ordering it front. At that
+        // moment `viewDidAppear` can still observe the old geometry. Running
+        // this after the final Auto Layout pass keeps the bottom safe area
+        // correct for warm opens, display moves, and a Dock revealed over an
+        // auto-hidden configuration.
+        updatePageControlBottomMargin()
+    }
+
+    /// The launcher deliberately owns the full target screen so that its
+    /// background reaches behind the menu bar. Its interactive grid therefore
+    /// has to reserve a bottom safe area itself whenever the real Dock remains
+    /// visible.
+    @discardableResult
+    private func updatePageControlBottomMargin() -> CGFloat {
+        guard let window = view.window, let screen = window.screen else { return dockReservedHeight }
+        let screenDockReservedHeight = DockSafeArea.bottomInset(
+            hideDock: model.hideDockWhileLauncherOpen,
+            screenFrame: screen.frame,
+            visibleFrame: screen.visibleFrame,
+            dockFrames: DockSafeArea.visibleBottomDockFrames(on: screen)
+        )
+        let windowBottomInset = max(window.frame.minY - screen.frame.minY, 0)
+        let dockReservedHeight = max(screenDockReservedHeight - windowBottomInset, 0)
+        self.dockReservedHeight = dockReservedHeight
+        let bottomConstant = -(dockReservedHeight + 24)
+        guard abs((pageControlBottomConstraint?.constant ?? bottomConstant) - bottomConstant) > 0.5 else {
+            return dockReservedHeight
+        }
+        pageControlBottomConstraint?.constant = bottomConstant
+        scheduleDockReflow()
+        DiagnosticsLog.grid.info(
+            "page control inset: hideDock=\(self.model.hideDockWhileLauncherOpen, privacy: .public), screenDockReservedHeight=\(screenDockReservedHeight, privacy: .public), windowBottomInset=\(windowBottomInset, privacy: .public), dockReservedHeight=\(dockReservedHeight, privacy: .public), bottomConstant=\(bottomConstant, privacy: .public), screenFrame=\(String(describing: screen.frame), privacy: .public), visibleFrame=\(String(describing: screen.visibleFrame), privacy: .public)"
+        )
+        return dockReservedHeight
+    }
+
+    /// Re-samples the real Dock frame after WindowServer has settled a newly
+    /// shown launcher. The public hook lets the window controller request a
+    /// second pass without exposing the collection view or its layout.
+    @discardableResult
+    public func refreshDockLayout() -> CGFloat {
+        let dockInset = updatePageControlBottomMargin()
+        scheduleDockReflow()
+        return dockInset
+    }
+
+    /// A Dock reveal changes the outer scroll view's clip height after the
+    /// page-control constraint has moved. AppKit does not guarantee that a
+    /// custom collection layout will be prepared again for that constraint
+    /// change, so explicitly invalidate it on the next run-loop turn, after
+    /// Auto Layout has committed the new viewport size. The coalescing guard
+    /// avoids retaining a separate task for every repeated callback.
+    private func scheduleDockReflow() {
+        guard dockReflowTask == nil else { return }
+        dockReflowTask = Task { @MainActor [weak self] in
+            defer { self?.dockReflowTask = nil }
+            try? await Task.sleep(nanoseconds: 40_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.view.layoutSubtreeIfNeeded()
+            self.layout.invalidateLayout()
+            self.collectionView.collectionViewLayout?.invalidateLayout()
+            self.collectionView.layoutSubtreeIfNeeded()
+        }
     }
 
     public func reload() {
@@ -255,6 +329,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.reloadData()
         pageControl.numberOfPages = model.pages.count
         pageControl.currentPage = currentPage
+        updatePageControlBottomMargin()
         prefetchAdjacentPageIcons()
     }
 
@@ -276,15 +351,51 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// invoked after the first catalog reconcile). Fire-and-forget: results
     /// land in `IconCache`'s memory dict as a side effect, nothing here
     /// needs to consume them directly.
-    private func prefetchAdjacentPageIcons() {
-        for neighborPage in [currentPage - 1, currentPage + 1] where model.pages.indices.contains(neighborPage) {
+    private func prefetchAdjacentPageIcons(including targetPage: Int? = nil) {
+        prefetchGeneration &+= 1
+        let generation = prefetchGeneration
+        prefetchTask?.cancel()
+
+        var records: [ApplicationRecord] = []
+        records.reserveCapacity(Self.maxPrefetchIcons)
+        // The previous page is normally already warm because it was just
+        // visible. Spend the bounded prefetch budget on the next page first.
+        var pages = [currentPage + 1, currentPage - 1]
+        if let targetPage {
+            pages.insert(targetPage, at: 0)
+        }
+        var seenPages = Set<Int>()
+        for neighborPage in pages where model.pages.indices.contains(neighborPage) && seenPages.insert(neighborPage).inserted {
             for item in model.pages[neighborPage] {
                 guard case .app(let id) = item, let record = model.record(for: id) else { continue }
-                let cache = iconCache
-                Task {
-                    _ = await cache.icon(for: record)
+                records.append(record)
+                if records.count >= Self.maxPrefetchIcons {
+                    break
                 }
             }
+            if records.count >= Self.maxPrefetchIcons {
+                break
+            }
+        }
+        guard !records.isEmpty else { return }
+
+        let cache = iconCache
+        prefetchTask = Task { @MainActor [weak self, cache, records] in
+            // Start immediately. The old fixed delay left the first frame of
+            // the next page cold, which was the visible icon pop-in.
+            // IconCache already caps its worker queue at four operations.
+            // Submit the whole page here so that cap can actually be used;
+            // awaiting each icon serially left most of the next page cold.
+            await withTaskGroup(of: Void.self) { group in
+                for record in records {
+                    group.addTask {
+                        _ = await cache.icon(for: record)
+                    }
+                }
+            }
+
+            guard let self, self.prefetchGeneration == generation else { return }
+            self.prefetchTask = nil
         }
     }
 
@@ -327,76 +438,90 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// The data-source-swap approach itself (as opposed to scroll-position
     /// paging) is unchanged and stays that way — see this file's top-level
     /// doc comment for why the earlier scroll-based version never reliably
-    /// worked live. This only adds a visual transition *around* the swap: a
-    /// quick crossfade, so a page change reads as a transition instead of a
-    /// hard cut, without touching the reload logic that's already proven
-    /// reliable.
-    /// Adds a small directional slide alongside the existing crossfade —
+    /// worked live. The swap is wrapped in a short directional slide while
+    /// the collection view stays fully opaque, so there is no fade-to-black
+    /// frame between pages.
+    /// Adds a small directional slide —
     /// apple-design's "spatial consistency"/"hint in the direction of the
     /// gesture" guidance: a jump to a *later* page slides content out to
     /// the left and the new page in from the right (mirrored for a jump
     /// backward), instead of the fade alone just cutting in place. Still a
     /// discrete jump (not a continuously finger-tracked scroll — that
     /// approach was already tried and abandoned, see this type's top-level
-    /// doc comment), so damping stays at 1.0/no bounce per apple-design:
-    /// bounce is reserved for motion that actually carried gesture momentum.
-    private static let pageSlideOffset: CGFloat = 28
+    /// doc comment). Keep the travel deliberately small: the page drag path
+    /// provides the large spatial movement; arrow/dot jumps only need a
+    /// restrained directional cue.
+    private static let pageSlideOffset: CGFloat = 18
+    private var pageTransitionGeneration = 0
 
     private func jumpToPage(_ index: Int) {
         guard model.pages.indices.contains(index), index != currentPage || collectionView.numberOfSections == 0 else { return }
         let start = DispatchTime.now()
-        pageControl.currentPage = index
+        pageTransitionGeneration &+= 1
+        let generation = pageTransitionGeneration
+        prefetchAdjacentPageIcons(including: index)
         collectionView.wantsLayer = true
+        collectionView.alphaValue = 1
 
         let direction: CGFloat = index >= currentPage ? 1 : -1
         let offset = Self.pageSlideOffset
 
-        if let layer = collectionView.layer {
-            layer.setValue(-direction * offset, forKeyPath: "transform.translation.x")
-            layer.add(
-                Self.springAnimation(keyPath: "transform.translation.x", from: 0, to: -direction * offset, damping: 1.0, response: 0.20),
-                forKey: "pageSlideOut"
-            )
-        }
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.10
-            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            collectionView.animator().alphaValue = 0
-        }, completionHandler: { [weak self] in
-            // Same reasoning as `LauncherWindowController.hide()`:
-            // `NSAnimationContext`'s completion handler isn't `@MainActor`-
-            // annotated in the SDK, so hop explicitly rather than touching
-            // main-actor-isolated view state from a nominally-Sendable
-            // closure.
+        let layer = collectionView.layer
+        let presentationOffset = layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat
+        let currentOffset = presentationOffset ?? (layer?.value(forKeyPath: "transform.translation.x") as? CGFloat ?? 0)
+        layer?.removeAnimation(forKey: "pageSlideOut")
+        layer?.removeAnimation(forKey: "pageSlideIn")
+        let exitTarget = -direction * offset
+        let exitSpring = Self.springAnimation(
+            keyPath: "transform.translation.x",
+            from: currentOffset,
+            to: exitTarget,
+            damping: 0.98,
+            response: 0.22
+        )
+        layer?.add(exitSpring, forKey: "pageSlideOut")
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer?.setValue(exitTarget, forKeyPath: "transform.translation.x")
+        CATransaction.commit()
+
+        let settleDelay = min(max(exitSpring.settlingDuration, 0.12), 0.42)
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) { [weak self] in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.pageTransitionGeneration == generation else { return }
+
+                // Prepare the new page while it is still off the visible
+                // side. Keeping the layout settings and reload in this
+                // order prevents one frame of the previous icon size.
                 self.currentPage = index
+                self.layout.settings = self.model.gridSettings
+                self.layout.invalidateLayout()
+                self.collectionView.collectionViewLayout?.invalidateLayout()
                 self.collectionView.reloadData()
+                self.collectionView.layoutSubtreeIfNeeded()
+                self.collectionView.displayIfNeeded()
+                self.collectionView.alphaValue = 1
                 self.resetScrollPosition()
+                self.pageControl.currentPage = index
                 self.prefetchAdjacentPageIcons()
 
-                // Snap the freshly-reloaded content to the "just off to the
-                // correct side" starting position with no animation, then
-                // spring it into place — the mirror image of the slide-out.
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
+                self.collectionView.layer?.removeAllAnimations()
                 self.collectionView.layer?.setValue(direction * offset, forKeyPath: "transform.translation.x")
                 CATransaction.commit()
 
-                if let layer = self.collectionView.layer {
-                    layer.setValue(0, forKeyPath: "transform.translation.x")
-                    layer.add(
-                        Self.springAnimation(keyPath: "transform.translation.x", from: direction * offset, to: 0, damping: 1.0, response: 0.24),
-                        forKey: "pageSlideIn"
-                    )
-                }
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.13
-                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    self.collectionView.animator().alphaValue = 1
-                }
+                let entrySpring = Self.springAnimation(
+                    keyPath: "transform.translation.x",
+                    from: direction * offset,
+                    to: 0,
+                    damping: 0.98,
+                    response: 0.26
+                )
+                self.collectionView.layer?.add(entrySpring, forKey: "pageSlideIn")
+                self.collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
             }
-        })
+        }
 
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.launcher.info("page transition: reloadData took \(ms, privacy: .public)ms")
@@ -529,6 +654,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             let hasNeighbor = dragDirection > 0 ? dragHasNext : dragHasPrev
             DiagnosticsLog.grid.notice("updatePageDrag: direction resolved to \(self.dragDirection, privacy: .public), hasNeighbor=\(hasNeighbor, privacy: .public)")
             if hasNeighbor, dragNeighborImageView == nil {
+                prefetchAdjacentPageIcons(including: currentPage + dragDirection)
                 if let image = renderPageSnapshot(forPage: currentPage + dragDirection, size: collectionView.bounds.size) {
                     let xOffset = dragDirection > 0 ? width : -width
                     let imageView = NSImageView(frame: NSRect(
@@ -550,9 +676,17 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
 
         let hasNeighborImage = dragNeighborImageView != nil
-        let effective = hasNeighborImage
-            ? deltaX
-            : (deltaX < 0 ? -Self.rubberBand(-deltaX, dimension: width) : Self.rubberBand(deltaX, dimension: width))
+        // An edge pull is a hint, not a second page-sized animation. Using
+        // the viewport width as the rubber-band dimension made the terminal
+        // page travel far enough to look like a broken page turn.
+        let effective: CGFloat
+        if hasNeighborImage {
+            effective = deltaX
+        } else {
+            let edgePullLimit: CGFloat = 12
+            let resisted = Self.rubberBand(abs(deltaX), dimension: edgePullLimit)
+            effective = min(resisted, edgePullLimit) * (deltaX < 0 ? -1 : 1)
+        }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -607,25 +741,13 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         let targetTranslation: CGFloat = commit ? (dragDirection > 0 ? -width : width) : 0
         let distanceRemaining = targetTranslation - deltaX
-        let relativeVelocity = abs(distanceRemaining) > 1 ? velocity / distanceRemaining : 0
 
-        // Distinguish commit vs. abort settle timing. Real captured log
-        // evidence from an actual trackpad swipe (user report: "looks like
-        // a fade, not a slide") showed a commit resolving from a short flick
-        // (e.g. 76pt dragged, ~1000pt/s release velocity) — meaning the
-        // spring has to visibly travel nearly the *entire* remaining page
-        // width, not the short distance the finger actually covered. The
-        // old single damping-1.0/response-0.32 spring (tuned for a quick,
-        // small correction) covered that whole distance in well under half
-        // a second with no overshoot, which reads as an abrupt snap rather
-        // than a continuous slide. A longer response for the commit case
-        // specifically, plus a touch of momentum-appropriate bounce
-        // (apple-design: add bounce only when the gesture itself carried
-        // momentum — a flick/release is exactly that), gives the eye time
-        // to actually see the motion. Abort keeps the original fast/no-
-        // bounce spring — it only ever travels back the short distance the
-        // user dragged, so a quick correction still fits there.
-        let (damping, response): (CGFloat, CGFloat) = commit ? (0.86, 0.45) : (1.0, 0.32)
+        // Keep the same restrained spring for click and swipe paths. The
+        // old 0.86/0.45 commit spring produced a visible overshoot at the
+        // page edge and made a normal swipe feel like a second gesture.
+        let (damping, response): (CGFloat, CGFloat) = commit ? (0.97, 0.30) : (1.0, 0.24)
+        let boundedVelocity = min(max(velocity, -1600), 1600)
+        let relativeVelocity = abs(distanceRemaining) > 1 ? boundedVelocity / distanceRemaining : 0
 
         let spring = Self.springAnimation(
             keyPath: "transform.translation.x",
@@ -646,16 +768,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let targetPage = commit ? currentPage + dragDirection : currentPage
         pendingPageDragTargetPage = targetPage
         let generation = dragGeneration
-        // Clamped defensively — this is a display-timing nicety, not the
-        // real safety net (that's the fixed `dragSafetyNetTimeout` fallback
-        // armed in `beginPageDrag`, which fires regardless of this value).
-        // Raised from 0.6 to 1.0: with the longer commit-case response
-        // above, `spring.settlingDuration` can legitimately exceed 0.6s —
-        // a too-tight clamp here would schedule `finishPageDrag` (which
-        // hard-cancels the layer's in-flight animation and snaps straight
-        // to the final position) *before* the spring visually finishes,
-        // which would itself look like exactly the abrupt cut this change
-        // is trying to fix.
+        // The safety-net timer is still the failure recovery; this bound only
+        // keeps a pathological spring from delaying the data-source swap.
         let settleDuration = min(max(spring.settlingDuration, 0), 1.0)
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) { [weak self] in
             Task { @MainActor in
@@ -729,6 +843,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
         CATransaction.commit()
 
+        layout.settings = model.gridSettings
+        layout.invalidateLayout()
+        collectionView.collectionViewLayout?.invalidateLayout()
         collectionView.reloadData()
         collectionView.layoutSubtreeIfNeeded()
         collectionView.displayIfNeeded()
@@ -879,7 +996,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             model: model,
             iconCache: iconCache,
             itemIdentifier: itemIdentifier,
-            iconSize: currentIconSize
+            iconSize: currentIconSize,
+            visualScale: currentEffectiveIconScale
         )
         // `dataSource` is only needed for this synchronous render (no
         // async work happens between here and the function returning), so
@@ -1201,23 +1319,23 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // reference.
         let hostView = view.window?.contentView ?? view
 
-        // Matches the "Tessera" reference's own `FolderOverlay`:
-        // `.padding(.horizontal, TSLayout.folderPanelInsetH)` (96pt) on the
-        // card, which makes its width scale with the screen rather than sit
-        // at a small fixed cap (the previous, invented 640pt cap read as far
-        // narrower than the reference photo). Computed *before*
-        // `FolderContentsViewController` is created and passed in as its
-        // `panelWidth` — see that property's doc comment for why the
-        // controller's own `preferredContentSize.width` must equal this
-        // exact value rather than the caller applying a separate,
-        // independently-computed width constraint afterward.
-        let panelWidth = hostView.bounds.width - 192
+        let itemCount = model.folders[folderID]?.pages.reduce(0) { $0 + $1.count } ?? 0
+        let panelWidth = FolderContentsViewController.panelWidth(
+            availableWidth: hostView.bounds.width - 192,
+            itemCount: itemCount,
+            columns: model.gridSettings.columns,
+            iconSize: CGFloat(currentIconSize * currentEffectiveIconScale)
+        )
 
         let folderVC = FolderContentsViewController(
             model: model,
             folderID: folderID,
             iconCache: iconCache,
-            iconSize: currentIconSize,
+            // The open-folder tiles are SwiftUI content rather than
+            // `GridCellItem`, so they do not receive the cell layer transform
+            // below. Pass the same effective visual size into that surface so
+            // its mosaic and card height follow the main grid scale.
+            iconSize: currentIconSize * currentEffectiveIconScale,
             columns: model.gridSettings.columns,
             panelWidth: panelWidth,
             onLaunch: { [weak self] record in
@@ -1328,8 +1446,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             context.duration = 0.14
             backdrop.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
-            backdrop.removeFromSuperview()
-            self?.folderContentsViewController = nil
+            Task { @MainActor [weak self] in
+                backdrop.removeFromSuperview()
+                self?.folderContentsViewController = nil
+            }
         })
     }
 
@@ -1374,9 +1494,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                     AppLauncher.launch(record, createsNewInstance: true)
                 } : nil,
                 showInFinder: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
-                addToDock: {
-                    DiagnosticsLog.launcher.info("Add to Dock requested for \(record.bundleIdentifier, privacy: .public); drag the icon onto the real Dock to complete this (see GridCollectionView pasteboard writer).")
-                },
                 rename: { [weak self] in self?.promptRenameApp(at: indexPath, record: record) },
                 hide: { [weak self] in self?.hideApp(record) },
                 removeFromFolder: nil,
@@ -1423,23 +1540,38 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    /// The icon size the grid is *actually* rendering right now. There is no
-    /// user-adjustable icon-size setting anymore (explicit request: "現在の
-    /// 設定項目にはアプリのサイズがあるけど完全にそれをけしてほしい行数の
-    /// 数値によって変化する固定実装にして") — this is a fixed function of
-    /// the grid's own geometry, which is itself driven by the `rows`/
-    /// `columns` settings: `cellSize.height` minus `labelAllowance` (room
-    /// reserved for the label band below the icon) and `cellSize.width`,
-    /// whichever is smaller, so the icon always fills the available cell
-    /// without overflowing it or clipping its own label. Exposed so other
-    /// surfaces showing the same apps — the search results list — can match
-    /// this exactly instead of independently computing their own size.
+    /// The safe base size for an icon in the current grid slot. The effective
+    /// multiplier is applied by `GridCellItem` to the real icon constraint, so
+    /// its centered icon+label group and hit region use the same geometry.
     public var currentIconSize: Double {
         let cellSize = layout.currentCellSize
         guard cellSize.width > 0, cellSize.height > 0 else { return 96 }
-        let labelAllowance: CGFloat = 44
-        let cellCeiling = min(cellSize.width, cellSize.height - labelAllowance)
-        return Double(max(cellCeiling, 1))
+
+        let labelsVisible = model.gridSettings.labelVisible
+        let labelAllowance: CGFloat = labelsVisible ? 23 : 8
+        return Double(GridIconLayoutPolicy.safeSlot(cellSize: cellSize, labelAllowance: labelAllowance))
+    }
+
+    /// The effective visual multiplier after the current inter-cell gap has
+    /// supplied its safe expansion budget. The budget is intentionally
+    /// derived here, beside `currentIconSize`, so every cell and snapshot uses
+    /// the same value without changing `PagedGridLayout` or Settings APIs.
+    public var currentEffectiveIconScale: Double {
+        let cellSize = layout.currentCellSize
+        guard cellSize.width > 0, cellSize.height > 0 else { return 1 }
+
+        let labelsVisible = model.gridSettings.labelVisible
+        let labelAllowance: CGFloat = labelsVisible ? 23 : 8
+        let safeSlot = GridIconLayoutPolicy.safeSlot(cellSize: cellSize, labelAllowance: labelAllowance)
+        let gap = min(
+            CGFloat(model.gridSettings.horizontalSpacing),
+            CGFloat(model.gridSettings.verticalSpacing)
+        )
+        return Double(GridIconLayoutPolicy.effectiveVisualScale(
+            requestedScale: model.gridSettings.iconScale,
+            safeSlot: safeSlot,
+            gap: gap
+        ))
     }
 
     /// The grid's actual per-cell size right now (`PagedGridLayout`'s
@@ -1478,6 +1610,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
         let isSelected = keyboardSelectionActive && collectionView.selectionIndexPaths.contains(indexPath)
         let iconSize = currentIconSize
+        let visualScale = currentEffectiveIconScale
         switch model.pages[currentPage][indexPath.item] {
         case .app(let id):
             guard let record = model.record(for: id) else { return cell }
@@ -1500,10 +1633,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             // cache miss.
             if let cachedIcon = cache.cachedIconIfAvailable(for: record) {
                 DiagnosticsLog.grid.debug("itemForRepresentedObjectAt: icon cache hit for \(record.bundleIdentifier, privacy: .public)")
-                cell.configureAsApp(record: record, icon: cachedIcon, isSelected: isSelected, iconSize: iconSize, displayName: displayName)
+                cell.configureAsApp(record: record, icon: cachedIcon, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, displayName: displayName)
             } else {
                 DiagnosticsLog.grid.debug("itemForRepresentedObjectAt: icon cache miss for \(record.bundleIdentifier, privacy: .public), fetching async")
-                cell.configureAsApp(record: record, icon: NSImage(), isSelected: isSelected, iconSize: iconSize, displayName: displayName)
+                cell.configureAsApp(record: record, icon: NSImage(), isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, displayName: displayName)
                 Task { @MainActor in
                     let icon = await cache.icon(for: record)
                     // The cell may have been recycled for a different record by
@@ -1511,7 +1644,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                     // every grid-settings Apply and search keystroke) — only
                     // apply if it's still showing what we started fetching for.
                     guard cell.currentRequestKey == expectedKey else { return }
-                    cell.configureAsApp(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize, displayName: displayName)
+                    cell.configureAsApp(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, displayName: displayName)
                 }
             }
         case .folder(let folderID):
@@ -1527,7 +1660,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             // already looked at — real icons for anything not yet cached
             // arrive moments later via the async fetch below.
             let warmIcons = previews.compactMap { iconCache.cachedIconIfAvailable(for: $0) }
-            cell.configureAsFolder(name: name, isSelected: isSelected, iconSize: iconSize, icons: warmIcons, requestKey: key)
+            cell.configureAsFolder(name: name, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, icons: warmIcons, requestKey: key)
             if !previews.isEmpty {
                 let cache = iconCache
                 Task { @MainActor in
@@ -1582,19 +1715,20 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let sourceOriginalIndex: Int
         let draggedItem: LayoutItem
         let originalFrame: NSRect
-        /// The floating view's frame, in root-view coordinates, set exactly
+        /// The floating view's frame, in the top-level host coordinates, set exactly
         /// once at creation and never reassigned — see `updateItemDrag`'s
         /// doc comment for why: all *movement* after that happens purely
         /// via `transform.translation.x/y`, matching every other continuous
         /// drag in this codebase (page-drag, reorder preview). Needed here
         /// as the fixed baseline those translation deltas are computed from.
-        var floatingViewOriginalFrameInRoot: NSRect = .zero
+        var floatingViewOriginalFrameInHost: NSRect = .zero
         /// Offset from the cell's origin to where the user actually grabbed
         /// it — respected while following the cursor so the icon doesn't
         /// jump to be centered under the pointer (apple-design's direct-
         /// manipulation guidance).
         let grabOffset: NSPoint
         var floatingView: NSView?
+        weak var floatingViewHost: NSView?
         var candidateSlot: Int
         var pendingRawSlot: Int
         var folderCandidateOriginalIndex: Int?
@@ -1860,7 +1994,18 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     ///     instead of back to `GridCollectionView`, which the per-window
     ///     tracking continuity alone can miss.
     private static let itemDragSafetyNetTimeout: TimeInterval = 15.0
-    private var itemDragGlobalMouseUpMonitor: Any?
+    private var itemDragGlobalMouseUpMonitor: EventMonitorToken?
+
+    /// Removes the global mouse-up fallback as soon as an item drag settles.
+    /// AppKit does not remove global monitors automatically; leaving one
+    /// registered after a drag retains the callback until the controller dies
+    /// and makes every later mouse-up pay an unnecessary observer cost.
+    private func disarmItemDragSafetyNet() {
+        guard let monitor = itemDragGlobalMouseUpMonitor else { return }
+        monitor.remove()
+        itemDragGlobalMouseUpMonitor = nil
+        DiagnosticsLog.grid.debug("disarmItemDragSafetyNet: global mouseUp monitor removed")
+    }
 
     private func armItemDragSafetyNets(generation: Int) {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.itemDragSafetyNetTimeout) { [weak self] in
@@ -1871,11 +2016,18 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             }
         }
         guard itemDragGlobalMouseUpMonitor == nil else { return }
-        itemDragGlobalMouseUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
-            guard let self, let session = self.activeItemDrag else { return }
-            DiagnosticsLog.grid.notice("armItemDragSafetyNets: global mouseUp monitor fired while a drag was still active — GridCollectionView never received it, committing via this fallback instead")
-            self.endItemDrag(session: session)
+        guard let monitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseUp],
+            handler: { [weak self] _ in
+                guard let self, let session = self.activeItemDrag else { return }
+                DiagnosticsLog.grid.notice("armItemDragSafetyNets: global mouseUp monitor fired while a drag was still active — GridCollectionView never received it, committing via this fallback instead")
+                self.endItemDrag(session: session)
+            }
+        ) else {
+            DiagnosticsLog.grid.error("armItemDragSafetyNets: could not register global mouseUp monitor")
+            return
         }
+        itemDragGlobalMouseUpMonitor = EventMonitorToken(monitor)
     }
 
     private func snapshotImage(of view: NSView) -> NSImage? {
@@ -1889,19 +2041,26 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private func createFloatingDragView(session: ItemDragSession) {
         guard let cell = collectionView.item(at: IndexPath(item: session.sourceOriginalIndex, section: 0)) as? GridCellItem else { return }
+        let host = view.window?.contentView ?? view
         let image = snapshotImage(of: cell.view)
-        let frameInRoot = collectionView.convert(session.originalFrame, to: view)
-        let imageView = NonInteractiveImageView(frame: frameInRoot)
+        host.wantsLayer = true
+        host.clipsToBounds = false
+        host.layer?.masksToBounds = false
+        let frameInHost = collectionView.convert(session.originalFrame, to: host)
+        let imageView = NonInteractiveImageView(frame: frameInHost)
         imageView.image = image
         imageView.imageScaling = .scaleNone
         imageView.wantsLayer = true
+        imageView.clipsToBounds = false
+        imageView.layer?.masksToBounds = false
         imageView.layer?.zPosition = 1000
         imageView.layer?.shadowOpacity = 0.35
         imageView.layer?.shadowRadius = 12
         imageView.layer?.shadowOffset = CGSize(width: 0, height: -6)
-        view.addSubview(imageView, positioned: .above, relativeTo: nil)
+        host.addSubview(imageView, positioned: .above, relativeTo: nil)
         session.floatingView = imageView
-        session.floatingViewOriginalFrameInRoot = frameInRoot
+        session.floatingViewHost = host
+        session.floatingViewOriginalFrameInHost = frameInHost
         // Real, confirmed bug found via genuine CGEvent-driven drag testing:
         // setting `cell.view.isHidden = true` here — even though `cell.view`
         // is a descendant of `collectionView`, not `collectionView` itself —
@@ -1959,7 +2118,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         guard let floatingView = session.floatingView, let layer = floatingView.layer else { return }
         // Real, confirmed bug found via genuine CGEvent-driven drag testing
         // with diagnostic logging: converting `targetOriginInCollectionView`
-        // as a *point* here, while `floatingViewOriginalFrameInRoot` (below,
+        // as a *point* here, while `floatingViewOriginalFrameInHost` (below,
         // in `createFloatingDragView`) is computed by converting the cell's
         // *rect* — `NSView.convert(_ rect:to:)` automatically corrects for a
         // flipped/non-flipped mismatch between `collectionView` (flipped)
@@ -1976,9 +2135,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // path and agree on what `minY` means.
         let targetOriginInCollectionView = NSPoint(x: point.x - session.grabOffset.x, y: point.y - session.grabOffset.y)
         let targetRectInCollectionView = NSRect(origin: targetOriginInCollectionView, size: session.originalFrame.size)
-        let targetRectInRoot = collectionView.convert(targetRectInCollectionView, to: view)
-        let dx = targetRectInRoot.minX - session.floatingViewOriginalFrameInRoot.minX
-        let dy = targetRectInRoot.minY - session.floatingViewOriginalFrameInRoot.minY
+        let host = session.floatingViewHost ?? view
+        let targetRectInHost = collectionView.convert(targetRectInCollectionView, to: host)
+        let dx = targetRectInHost.minX - session.floatingViewOriginalFrameInHost.minX
+        let dy = targetRectInHost.minY - session.floatingViewOriginalFrameInHost.minY
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -2100,8 +2260,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // tuning pass can reintroduce a nonzero debounce without touching
         // the surrounding structure.
         session.reorderTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragReorderDebounce, repeats: false) { [weak self, weak session] _ in
-            guard let self, let session, session.generation == self.itemDragGeneration else { return }
-            self.commitReorderCandidate(session: session, slot: rawSlot)
+            Task { @MainActor [weak self, weak session] in
+                guard let self, let session, session.generation == self.itemDragGeneration else { return }
+                self.commitReorderCandidate(session: session, slot: rawSlot)
+            }
         }
     }
 
@@ -2229,8 +2391,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         showFolderZoneIndicator(session: session, targetIndex: zoneTarget)
         beginFloatingViewFolderPull(session: session, engaged: true)
         session.folderTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragFolderHoverDelay, repeats: false) { [weak self, weak session] _ in
-            guard let self, let session, session.generation == self.itemDragGeneration else { return }
-            self.commitFolderCandidate(session: session, index: zoneTarget)
+            Task { @MainActor [weak self, weak session] in
+                guard let self, let session, session.generation == self.itemDragGeneration else { return }
+                self.commitFolderCandidate(session: session, index: zoneTarget)
+            }
         }
     }
 
@@ -2326,19 +2490,25 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func showFolderZoneIndicator(session: ItemDragSession, targetIndex: Int) {
         clearFolderZoneIndicator(session: session, animated: false)
         guard let cell = collectionView.item(at: IndexPath(item: targetIndex, section: 0)) as? GridCellItem else { return }
-        let iconFrameInRoot = cell.view.convert(cell.iconFrame, to: view)
-        guard iconFrameInRoot.width > 0, iconFrameInRoot.height > 0 else { return }
+        let host = session.floatingViewHost ?? view
+        host.wantsLayer = true
+        host.clipsToBounds = false
+        host.layer?.masksToBounds = false
+        let iconFrameInHost = cell.view.convert(cell.iconFrame, to: host)
+        guard iconFrameInHost.width > 0, iconFrameInHost.height > 0 else { return }
 
-        let indicatorSize = iconFrameInRoot.width * Self.itemDragFolderZoneIndicatorScale
-        let zoneRectInRoot = NSRect(
-            x: iconFrameInRoot.midX - indicatorSize / 2,
-            y: iconFrameInRoot.midY - indicatorSize / 2,
+        let indicatorSize = iconFrameInHost.width * Self.itemDragFolderZoneIndicatorScale
+        let zoneRectInHost = NSRect(
+            x: iconFrameInHost.midX - indicatorSize / 2,
+            y: iconFrameInHost.midY - indicatorSize / 2,
             width: indicatorSize,
             height: indicatorSize
         )
 
-        let indicator = NonInteractiveImageView(frame: zoneRectInRoot)
+        let indicator = NonInteractiveImageView(frame: zoneRectInHost)
         indicator.wantsLayer = true
+        indicator.clipsToBounds = false
+        indicator.layer?.masksToBounds = false
         let cornerRadius = indicatorSize * Self.itemDragFolderZoneIndicatorCornerRatio
         indicator.layer?.cornerRadius = cornerRadius
         indicator.layer?.cornerCurve = .continuous
@@ -2352,10 +2522,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         indicator.layer?.borderWidth = 1
         indicator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.18).cgColor
         indicator.layer?.opacity = 0
-        if let floatingView = session.floatingView {
-            view.addSubview(indicator, positioned: .below, relativeTo: floatingView)
+        if let floatingView = session.floatingView, floatingView.superview === host {
+            host.addSubview(indicator, positioned: .below, relativeTo: floatingView)
         } else {
-            view.addSubview(indicator)
+            host.addSubview(indicator)
         }
         session.folderZoneIndicatorView = indicator
 
@@ -2412,8 +2582,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     /// Spec 9: holding the dragged icon near a page edge previews and then
     /// commits a page turn, while the dragged icon itself stays fixed under
-    /// the pointer (it's a floating overlay on `view`, independent of the
-    /// collection view being transformed) — only the grid/background/page
+    /// the pointer (it's a floating overlay on the window content host,
+    /// independent of the collection view being transformed) — only the
+    /// grid/background/page
     /// indicator move, matching "掴んだアイコンまでページと一緒に流しては
     /// いけない". First/last page gets a small resistance nudge instead
     /// (spec 10), reusing the page-drag machinery's own `rubberBand` helper.
@@ -2430,9 +2601,16 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         session.edgeDirection = direction
         session.edgeTimer?.invalidate()
         guard direction != 0 else { return }
+        let committedDirection = direction
         session.edgeTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragEdgeHoverDelay, repeats: false) { [weak self, weak session] _ in
-            guard let self, let session, session.generation == self.itemDragGeneration, session.edgeDirection == direction else { return }
-            self.commitPageTurnDuringDrag(session: session, direction: direction)
+            Task { @MainActor [weak self, weak session] in
+                guard let self,
+                      let session,
+                      session.generation == self.itemDragGeneration,
+                      session.edgeDirection == committedDirection
+                else { return }
+                self.commitPageTurnDuringDrag(session: session, direction: committedDirection)
+            }
         }
     }
 
@@ -2469,6 +2647,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
 
         if session.edgePeekImageView == nil {
+            prefetchAdjacentPageIcons(including: currentPage + direction)
             guard let image = renderPageSnapshot(forPage: currentPage + direction, size: collectionView.bounds.size) else { return }
             let xOffset = direction > 0 ? width : -width
             // Same parent/frame convention as the trackpad-swipe path's own
@@ -2518,7 +2697,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func clearEdgePeek(session: ItemDragSession) {
         guard let peekImageView = session.edgePeekImageView else { return }
         let lastOffset = session.lastPeekOffset ?? 0
-        collectionView.layer?.add(Self.springAnimation(keyPath: "transform.translation.x", from: lastOffset, to: 0, damping: 0.86, response: 0.24), forKey: "edgePeekRevert")
+        collectionView.layer?.add(Self.springAnimation(keyPath: "transform.translation.x", from: lastOffset, to: 0, damping: 0.98, response: 0.20), forKey: "edgePeekRevert")
         collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
         peekImageView.removeFromSuperview()
         session.edgePeekImageView = nil
@@ -2552,14 +2731,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let offset: CGFloat = direction > 0 ? -width : width
         let presentationX = (collectionView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? 0
         let rawVelocity = Self.estimateVelocity(from: session.lastPeekOffset, at: session.lastPeekTime, to: presentationX, at: CACurrentMediaTime())
-        let relativeVelocity = abs(offset - presentationX) > 1 ? rawVelocity / (offset - presentationX) : 0
+        let boundedVelocity = min(max(rawVelocity, -1600), 1600)
+        let relativeVelocity = abs(offset - presentationX) > 1 ? boundedVelocity / (offset - presentationX) : 0
         let peekImageView = session.edgePeekImageView
         session.edgePeekImageView = nil // this function now owns the transition, not clearEdgePeek
         session.lastPeekOffset = nil
         session.lastPeekTime = nil
 
         collectionView.wantsLayer = true
-        let spring = Self.springAnimation(keyPath: "transform.translation.x", from: presentationX, to: offset, damping: 1.0, response: 0.28, initialVelocity: relativeVelocity)
+        let spring = Self.springAnimation(keyPath: "transform.translation.x", from: presentationX, to: offset, damping: 0.98, response: 0.30, initialVelocity: relativeVelocity)
         collectionView.layer?.add(spring, forKey: "itemDragPageTurnOut")
         collectionView.layer?.setValue(offset, forKeyPath: "transform.translation.x")
         // The peek image (if one was already showing) rides out at the same
@@ -2574,12 +2754,13 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             let peekOffsetConstant: CGFloat = direction > 0 ? width : -width
             let peekCurrentX = (peekImageView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? (presentationX + peekOffsetConstant)
             let peekTarget = offset + peekOffsetConstant
-            let peekSpring = Self.springAnimation(keyPath: "transform.translation.x", from: peekCurrentX, to: peekTarget, damping: 1.0, response: 0.28, initialVelocity: relativeVelocity)
+            let peekSpring = Self.springAnimation(keyPath: "transform.translation.x", from: peekCurrentX, to: peekTarget, damping: 0.98, response: 0.30, initialVelocity: relativeVelocity)
             peekImageView.layer?.add(peekSpring, forKey: "itemDragPageTurnOut")
             peekImageView.layer?.setValue(peekTarget, forKeyPath: "transform.translation.x")
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) { [weak self] in
+        let settleDuration = min(max(spring.settlingDuration, 0.12), 0.55)
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) { [weak self] in
             Task { @MainActor in
                 // Torn down unconditionally, even if the guard below bails
                 // (stale/superseded drag) — this function already took
@@ -2588,8 +2769,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 peekImageView?.removeFromSuperview()
                 guard let self, self.activeItemDrag === session, session.generation == self.itemDragGeneration else { return }
                 self.currentPage = targetPage
+                self.layout.settings = self.model.gridSettings
+                self.layout.invalidateLayout()
+                self.collectionView.collectionViewLayout?.invalidateLayout()
                 self.collectionView.reloadData()
                 self.collectionView.layoutSubtreeIfNeeded()
+                self.collectionView.displayIfNeeded()
 
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
@@ -2622,6 +2807,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     // MARK: Drop / settle / cancel
 
     private func endItemDrag(session: ItemDragSession) {
+        disarmItemDragSafetyNet()
         session.invalidateTimers()
         activeItemDrag = nil
         clearEdgePeek(session: session)
@@ -2681,9 +2867,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         let targetOriginalIndex = min(session.candidateSlot, model.pages.indices.contains(currentPage) ? max(model.pages[currentPage].count - 1, 0) : 0)
         let targetFrame = layout.layoutAttributesForItem(at: IndexPath(item: targetOriginalIndex, section: 0))?.frame ?? session.originalFrame
-        let targetFrameInRoot = collectionView.convert(targetFrame, to: view)
-        let dx = targetFrameInRoot.minX - session.floatingViewOriginalFrameInRoot.minX
-        let dy = targetFrameInRoot.minY - session.floatingViewOriginalFrameInRoot.minY
+        let host = session.floatingViewHost ?? view
+        let targetFrameInHost = collectionView.convert(targetFrame, to: host)
+        let dx = targetFrameInHost.minX - session.floatingViewOriginalFrameInHost.minX
+        let dy = targetFrameInHost.minY - session.floatingViewOriginalFrameInHost.minY
 
         animateLayerTranslation(layer, toX: dx, toY: dy)
         // Real, confirmed report ("グループ化...アプリが逃げる"): reads the
@@ -2699,6 +2886,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             Task { @MainActor in
                 floatingView.removeFromSuperview()
+                session.floatingViewHost = nil
                 self?.collectionView.item(at: IndexPath(item: targetOriginalIndex, section: 0))?.view.layer?.opacity = 1
                 self?.collectionView.reloadData()
             }
@@ -2709,6 +2897,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// cell (same transform-only approach as `settleFloatingView`), undo
     /// any reorder preview, no model mutation.
     private func revertItemDrag(session: ItemDragSession) {
+        disarmItemDragSafetyNet()
         session.invalidateTimers()
         activeItemDrag = nil
         clearEdgePeek(session: session)
@@ -2732,6 +2921,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
             Task { @MainActor in
                 floatingView.removeFromSuperview()
+                session.floatingViewHost = nil
             }
         }
         collectionView.item(at: IndexPath(item: session.sourceOriginalIndex, section: 0))?.view.layer?.opacity = 1
@@ -2790,13 +2980,15 @@ private final class SnapshotDataSource: NSObject, NSCollectionViewDataSource {
     private let iconCache: IconCache
     private let itemIdentifier: NSUserInterfaceItemIdentifier
     private let iconSize: Double
+    private let visualScale: Double
 
-    init(items: [LayoutItem], model: GridModel, iconCache: IconCache, itemIdentifier: NSUserInterfaceItemIdentifier, iconSize: Double) {
+    init(items: [LayoutItem], model: GridModel, iconCache: IconCache, itemIdentifier: NSUserInterfaceItemIdentifier, iconSize: Double, visualScale: Double = 1) {
         self.items = items
         self.model = model
         self.iconCache = iconCache
         self.itemIdentifier = itemIdentifier
         self.iconSize = iconSize
+        self.visualScale = visualScale
     }
 
     func numberOfSections(in collectionView: NSCollectionView) -> Int { 1 }
@@ -2815,7 +3007,7 @@ private final class SnapshotDataSource: NSObject, NSCollectionViewDataSource {
             guard let record = model.record(for: id) else { return cell }
             let icon = iconCache.cachedIconIfAvailable(for: record) ?? NSImage()
             let displayName = model.displayName(for: record)
-            cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: iconSize, displayName: displayName)
+            cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: iconSize, visualScale: visualScale, displayName: displayName)
         case .folder(let folderID):
             let folder = model.folders[folderID]
             let name = folder?.name ?? L10n.defaultFolderName
@@ -2831,7 +3023,7 @@ private final class SnapshotDataSource: NSObject, NSCollectionViewDataSource {
                 return model.record(for: id)
             } ?? []
             let icons = records.prefix(9).compactMap { iconCache.cachedIconIfAvailable(for: $0) }
-            cell.configureAsFolder(name: name, isSelected: false, iconSize: iconSize, icons: icons, requestKey: "folder:\(folderID.value)")
+            cell.configureAsFolder(name: name, isSelected: false, iconSize: iconSize, visualScale: visualScale, icons: icons, requestKey: "folder:\(folderID.value)")
         }
         return cell
     }

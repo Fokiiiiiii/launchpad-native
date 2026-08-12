@@ -1,23 +1,37 @@
 import Localization
 import SwiftUI
 
-/// Round 13 §A: with the native titlebar close button now hidden on both
-/// Settings and the Uninstall panel (matching the reference design's
-/// borderless floating-card look), outside-click-dismiss and Escape are the
-/// only remaining ways to close either window — neither is discoverable to
-/// a first-time user. This small in-content affordance trades a little
-/// visual fidelity to the reference (which shows no close button at all)
-/// for the user's own explicit "more usable" instruction.
+/// Discoverable close affordance for borderless glass panels.
+///
+/// The Tessera mock uses the familiar macOS red traffic-light position. The
+/// glyph appears on hover, matching the native control without introducing a
+/// full title bar.
 struct PanelCloseButton: View {
     let action: () -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 16))
-                .foregroundStyle(.secondary)
+            ZStack {
+                Circle()
+                    .fill(Color(red: 1.0, green: 0.37, blue: 0.34))
+                    .overlay {
+                        Circle()
+                            .strokeBorder(.black.opacity(0.18), lineWidth: 0.5)
+                    }
+                Image(systemName: "xmark")
+                    .font(.system(size: 6.5, weight: .black))
+                    .foregroundStyle(.black.opacity(0.62))
+                    .opacity(isHovering ? 1 : 0)
+            }
+            .frame(width: 13, height: 13)
+            .shadow(color: .black.opacity(0.18), radius: 1, y: 0.5)
+            .frame(width: 20, height: 20)
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
         .accessibilityLabel(L10n.closePanelAccessibilityLabel)
     }
 }

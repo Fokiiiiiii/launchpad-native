@@ -60,3 +60,15 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
     let second = await cache.icon(for: r)
     #expect(first === second) // same NSImage instance returned from memory
 }
+
+@Test func diskCachePathIncludesTheRequestedKey() {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let cache = IconCache(cacheDirectory: dir)
+
+    let first = cache.cacheFileURL(forKey: "com.example.first")
+    let second = cache.cacheFileURL(forKey: "com.example.second")
+    #expect(first.lastPathComponent == "com.example.first.png")
+    #expect(second.lastPathComponent == "com.example.second.png")
+    #expect(first != second)
+}

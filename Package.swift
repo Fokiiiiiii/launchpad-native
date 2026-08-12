@@ -23,6 +23,10 @@ let package = Package(
             resources: [.process("Resources")]
         ),
         .target(
+            name: "DesignSystem",
+            path: "Sources/DesignSystem"
+        ),
+        .target(
             name: "Catalog",
             dependencies: ["Diagnostics"],
             path: "Sources/Catalog"
@@ -34,12 +38,12 @@ let package = Package(
         ),
         .target(
             name: "Launcher",
-            dependencies: ["Diagnostics", "Catalog", "Grid", "Localization"],
+            dependencies: ["Diagnostics", "Catalog", "Grid", "Localization", "DesignSystem"],
             path: "Sources/Launcher"
         ),
         .target(
             name: "Grid",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "WindowBrowser", "Localization"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "WindowBrowser", "Localization", "DesignSystem"],
             path: "Sources/Grid",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
@@ -65,12 +69,12 @@ let package = Package(
         ),
         .target(
             name: "Onboarding",
-            dependencies: ["Diagnostics", "Localization"],
+            dependencies: ["Diagnostics", "Localization", "DesignSystem"],
             path: "Sources/Onboarding"
         ),
         .target(
             name: "WhatsNew",
-            dependencies: ["Diagnostics", "Localization"],
+            dependencies: ["Diagnostics", "Localization", "DesignSystem"],
             path: "Sources/WhatsNew"
         ),
         .executableTarget(
@@ -152,6 +156,11 @@ let package = Package(
             name: "UninstallTests",
             dependencies: ["Uninstall", "Catalog"],
             path: "Tests/UninstallTests"
+        ),
+        .testTarget(
+            name: "SettingsTests",
+            dependencies: ["Settings", "Uninstall", "Catalog"],
+            path: "Tests/SettingsTests"
         ),
         .testTarget(
             name: "WhatsNewTests",

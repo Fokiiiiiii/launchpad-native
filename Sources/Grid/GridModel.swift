@@ -22,6 +22,11 @@ public final class GridModel {
     /// controller can reload without this model knowing about NSCollectionView.
     public var onChange: (() -> Void)?
 
+    /// Fired specifically when the hidden-app set changes. LauncherWindowController
+    /// uses this narrower signal to refresh the searchable snapshot immediately
+    /// after a context-menu hide/unhide, without coupling GridModel to search UI.
+    public var onHiddenApplicationsChange: (() -> Void)?
+
     public init(layoutStore: LayoutStore) {
         self.layoutStore = layoutStore
     }
@@ -30,17 +35,26 @@ public final class GridModel {
         document = await layoutStore.load()
         pages = document.pages.isEmpty ? [[]] : document.pages
         folders = document.folders
+
+        // Vertical scrolling is a legacy value without a renderer. Normalize it
+        // in memory and persist the migration together with any capacity reflow.
+        var requiresSave = false
+        if document.layoutMode == .verticalScroll {
+            document.layoutMode = .paged
+            requiresSave = true
+        }
+
         gridSettings = document.gridSettings
-        // Self-heal: a page persisted under a larger columns*rows capacity
-        // can have more items than the *current* capacity allows if the
-        // user has since reduced it. PagedGridLayout positions item N at
-        // row = N / columns — an item past the current row count lands
-        // below the visible page bounds and is simply never drawn, which
-        // is exactly the reported "some grid icons disappear" bug. Confirmed
-        // on a real corrupted document: capacity 18 (6x3) with pages of 34
-        // and 35 items (left over from an earlier 7x5 = 35 setting).
+        // A document can contain pages packed for a larger capacity. Reflow
+        // once when needed, then save the healed arrangement so subsequent
+        // launches do not repeat the repair.
         if pages.contains(where: { $0.count > capacityPerPage }) {
             reflowPagesToCurrentCapacity()
+            requiresSave = true
+        }
+
+        if requiresSave {
+            await save()
         }
     }
 
@@ -143,6 +157,26 @@ public final class GridModel {
     public func setShowsMenuBarIcon(_ value: Bool) {
         document.showsMenuBarIcon = value
         onChange?()
+    }
+
+    /// Whether LSUIElement (menu-bar) apps may be placed on the grid and
+    /// offered to launcher search. LSBackgroundOnly is always excluded by
+    /// `isEligibleForGrid(_:)`, regardless of this setting.
+    public var showMenuBarApplications: Bool {
+        document.showMenuBarApplications
+    }
+
+    public func setShowMenuBarApplications(_ value: Bool) {
+        guard document.showMenuBarApplications != value else { return }
+        document.showMenuBarApplications = value
+        // Reconcile the existing catalog immediately so the setting has live
+        // effect: disabling removes menu-bar apps from the layout, while
+        // enabling discovers them again using the normal placement policy.
+        if !recordsByIDValue.isEmpty {
+            reconcile(with: allRecords)
+        } else {
+            onChange?()
+        }
     }
 
     public var showsHiddenAppsInSearch: Bool {
@@ -297,14 +331,15 @@ public final class GridModel {
     public func reconcile(with records: [ApplicationRecord]) {
         recordsByIDValue = Dictionary(uniqueKeysWithValues: records.map { ($0.id.value, $0) })
         let hiddenIDs = Set(document.hiddenApplicationIDs.map(\.value))
-        let validIDs = Set(recordsByIDValue.keys).subtracting(hiddenIDs)
+        let validIDs = Set(recordsByIDValue.values.filter(isEligibleForGrid(_:)).map { $0.id.value })
+            .subtracting(hiddenIDs)
 
         pruneMissingItems(validIDs: validIDs)
         backfillMissingDateAdded()
 
         let placedIDs = allPlacedAppIdentifierValues()
         let newRecords = records
-            .filter { !$0.isBackgroundOnly }
+            .filter(isEligibleForGrid(_:))
             .filter { !hiddenIDs.contains($0.id.value) }
             .filter { !placedIDs.contains($0.id.value) }
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
@@ -435,6 +470,13 @@ public final class GridModel {
     }
 
     private var capacityPerPage: Int { max(gridSettings.columns * gridSettings.rows, 1) }
+
+    /// The single grid-placement policy. `LSBackgroundOnly` is always
+    /// excluded; `LSUIElement` records are controlled by the persisted
+    /// `showMenuBarApplications` setting.
+    private func isEligibleForGrid(_ record: ApplicationRecord) -> Bool {
+        !record.isBackgroundOnly && (showMenuBarApplications || !record.isMenuBarApp)
+    }
 
     private func appendToLastPage(_ item: LayoutItem) {
         if pages.isEmpty { pages.append([]) }
@@ -595,6 +637,7 @@ public final class GridModel {
         let validIDs = Set(recordsByIDValue.keys).subtracting(hiddenValues)
         pruneMissingItems(validIDs: validIDs)
         onChange?()
+        onHiddenApplicationsChange?()
     }
 
     public func unhideApplication(_ identifier: StableAppIdentifier) {
@@ -603,6 +646,7 @@ public final class GridModel {
             appendToLastPage(.app(identifier))
         }
         onChange?()
+        onHiddenApplicationsChange?()
     }
 
     public var hiddenApplicationIdentifiers: [StableAppIdentifier] {
@@ -682,13 +726,25 @@ public final class GridModel {
 
     // MARK: - Persistence
 
-    public func save() async {
+    @discardableResult
+    public func save() async -> Bool {
         document.pages = pages
         document.folders = folders
         do {
             try await layoutStore.save(document)
+            return true
         } catch {
             DiagnosticsLog.persistence.error("Failed to save layout: \(String(describing: error), privacy: .public)")
+            return false
         }
+    }
+
+    /// Saves through the same actor-backed store but returns the outcome to a
+    /// caller that is coordinating an external transaction.
+    @discardableResult
+    public func saveResult() async -> Bool {
+        document.pages = pages
+        document.folders = folders
+        return await layoutStore.saveResult(document)
     }
 }
