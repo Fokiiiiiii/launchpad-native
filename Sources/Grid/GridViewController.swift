@@ -64,7 +64,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private var prefetchTask: Task<Void, Never>?
     private var prefetchGeneration = 0
     private var dockReflowTask: Task<Void, Never>?
-    private static let maxPrefetchIcons = 24
+    /// Bounds the usual four-page working set (35 items per page by default)
+    /// with room for folder previews; larger/custom pages may exceed it.
+    private static let maxPrefetchIcons = 160
     private let onLaunch: (ApplicationRecord) -> Void
     private let onBackgroundClick: () -> Void
     private let onRequestUninstall: (String) -> Void
@@ -358,38 +360,83 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         var records: [ApplicationRecord] = []
         records.reserveCapacity(Self.maxPrefetchIcons)
-        // The previous page is normally already warm because it was just
-        // visible. Spend the bounded prefetch budget on the next page first.
-        var pages = [currentPage + 1, currentPage - 1]
+        var seenIconKeys = Set<String>()
+        var primaryApps: [ApplicationRecord] = []
+        var remainingApps: [ApplicationRecord] = []
+        var folderPreviews: [ApplicationRecord] = []
+        func append(_ record: ApplicationRecord, to cohort: inout [ApplicationRecord]) {
+            guard records.count < Self.maxPrefetchIcons,
+                  seenIconKeys.insert(record.iconCacheKey).inserted else { return }
+            records.append(record)
+            cohort.append(record)
+        }
+        // Warm the visible page as well as likely targets. Explicit targets
+        // come first so a jump spends the bounded budget on what will render.
+        var pages = [currentPage, currentPage + 1, currentPage - 1]
         if let targetPage {
+            pages.removeAll { $0 == targetPage }
             pages.insert(targetPage, at: 0)
         }
         var seenPages = Set<Int>()
-        for neighborPage in pages where model.pages.indices.contains(neighborPage) && seenPages.insert(neighborPage).inserted {
-            for item in model.pages[neighborPage] {
-                guard case .app(let id) = item, let record = model.record(for: id) else { continue }
-                records.append(record)
-                if records.count >= Self.maxPrefetchIcons {
-                    break
-                }
-            }
-            if records.count >= Self.maxPrefetchIcons {
-                break
+        let selectedPages = pages.filter {
+            model.pages.indices.contains($0) && seenPages.insert($0).inserted
+        }
+        // Top-level apps from the target/current page get the first cohort.
+        if let page = selectedPages.first {
+            for item in model.pages[page] {
+                guard case .app(let id) = item,
+                      let record = model.record(for: id) else { continue }
+                append(record, to: &primaryApps)
+                if records.count == Self.maxPrefetchIcons { break }
             }
         }
-        guard !records.isEmpty else { return }
+        if records.count < Self.maxPrefetchIcons {
+            // Remaining pages form the second cohort. Folder previews stay
+            // last so they cannot delay primary icon loads.
+            for page in selectedPages.dropFirst() {
+                for item in model.pages[page] {
+                    guard case .app(let id) = item,
+                          let record = model.record(for: id) else { continue }
+                    append(record, to: &remainingApps)
+                    if records.count == Self.maxPrefetchIcons { break }
+                }
+                if records.count == Self.maxPrefetchIcons { break }
+            }
+        }
+        if records.count < Self.maxPrefetchIcons {
+            for page in selectedPages {
+                for item in model.pages[page] {
+                    guard case .folder(let folderID) = item,
+                          let folder = model.folders[folderID] else { continue }
+                    for child in folder.pages.flatMap({ $0 }).prefix(9) {
+                        guard case .app(let id) = child,
+                              let record = model.record(for: id) else { continue }
+                        append(record, to: &folderPreviews)
+                        if records.count == Self.maxPrefetchIcons { break }
+                    }
+                    if records.count == Self.maxPrefetchIcons { break }
+                }
+                if records.count == Self.maxPrefetchIcons { break }
+            }
+        }
+        let cohorts = [primaryApps, remainingApps, folderPreviews].filter { !$0.isEmpty }
+        guard !cohorts.isEmpty else { return }
 
         let cache = iconCache
-        prefetchTask = Task { @MainActor [weak self, cache, records] in
+        prefetchTask = Task { @MainActor [weak self, cache, cohorts] in
             // Start immediately. The old fixed delay left the first frame of
             // the next page cold, which was the visible icon pop-in.
-            // IconCache already caps its worker queue at four operations.
-            // Submit the whole page here so that cap can actually be used;
-            // awaiting each icon serially left most of the next page cold.
-            await withTaskGroup(of: Void.self) { group in
-                for record in records {
-                    group.addTask {
-                        _ = await cache.icon(for: record)
+            // IconCache already caps its worker queue at a finite number of
+            // operations.
+            // Keep priority cohorts sequential while each cohort remains
+            // concurrent; this preserves target-first warmup under load.
+            for cohort in cohorts {
+                guard !Task.isCancelled else { return }
+                await withTaskGroup(of: Void.self) { group in
+                    for record in cohort {
+                        group.addTask {
+                            _ = await cache.icon(for: record)
+                        }
                     }
                 }
             }

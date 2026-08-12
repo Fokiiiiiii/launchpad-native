@@ -316,7 +316,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         }
 
         gridModel.reconcile(with: records)
-        viewController?.reloadGrid()
         Task { await gridModel.save() }
     }
 

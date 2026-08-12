@@ -21,14 +21,18 @@ public final class IconCache: @unchecked Sendable {
         let queue = OperationQueue()
         queue.name = "com.launchpadnative.iconcache"
         queue.qualityOfService = .userInitiated
-        queue.maxConcurrentOperationCount = 4
+        queue.maxConcurrentOperationCount = 8
         return queue
     }()
     private let writeQueue = DispatchQueue(label: "com.launchpadnative.iconcache.write")
     private let memoryLock = NSLock()
     private var memory: [String: NSImage] = [:]
     private var memoryOrder: [String] = []
-    private let memoryLimit = 64
+    /// Keeps the usual current plus adjacent/target working set resident. At
+    /// 128pt requests this is roughly 48 MiB of 2x RGBA pixels before NSImage
+    /// overhead; custom page sizes may exceed it, but the LRU bound prevents
+    /// prefetch from retaining an unbounded catalog.
+    private let memoryLimit = 192
 
     private struct Waiter {
         let id: UUID
@@ -37,7 +41,7 @@ public final class IconCache: @unchecked Sendable {
     private let requestLock = NSLock()
     private var inFlight: [String: [Waiter]] = [:]
     private var cancelledRequestIDs: Set<UUID> = []
-    private let maxInFlightKeys = 128
+    private let maxInFlightKeys = 256
     private let maxWaitersPerKey = 32
     private let maxCancelledRequestIDs = 256
 
