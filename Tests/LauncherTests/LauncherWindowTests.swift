@@ -1,6 +1,30 @@
 import AppKit
+import Catalog
+import Grid
+import Persistence
 import Testing
 @testable import Launcher
+
+@Test @MainActor
+func launcherViewLoadsEmptySearchStateWithoutInvalidCrossHierarchyConstraints() {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("launchpad-launcher-view-test-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = GridModel(layoutStore: LayoutStore(directory: directory))
+    let viewController = LauncherViewController(
+        viewModel: LauncherViewModel(),
+        gridModel: model,
+        iconCache: IconCache(cacheDirectory: directory.appendingPathComponent("icons", isDirectory: true)),
+        onDidLaunch: {},
+        onDidCancel: {},
+        onOpenSettings: {}
+    )
+
+    // Regression guard: AppKit used to throw NSGenericException here while
+    // activating constraints from the collection view's backgroundView.
+    viewController.loadViewIfNeeded()
+    #expect(viewController.view.window == nil)
+}
 
 @Test @MainActor func launcherWindowAcceptsMouseMovedEvents() {
     let window = LauncherWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100))

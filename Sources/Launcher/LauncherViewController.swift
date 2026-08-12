@@ -205,7 +205,11 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         emptyMessage.alignment = .center
         emptyMessage.setAccessibilityElement(false)
 
-        emptySearchResultsView.translatesAutoresizingMaskIntoConstraints = false
+        // `backgroundView` is inserted by NSCollectionView after assignment,
+        // so it has no common ancestor with the collection view while
+        // `loadView()` is building the hierarchy. Use a frame/autoresizing
+        // contract instead of cross-view Auto Layout constraints.
+        emptySearchResultsView.translatesAutoresizingMaskIntoConstraints = true
         emptySearchResultsView.orientation = .vertical
         emptySearchResultsView.alignment = .centerX
         emptySearchResultsView.spacing = 4
@@ -217,11 +221,9 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         emptySearchResultsView.setAccessibilityLabel(L10n.searchNoResultsTitle)
         emptySearchResultsView.setAccessibilityHelp(L10n.searchNoResultsMessage)
         emptySearchResultsView.isHidden = true
+        emptySearchResultsView.frame = searchResultsCollectionView.bounds
+        emptySearchResultsView.autoresizingMask = [.width, .height]
         searchResultsCollectionView.backgroundView = emptySearchResultsView
-        NSLayoutConstraint.activate([
-            emptySearchResultsView.centerXAnchor.constraint(equalTo: searchResultsCollectionView.centerXAnchor),
-            emptySearchResultsView.centerYAnchor.constraint(equalTo: searchResultsCollectionView.centerYAnchor)
-        ])
 
         searchResultsScrollView.translatesAutoresizingMaskIntoConstraints = false
         searchResultsScrollView.documentView = searchResultsCollectionView
