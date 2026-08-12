@@ -134,9 +134,16 @@ final class PageControlView: NSView {
         effectiveAppearance.performAsCurrentDrawingAppearance { [weak self] in
             guard let self else { return }
             for (index, button) in dotButtons.enumerated() {
-                button.layer?.backgroundColor = (index == currentPage)
+                let isCurrentPage = index == currentPage
+                button.layer?.backgroundColor = isCurrentPage
                     ? NSColor.labelColor.cgColor
                     : NSColor.tertiaryLabelColor.cgColor
+                // The selected state is the semantic source of truth for
+                // VoiceOver; the dot color remains a visual supplement.
+                if button.isAccessibilitySelected() != isCurrentPage {
+                    button.setAccessibilitySelected(isCurrentPage)
+                    button.setAccessibilityValue(isCurrentPage ? L10n.selectedAccessibilityValue : nil)
+                }
             }
         }
     }
@@ -151,16 +158,17 @@ final class PageControlView: NSView {
         updateDotStates()
     }
 
-    /// Kept simple on purpose: earlier this dimmed disabled buttons to 0.3
-    /// alpha, which against this app's dark glass background read as the
-    /// button having vanished entirely during hands-on testing ("after
-    /// moving, the button disappears" — really just the *next* button
-    /// dimming out on the last page). Both buttons now stay fully visible
-    /// always; clicking past either end is already a no-op via `jumpToPage`'s
-    /// own bounds check, so hiding/disabling isn't load-bearing.
+    /// Keep disabled chevrons visible enough against the dark glass instead
+    /// of applying the former 0.3-alpha treatment, which read as vanished.
     private func updateChevronEnabledState() {
-        previousButton.isHidden = numberOfPages <= 1
-        nextButton.isHidden = numberOfPages <= 1
+        let hasMultiplePages = numberOfPages > 1
+        previousButton.isHidden = !hasMultiplePages
+        nextButton.isHidden = !hasMultiplePages
+
+        previousButton.isEnabled = hasMultiplePages && currentPage > 0
+        nextButton.isEnabled = hasMultiplePages && currentPage < numberOfPages - 1
+        previousButton.contentTintColor = previousButton.isEnabled ? .labelColor : .secondaryLabelColor
+        nextButton.contentTintColor = nextButton.isEnabled ? .labelColor : .secondaryLabelColor
     }
 
     @objc private func dotClicked(_ sender: NSButton) {
