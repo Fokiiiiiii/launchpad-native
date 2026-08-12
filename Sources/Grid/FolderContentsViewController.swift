@@ -65,13 +65,15 @@ final class FolderContentsViewController: NSViewController {
     private static let minimumPanelWidth: CGFloat = 240
     private var itemHeight: CGFloat { CGFloat(iconSize) + 40 }
 
-    static func panelWidth(availableWidth: CGFloat, itemCount: Int, columns: Int, iconSize: CGFloat) -> CGFloat {
-        let columnCount = max(columns, 1)
-        let occupiedColumns = min(max(itemCount, 1), columnCount)
-        let compactWidth = CGFloat(occupiedColumns) * (max(iconSize, 1) + Self.tileLabelAllowance)
+    static func displayedColumnCount(itemCount: Int, configuredColumns: Int) -> Int {
+        min(max(itemCount, 1), max(configuredColumns, 1))
+    }
+
+    static func panelWidth(availableWidth: CGFloat, columns: Int, iconSize: CGFloat, usesWideLayout: Bool) -> CGFloat {
+        let compactWidth = CGFloat(max(columns, 1)) * (max(iconSize, 1) + Self.tileLabelAllowance)
             + 2 * Self.gridHorizontalInset
         let maximumWidth = max(availableWidth, Self.minimumPanelWidth)
-        guard itemCount < columnCount else { return maximumWidth }
+        guard !usesWideLayout else { return maximumWidth }
         return min(max(compactWidth, Self.minimumPanelWidth), maximumWidth)
     }
 

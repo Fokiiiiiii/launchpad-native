@@ -1320,11 +1320,16 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let hostView = view.window?.contentView ?? view
 
         let itemCount = model.folders[folderID]?.pages.reduce(0) { $0 + $1.count } ?? 0
+        let configuredColumns = max(model.gridSettings.columns, 1)
+        let folderColumns = FolderContentsViewController.displayedColumnCount(
+            itemCount: itemCount,
+            configuredColumns: configuredColumns
+        )
         let panelWidth = FolderContentsViewController.panelWidth(
             availableWidth: hostView.bounds.width - 192,
-            itemCount: itemCount,
-            columns: model.gridSettings.columns,
-            iconSize: CGFloat(currentIconSize * currentEffectiveIconScale)
+            columns: folderColumns,
+            iconSize: CGFloat(currentIconSize * currentEffectiveIconScale),
+            usesWideLayout: itemCount >= configuredColumns
         )
 
         let folderVC = FolderContentsViewController(
@@ -1336,7 +1341,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             // below. Pass the same effective visual size into that surface so
             // its mosaic and card height follow the main grid scale.
             iconSize: currentIconSize * currentEffectiveIconScale,
-            columns: model.gridSettings.columns,
+            columns: folderColumns,
             panelWidth: panelWidth,
             onLaunch: { [weak self] record in
                 self?.closeFolderOverlay()

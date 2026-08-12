@@ -658,17 +658,18 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         let inSearchMode = !searchResultsScrollView.isHidden
+        let searchRowLength = max(gridModel.gridSettings.columns, 1)
         switch selector {
         case #selector(NSResponder.moveDown(_:)):
             if inSearchMode {
-                viewModel.moveSelection(by: 7) // one grid row, matches default column count until Phase 6 grid settings wire in
+                viewModel.moveSelection(by: searchRowLength)
             } else {
                 gridViewController.moveSelection(deltaColumns: 0, deltaRows: 1)
             }
             return true
         case #selector(NSResponder.moveUp(_:)):
             if inSearchMode {
-                viewModel.moveSelection(by: -7)
+                viewModel.moveSelection(by: -searchRowLength)
             } else {
                 gridViewController.moveSelection(deltaColumns: 0, deltaRows: -1)
             }
