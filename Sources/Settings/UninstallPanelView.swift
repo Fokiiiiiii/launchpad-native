@@ -144,7 +144,7 @@ struct UninstallPanelView: View {
                 }
                 .labelsHidden()
                 .toggleStyle(.checkbox)
-                .disabled(selectableRows.isEmpty)
+                .disabled(selectableRows.isEmpty || viewModel.hasConfirmedRemoval)
                 Label(sectionTitle(kind), systemImage: sectionSymbol(kind))
                     .font(.system(size: 13))
                 Spacer()
@@ -181,7 +181,7 @@ struct UninstallPanelView: View {
             }
             .labelsHidden()
             .toggleStyle(.checkbox)
-            .disabled(row.isDisabled)
+            .disabled(row.isDisabled || viewModel.hasConfirmedRemoval)
 
             if row.removalItem.path == viewModel.record.bundleURL, let appIcon {
                 Image(nsImage: appIcon)
@@ -236,31 +236,47 @@ struct UninstallPanelView: View {
     }
 
     private var footer: some View {
-        HStack {
-            let allRows = viewModel.rowsBySection.values.flatMap { $0 }
-            let selectableRows = allRows.filter { !$0.isDisabled }
-            Toggle(isOn: Binding(
-                get: { !selectableRows.isEmpty && selectableRows.allSatisfy(\.isChecked) },
-                set: { newValue in
-                    for row in selectableRows { viewModel.setChecked(newValue, rowID: row.id) }
+        VStack(alignment: .leading, spacing: 10) {
+            if viewModel.operationReportError != nil {
+                Label {
+                    Text(L10n.uninstallReportSaveFailedNotice)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
                 }
-            )) {
-                Text(L10n.uninstallSelectAllLabel)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isStaticText)
             }
-            .toggleStyle(.checkbox)
-            Spacer()
-            Button(L10n.uninstallCancelButton, action: onCancel)
-                .buttonStyle(.bordered)
-                .keyboardShortcut(.cancelAction)
-            Button(action: onConfirm) {
-                Text(L10n.uninstallMoveToTrashButton)
+
+            HStack {
+                let allRows = viewModel.rowsBySection.values.flatMap { $0 }
+                let selectableRows = allRows.filter { !$0.isDisabled }
+                Toggle(isOn: Binding(
+                    get: { !selectableRows.isEmpty && selectableRows.allSatisfy(\.isChecked) },
+                    set: { newValue in
+                        for row in selectableRows { viewModel.setChecked(newValue, rowID: row.id) }
+                    }
+                )) {
+                    Text(L10n.uninstallSelectAllLabel)
+                }
+                .toggleStyle(.checkbox)
+                .disabled(viewModel.hasConfirmedRemoval)
+                Spacer()
+                Button(L10n.uninstallCancelButton, action: onCancel)
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(.cancelAction)
+                Button(action: onConfirm) {
+                    Text(L10n.uninstallMoveToTrashButton)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .disabled(viewModel.hasConfirmedRemoval || viewModel.isRecordingOperationReport)
+                // Deliberately no `.keyboardShortcut(.defaultAction)` — an
+                // accidental Return keypress must never trigger a Trash move,
+                // unlike the reference's own button (see this type's doc
+                // comment on why this diverges from it intentionally).
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.red)
-            // Deliberately no `.keyboardShortcut(.defaultAction)` — an
-            // accidental Return keypress must never trigger a Trash move,
-            // unlike the reference's own button (see this type's doc
-            // comment on why this diverges from it intentionally).
         }
         .padding(16)
     }

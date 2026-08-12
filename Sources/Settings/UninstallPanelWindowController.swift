@@ -39,6 +39,10 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
     /// `SettingsWindowController.closeWithoutKeyReclaim()`'s doc comment for
     /// the race this avoids (identical reasoning applies here).
     private var suppressNextWillCloseReclaim = false
+    /// Guards the destructive action while its operation report is being
+    /// persisted. A report-write failure leaves the panel open so its warning
+    /// can be read; the model itself also rejects any second execution.
+    private var isConfirming = false
 
     public init(iconCache: IconCache, onWillClose: @escaping () -> Void = {}) {
         self.iconCache = iconCache
@@ -219,11 +223,23 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
     }
 
     private func confirmAndClose() {
-        viewModel?.confirmMoveToTrash()
-        close()
+        guard !isConfirming, let viewModel else { return }
+        isConfirming = true
+        _ = viewModel.confirmMoveToTrash { [weak self, weak viewModel] reportSaved in
+            guard let self, self.viewModel === viewModel else { return }
+            self.isConfirming = false
+            // The removal has already happened either way. Close on the
+            // normal path only after the report is safely persisted; on a
+            // report failure, keep the panel open so the model's warning can
+            // distinguish that bookkeeping failure from the completed move.
+            if reportSaved {
+                self.close()
+            }
+        }
     }
 
     public func close() {
+        isConfirming = false
         outsideClickMonitor?.stop()
         outsideClickMonitor = nil
         window?.close()
@@ -252,9 +268,4 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// See `SettingsWindowController.windowDidBecomeKey`'s doc comment — same
-    /// fix, same reasoning, applies identically to this panel.
-    public func windowDidBecomeKey(_ notification: Notification) {
-        NSApp.presentationOptions.insert(.autoHideMenuBar)
-    }
 }

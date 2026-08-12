@@ -130,7 +130,4 @@ public final class WhatsNewWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    public func windowDidBecomeKey(_ notification: Notification) {
-        NSApp.presentationOptions.insert(.autoHideMenuBar)
-    }
 }

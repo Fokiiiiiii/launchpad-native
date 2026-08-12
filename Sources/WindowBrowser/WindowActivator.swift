@@ -37,8 +37,13 @@ public enum WindowActivator {
         guard AXIsProcessTrusted(), let axWindow = matchingAXWindow(for: window) else { return }
         var closeButton: AnyObject?
         guard AXUIElementCopyAttributeValue(axWindow, kAXCloseButtonAttribute as CFString, &closeButton) == .success,
-              let button = closeButton else { return }
-        AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString)
+              let closeButton,
+              CFGetTypeID(closeButton) == AXUIElementGetTypeID() else {
+            DiagnosticsLog.catalog.error("Accessibility returned an invalid close button for window \(window.id, privacy: .public)")
+            return
+        }
+        let button = unsafeDowncast(closeButton, to: AXUIElement.self)
+        AXUIElementPerformAction(button, kAXPressAction as CFString)
     }
 
     public static func minimize(_ window: WindowInfo) {
@@ -50,32 +55,60 @@ public enum WindowActivator {
         let app = AXUIElementCreateApplication(window.ownerProcessID)
         var windowsValue: AnyObject?
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windowsValue) == .success,
-              let axWindows = windowsValue as? [AXUIElement] else { return nil }
+              let axWindows = windowsValue as? [AnyObject] else { return nil }
 
         for axWindow in axWindows {
+            guard CFGetTypeID(axWindow) == AXUIElementGetTypeID() else {
+                DiagnosticsLog.catalog.error("Accessibility returned an invalid window element for process \(window.ownerProcessID, privacy: .public)")
+                continue
+            }
+            let windowElement = unsafeDowncast(axWindow, to: AXUIElement.self)
+
             var titleValue: AnyObject?
-            AXUIElementCopyAttributeValue(axWindow, kAXTitleAttribute as CFString, &titleValue)
+            AXUIElementCopyAttributeValue(windowElement, kAXTitleAttribute as CFString, &titleValue)
             let title = titleValue as? String ?? ""
 
             var positionValue: AnyObject?
             var sizeValue: AnyObject?
-            AXUIElementCopyAttributeValue(axWindow, kAXPositionAttribute as CFString, &positionValue)
-            AXUIElementCopyAttributeValue(axWindow, kAXSizeAttribute as CFString, &sizeValue)
+            AXUIElementCopyAttributeValue(windowElement, kAXPositionAttribute as CFString, &positionValue)
+            AXUIElementCopyAttributeValue(windowElement, kAXSizeAttribute as CFString, &sizeValue)
 
-            var origin = CGPoint.zero
-            var size = CGSize.zero
-            if let positionValue { AXValueGetValue(positionValue as! AXValue, .cgPoint, &origin) }
-            if let sizeValue { AXValueGetValue(sizeValue as! AXValue, .cgSize, &size) }
-
-            let frameMatches = abs(origin.x - window.frame.origin.x) < 2
-                && abs(origin.y - window.frame.origin.y) < 2
-                && abs(size.width - window.frame.width) < 2
-                && abs(size.height - window.frame.height) < 2
+            let frameMatches = matchesFrame(
+                expected: window.frame,
+                origin: point(from: positionValue),
+                size: size(from: sizeValue)
+            )
 
             if title == window.title || frameMatches {
-                return axWindow
+                return windowElement
             }
         }
         return nil
+    }
+
+    static func matchesFrame(expected: CGRect, origin: CGPoint?, size: CGSize?, tolerance: CGFloat = 2) -> Bool {
+        guard let origin, let size else { return false }
+        return abs(origin.x - expected.origin.x) < tolerance
+            && abs(origin.y - expected.origin.y) < tolerance
+            && abs(size.width - expected.width) < tolerance
+            && abs(size.height - expected.height) < tolerance
+    }
+
+    private static func point(from value: AnyObject?) -> CGPoint? {
+        guard let value,
+              CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        let axValue = unsafeDowncast(value, to: AXValue.self)
+        guard AXValueGetType(axValue) == .cgPoint else { return nil }
+        var point = CGPoint.zero
+        return AXValueGetValue(axValue, .cgPoint, &point) ? point : nil
+    }
+
+    private static func size(from value: AnyObject?) -> CGSize? {
+        guard let value,
+              CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        let axValue = unsafeDowncast(value, to: AXValue.self)
+        guard AXValueGetType(axValue) == .cgSize else { return nil }
+        var size = CGSize.zero
+        return AXValueGetValue(axValue, .cgSize, &size) ? size : nil
     }
 }

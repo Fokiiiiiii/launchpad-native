@@ -754,7 +754,7 @@ user's own hands-on trackpad test is still required before considering
 this closed.
 
 **Settings window redesign: grouped sections and SF Symbols throughout**,
-scoped down from a much larger LaunchOS-feature-parity request (the user
+scoped down from a much larger feature-parity request (the user
 chose to redesign only the Settings UI visually this round, deferring the
 larger feature checklist). Every tab (`Grid`/`Triggers`/`Sources`/
 `Hidden`) now uses `Form { Section { ... } header: { Label(...) } }
@@ -1792,14 +1792,17 @@ gestures.
   the existing implementation already meets the actual goal (no user
   setup required); there is no alternative, permission-gated path to
   switch to.
-- **Gesture conflict with real Apple gestures: cannot be fully eliminated
-  at the app level, disclosed rather than silently promised.**
+- **Gesture conflict with real Apple gestures: preference suppression is automatic, interception is not.**
   `MTRegisterContactFrameCallback` is a passive observer running parallel
   to the OS's own gesture recognition (Mission Control, Show Desktop,
-  Launchpad) — it cannot intercept or block that pipeline. The existing
-  `gestureConflictHint` warning + "open Trackpad settings" button remains
-  the practical ceiling; only the user disabling the conflicting System
-  Settings gesture fully prevents the conflict.
+  Launchpad) — it cannot intercept or block that pipeline. When the app's
+  multitouch trigger is enabled, `ConflictingGestureManager` atomically
+  disables the 4- and 5-finger pinch/navigation preferences for both
+  trackpad domains and the Dock gesture keys, verifies exact readback, and
+  restores the original values on shutdown. Reapplying the trigger also
+  re-sends the disabled values. The system consumer may still cache or
+  re-enable a gesture; that live WindowServer behavior requires physical
+  trackpad verification and is not claimed by the code alone.
 - **Search field text color fixed (root-caused via real measurement, not
   guesswork).** Diagnostic logging (`LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING=1`)
   compared the field editor's actual frame/`textContainerInset` against
@@ -1891,10 +1894,14 @@ also turned up a real, permission-free lever: `TrackpadFourFingerPinchGesture`/
 `TrackpadFiveFingerPinchGesture` in `com.apple.AppleMultitouchTrackpad`/
 `com.apple.driver.AppleBluetoothMultitouch.trackpad` are ordinary
 `CFPreferences` keys, no Accessibility grant required. New
-`Triggers.ConflictingGestureManager` writes/restores exactly those two keys
-(never the swipe keys) with an explicit backup-of-prior-value type
+`Triggers.ConflictingGestureManager` writes/restores those two pinch keys
+(never the swipe keys) plus the Dock-owned `showLaunchpadGestureEnabled`
+fallback with an explicit backup-of-prior-value type
 (`GestureConflictBackup`, distinguishing "key didn't exist" from "key was
-0") wired through a new Settings toggle. Disclosed plainly: whether this
+0") wired through a new Settings toggle. Re-applying writes zero even when
+the plist already reads zero, so the preference consumer receives a fresh
+notification instead of retaining stale in-memory state. Disclosed plainly:
+whether this
 takes effect without logout, and what "0" actually means, are described by
 outside sources only — not confirmed by toggling and observing this
 session, since there's no physical trackpad to test with here.
@@ -1906,9 +1913,9 @@ and-forth of screenshots and corrections (closed folder icon looked
 "huge"/had an unwanted shadow; opened-folder presentation had to become a
 full-screen dimmed take-over, not an anchored popover; a screenshot
 initially assumed to be this app turned out to be a different, actually-
-installed competitor app, `/Applications/LaunchOS.app`, running as a login
-item — a real environmental confound worth knowing about if a future
-screenshot looks unfamiliar; the opened-folder panel was stuck at a narrow
+installed competitor app running as a login item — a real environmental
+confound worth knowing about if a future screenshot looks unfamiliar; the
+opened-folder panel was stuck at a narrow
 3 columns instead of the reference's fixed 7). Applying the lesson learned
 from the closed icon (hosting the reference's actual view code beats
 re-deriving its numbers into AppKit/Core Graphics) a second time, to the
@@ -2074,6 +2081,49 @@ Escape-to-dismiss still feels right now that the traffic-light buttons are
 hidden — needs the user's own hands-on pass; this session's offscreen PNG
 renders and `log stream` checks establish "doesn't crash, geometry is
 correct," not "looks/feels right."
+
+## Liquid Glass foundation audit and visual verification (2026-08-02)
+
+A follow-up audit against the supplied `Tessera Launchpad デザイン.zip`
+identified four separate copies of the same AppKit glass-surface recipe.
+Those copies had drifted: only some honored Increase Contrast, some used
+non-interactive glass subclasses, and each feature module carried its own
+Reduce Transparency fallback. The implementation now has a dependency-free
+`DesignSystem` target whose `GlassSurfaceFactory` owns the macOS 26
+`NSGlassEffectView` path, the `NSVisualEffectView` fallback, contrast
+borders, card shadows/tints, and decorative-view hit-testing. `Launcher`,
+`Grid`, `Onboarding`, and `WhatsNew` retain small local facades so their
+call sites stay stable while sharing one implementation.
+
+Settings keeps a single outer Liquid Glass surface rather than stacking glass
+inside glass. Its section cards now adapt to Reduce Transparency, Increase
+Contrast, and light/dark appearance; section icons carry the accent while
+labels remain primary text; and the borderless panel uses a familiar red
+macOS close control at the mockup's top-left position. A permanent
+`LAUNCHPAD_DEBUG_SHOW_SETTINGS=1` verification hook opens the real Settings
+window only after the launcher exists, without changing preferences, so future
+visual regressions can be captured deterministically.
+
+The same audit removed Swift 6 actor-isolation warnings from workspace
+activation, folder-dismiss, reorder, folder-hover, and edge-page timers by
+returning completion work to `MainActor` without changing their delays or
+state-machine guards. Hot-corner exit now cancels any pending delayed
+activation, preventing the launcher from opening after the pointer has already
+left the corner. Search-field first-responder installation moves to the next
+MainActor turn; this preserves immediate keyboard search while eliminating the
+AppKit `layoutSubtreeIfNeeded` re-entry warning reproduced at launch.
+
+Verification: warning-free debug and production builds, `swift test`
+(113/113), release assembly and installation to
+`~/Applications/LaunchpadNative.app`, normal-process relaunch, and real
+on-screen screenshots of the launcher plus the General and Screen Settings
+tabs. The observed launcher/card geometry, page controls, Dock composition,
+close control, tab chrome, section hierarchy, and accessibility tree all
+match the supplied Tessera direction. The only app-owned startup error still
+observed is the expected `CGEventTap creation failed` when Input Monitoring
+has not been granted. Real trackpad momentum/gesture feel, Reduce Transparency
+live toggling, and search-after-typing layout still require a hands-on pass;
+model and pure-logic tests do not prove those AppKit interaction boundaries.
 
 ## Requirements
 

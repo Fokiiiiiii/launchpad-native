@@ -41,9 +41,26 @@ public final class UninstallPanelViewModel: ObservableObject {
     @Published public private(set) var rowsBySection: [SectionKind: [Row]] = [:]
     @Published public private(set) var isComputingSizes = true
     @Published public private(set) var totalSizeText = "—"
+    /// Set only when the removal itself has already completed but its
+    /// operation-history report could not be persisted. This is deliberately
+    /// separate from `RemovalOutcome`: a report-write failure must never make
+    /// an item that was moved to Trash look like a failed removal.
+    @Published public private(set) var operationReportError: String?
+    /// Prevents a second destructive execution while the first report is
+    /// still being persisted (or after a persistence failure leaves this
+    /// panel open so the warning can be read).
+    @Published public private(set) var hasConfirmedRemoval = false
+    @Published public private(set) var isRecordingOperationReport = false
 
-    public init(record: ApplicationRecord, allRecords: [ApplicationRecord]) {
+    private let operationReportStore: OperationReportStore
+
+    public init(
+        record: ApplicationRecord,
+        allRecords: [ApplicationRecord],
+        operationReportStore: OperationReportStore = OperationReportStore()
+    ) {
         self.record = record
+        self.operationReportStore = operationReportStore
         let evidence = OwnershipEvidenceCollector.collect(for: record)
         var plan = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: allRecords)
 
@@ -122,13 +139,37 @@ public final class UninstallPanelViewModel: ObservableObject {
         totalSizeText = ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
     }
 
+    /// Executes the selected removals immediately and records the resulting
+    /// outcomes asynchronously. `onReportRecorded` is called on the main
+    /// actor once the report has either been saved (`true`) or failed (`false`)
+    /// so the owning window can close only after a successful history write.
     @discardableResult
-    public func confirmMoveToTrash() -> [RemovalOutcome] {
+    public func confirmMoveToTrash(onReportRecorded: ((Bool) -> Void)? = nil) -> [RemovalOutcome] {
+        guard !hasConfirmedRemoval else { return [] }
+        hasConfirmedRemoval = true
+        operationReportError = nil
+        isRecordingOperationReport = true
+
         RemovalExecutor.terminateIfRunning(bundleIdentifier: record.bundleIdentifier)
         let checked = rowsBySection.values.flatMap { $0 }.filter(\.isChecked).map(\.removalItem)
         let outcomes = RemovalExecutor.execute(checked)
         let bundleIdentifier = record.bundleIdentifier
-        Task { try? await OperationReportStore().recordExecution(bundleIdentifier: bundleIdentifier, outcomes: outcomes) }
+        let operationReportStore = self.operationReportStore
+        Task { @MainActor [weak self] in
+            do {
+                _ = try await operationReportStore.recordExecution(bundleIdentifier: bundleIdentifier, outcomes: outcomes)
+                self?.isRecordingOperationReport = false
+                onReportRecorded?(true)
+            } catch {
+                let detail = error.localizedDescription
+                DiagnosticsLog.uninstall.error(
+                    "Failed to record operation report for \(bundleIdentifier, privacy: .public): \(String(describing: error), privacy: .public)"
+                )
+                self?.operationReportError = detail
+                self?.isRecordingOperationReport = false
+                onReportRecorded?(false)
+            }
+        }
         return outcomes
     }
 }

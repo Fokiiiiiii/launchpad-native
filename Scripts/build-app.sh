@@ -45,6 +45,14 @@ if [ -d "$SCRATCH/$CONFIG/LaunchpadNative_Localization.bundle" ]; then
     cp -R "$SCRATCH/$CONFIG/LaunchpadNative_Localization.bundle" "$APP/Contents/Resources/"
 fi
 
+# SwiftPM signs the executable it produces, but assembling a new .app around
+# that executable afterwards changes the sealed resource set. Re-sign the
+# completed bundle before installation; otherwise LaunchServices may reject
+# it immediately with “code has no resources but signature indicates they
+# must be present”, making an apparently successful build impossible to run.
+codesign --force --deep --sign - "$APP"
+codesign --verify --deep --strict "$APP"
+
 echo "Built $APP"
 
 pkill -f "Applications/LaunchpadNative.app/Contents/MacOS/AppHost" 2>/dev/null || true
