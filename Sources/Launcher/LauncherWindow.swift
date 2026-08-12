@@ -30,23 +30,27 @@ final class LauncherWindow: NSWindow {
         // existing fullscreen app instead of becoming a new fullscreen app.
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
         isMovable = false
-        hidesOnDeactivate = false
+        // Never leave a full-display overlay above the app the user just
+        // opened. AppKit handles the deactivation transition synchronously;
+        // the controller's observer remains as a fallback for Space/app
+        // switches that do not generate a key-window transition.
+        hidesOnDeactivate = true
         // Preserve mouse-move delivery for AppKit's normal window handling;
         // the controller intentionally does not install a global mouse-move
         // monitor, which would create a task for every pointer event.
         acceptsMouseMovedEvents = true
     }
 
-    /// Keep the overlay below the Dock unless the user explicitly asks to
-    /// hide it. The real Dock must remain above the launcher in the default
-    /// presentation.
+    /// Keep the overlay at normal application level unless the user
+    /// explicitly asks to hide the Dock. A dock-adjacent level can leave the
+    /// full-display overlay above another app after deactivation.
     func applyDockVisibilityPreference(
         hideDock: Bool,
         reason: String = "unspecified",
         screenFrame: NSRect? = nil
     ) {
         let dockLevel = Int(CGWindowLevelForKey(.dockWindow))
-        level = NSWindow.Level(rawValue: hideDock ? dockLevel + 1 : dockLevel - 1)
+        level = hideDock ? NSWindow.Level(rawValue: dockLevel + 1) : .normal
         if let displayFrame = screenFrame ?? screen?.frame {
             setFrame(displayFrame, display: true)
         }

@@ -423,7 +423,12 @@ public struct SettingsView: View {
                         SettingsCardRow(minHeight: 34) {
                             HStack(spacing: 10) {
                                 Text(L10n.glassMaterialLabel)
-                                Slider(value: $viewModel.glassMaterialIntensity, in: 0...1, step: 0.05)
+                                Slider(
+                                    value: $viewModel.glassMaterialIntensity,
+                                    in: 0...1,
+                                    step: 0.05,
+                                    onEditingChanged: viewModel.setGlassMaterialEditing
+                                )
                                     .accessibilityLabel(Text(L10n.glassMaterialLabel))
                                 Text("\(Int(viewModel.glassMaterialIntensity * 100))%")
                                     .foregroundStyle(.secondary)

@@ -44,6 +44,7 @@ func launcherViewLoadsEmptySearchStateWithoutInvalidCrossHierarchyConstraints() 
     #expect(window.collectionBehavior.contains(.canJoinAllSpaces))
     #expect(window.collectionBehavior.contains(.fullScreenAuxiliary))
     #expect(!window.collectionBehavior.contains(.fullScreenPrimary))
+    #expect(window.hidesOnDeactivate)
 }
 
 @Test @MainActor func launcherDoesNotConstrainTheOverlayBelowTheHiddenMenuBar() {
@@ -81,6 +82,7 @@ func launcherViewLoadsEmptySearchStateWithoutInvalidCrossHierarchyConstraints() 
 
     window.applyDockVisibilityPreference(hideDock: false)
 
+    #expect(window.level == .normal)
     #expect(window.level.rawValue < dockLevel)
 }
 

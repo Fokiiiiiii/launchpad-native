@@ -61,6 +61,16 @@ final class TesseraBackgroundView: NSView {
     private var screen: NSScreen
     private var configuration: Configuration
     private var wallpaperRequestGeneration = 0
+    private var configurationGeneration: UInt = 0
+    private var configurationTask: Task<Void, Never>?
+    private var wallpaperTask: Task<Void, Never>?
+    /// The image request is intentionally independent from the material
+    /// slider.  Re-resolving WindowServer and re-blurring the desktop for
+    /// every 0.05 slider step can monopolize the main actor while the user
+    /// is still dragging.  The last requested mode/blur pair is enough to
+    /// decide when the wallpaper pixels themselves need to change.
+    private var lastWallpaperMode: LauncherBackgroundMode?
+    private var lastWallpaperBlur: Bool?
 
     init(screen: NSScreen, viewportOrigin: CGPoint = .zero, configuration: Configuration = .init()) {
         self.fullScreenSize = screen.frame.size
@@ -150,21 +160,34 @@ final class TesseraBackgroundView: NSView {
     /// the wallpaper contribution visible while retaining enough contrast for
     /// the icon grid; material intensity adjusts opacity, blur, and sheen
     /// together.
-    private func applyConfiguration() {
-        wallpaperRequestGeneration &+= 1
+    private func applyConfiguration(
+        clearWallpaper: Bool = true,
+        reloadWallpaper: Bool = true
+    ) {
+        if reloadWallpaper {
+            wallpaperTask?.cancel()
+            wallpaperTask = nil
+            wallpaperRequestGeneration &+= 1
+        }
         let requestGeneration = wallpaperRequestGeneration
         // A request can target another display, URL, radius, or mode. Never
         // keep showing a previous display's image while that source is being
         // resolved; the opaque base is the only valid state until the current
         // desktop image decodes successfully.
-        wallpaperLayer.contents = nil
+        if clearWallpaper && reloadWallpaper {
+            wallpaperLayer.contents = nil
+        }
         switch configuration.mode {
         case .glass:
             let material = Self.glassMaterialParameters(for: configuration.materialIntensity)
             wallpaperLayer.opacity = material.wallpaperOpacity
             scrimLayer.opacity = 1
             sheenLayer.opacity = material.sheenOpacity
-            requestWallpaper(radius: material.blurRadius, generation: requestGeneration)
+            if reloadWallpaper {
+                lastWallpaperMode = .glass
+                lastWallpaperBlur = true
+                requestWallpaper(radius: material.blurRadius, generation: requestGeneration)
+            }
         case .wallpaper:
             let radius: CGFloat = configuration.blursWallpaper ? 26 : 0
             wallpaperLayer.opacity = 1.0
@@ -174,7 +197,11 @@ final class TesseraBackgroundView: NSView {
             // the content. It is deliberately much lighter than glass mode.
             scrimLayer.opacity = 0.14
             sheenLayer.opacity = 0
-            requestWallpaper(radius: radius, generation: requestGeneration)
+            if reloadWallpaper {
+                lastWallpaperMode = .wallpaper
+                lastWallpaperBlur = configuration.blursWallpaper
+                requestWallpaper(radius: radius, generation: requestGeneration)
+            }
         }
     }
 
@@ -198,20 +225,24 @@ final class TesseraBackgroundView: NSView {
         DiagnosticsLog.launcher.info(
             "wallpaper request: mode=\(self.configuration.mode.rawValue, privacy: .public), sourceKind=\(source.kind.rawValue, privacy: .public), displayID=\(displayID, privacy: .public), resolvedURL=\(source.url?.path ?? "<unavailable>", privacy: .private), radius=\(radius, privacy: .public)"
         )
-        Task { @MainActor [weak self] in
+        wallpaperTask = Task { @MainActor [weak self] in
             let image = await TesseraWallpaperImageCache.blurredWallpaperAsync(
                 for: requestedScreen,
                 radius: radius
             )
-            guard let self, self.wallpaperRequestGeneration == generation else { return }
+            guard let self,
+                  !Task.isCancelled,
+                  self.wallpaperRequestGeneration == generation else { return }
             guard let image else {
                 // Do not substitute a synthetic asset when the OS wallpaper
                 // cannot be read. The opaque base remains visible and the
                 // cache diagnostics identify the display/URL failure.
                 self.wallpaperLayer.contents = nil
+                self.wallpaperTask = nil
                 return
             }
             self.wallpaperLayer.contents = image
+            self.wallpaperTask = nil
         }
     }
 
@@ -222,7 +253,28 @@ final class TesseraBackgroundView: NSView {
     /// live-apply behavior.
     func update(configuration: Configuration) {
         self.configuration = configuration
-        applyConfiguration()
+        configurationGeneration &+= 1
+        let generation = configurationGeneration
+        let wallpaperNeedsReload = lastWallpaperMode != configuration.mode
+            || lastWallpaperBlur != configuration.blursWallpaper
+        configurationTask?.cancel()
+        configurationTask = Task { @MainActor [weak self] in
+            // Slider updates arrive in bursts. Apply one latest configuration
+            // per event turn so stale blur requests never pile up.
+            await Task.yield()
+            guard let self,
+                  !Task.isCancelled,
+                  self.configurationGeneration == generation else { return }
+            // Material-only changes update the layer properties in place and
+            // retain the last successfully loaded wallpaper.  A mode/blur
+            // change is the only case that needs a new WindowServer/image
+            // request.
+            self.applyConfiguration(
+                clearWallpaper: wallpaperNeedsReload,
+                reloadWallpaper: wallpaperNeedsReload
+            )
+            self.configurationTask = nil
+        }
     }
 
     /// Updates the display geometry when the launcher moves to another
@@ -235,6 +287,9 @@ final class TesseraBackgroundView: NSView {
         if let viewportOrigin {
             self.viewportOrigin = viewportOrigin
         }
+        configurationTask?.cancel()
+        configurationTask = nil
+        configurationGeneration &+= 1
         applyConfiguration()
         updateLayerFrames()
     }

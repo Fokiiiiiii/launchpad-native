@@ -194,7 +194,6 @@ public final class GridModel {
 
     public func setBackgroundMode(_ mode: LauncherBackgroundMode) {
         document.backgroundMode = mode
-        onChange?()
     }
 
     public var glassMaterialIntensity: Double {
@@ -202,8 +201,7 @@ public final class GridModel {
     }
 
     public func setGlassMaterialIntensity(_ value: Double) {
-        document.glassMaterialIntensity = value
-        onChange?()
+        document.glassMaterialIntensity = min(max(value, 0), 1)
     }
 
     public var blursWallpaper: Bool {
@@ -212,7 +210,6 @@ public final class GridModel {
 
     public func setBlursWallpaper(_ value: Bool) {
         document.blursWallpaper = value
-        onChange?()
     }
 
     /// "カスタム" (manual drag order, unchanged), "名前順", "追加日順" (newest

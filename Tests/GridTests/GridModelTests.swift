@@ -52,6 +52,22 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(changes == 2)
 }
 
+@Test @MainActor func backgroundSettingsDoNotReloadTheGridObserver() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+
+    var reloads = 0
+    model.onChange = { reloads += 1 }
+    model.setBackgroundMode(.wallpaper)
+    model.setGlassMaterialIntensity(2)
+    model.setBlursWallpaper(false)
+
+    #expect(model.glassMaterialIntensity == 1)
+    #expect(reloads == 0)
+}
+
 @Test @MainActor func reconcileAppendsNewAppsAlphabetically() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }

@@ -90,6 +90,12 @@ public final class SettingsViewModel: ObservableObject {
     private var triggerApplyOwnerGeneration: UInt?
     private var triggerApplyGeneration: UInt = 0
     private var pendingTriggerSettings: TriggerSettings?
+    /// Background sliders emit several values during one drag. Keep the live
+    /// preview responsive and write only the latest value once the main-actor
+    /// event turn settles instead of queueing an atomic layout write per tick.
+    private var backgroundPersistTask: Task<Void, Never>?
+    private var backgroundPersistGeneration: UInt = 0
+    private var isEditingGlassMaterial = false
 
     @Published public var selectedTab: SettingsTab = .general
     @Published public var columns: Int {
@@ -223,7 +229,7 @@ public final class SettingsViewModel: ObservableObject {
             guard !isRefreshing else { return }
             model.setBackgroundMode(backgroundMode)
             onBackgroundSettingsChanged()
-            persist()
+            persistBackgroundSettings()
         }
     }
     @Published public var glassMaterialIntensity: Double {
@@ -232,7 +238,9 @@ public final class SettingsViewModel: ObservableObject {
             guard !isRefreshing else { return }
             model.setGlassMaterialIntensity(glassMaterialIntensity)
             onBackgroundSettingsChanged()
-            persist()
+            if !isEditingGlassMaterial {
+                persistBackgroundSettings()
+            }
         }
     }
     @Published public var blursWallpaper: Bool {
@@ -241,7 +249,7 @@ public final class SettingsViewModel: ObservableObject {
             guard !isRefreshing else { return }
             model.setBlursWallpaper(blursWallpaper)
             onBackgroundSettingsChanged()
-            persist()
+            persistBackgroundSettings()
         }
     }
 
@@ -719,7 +727,35 @@ public final class SettingsViewModel: ObservableObject {
         }
     }
 
+    /// Slider updates are intentionally live-only while the pointer is down;
+    /// the final value is persisted once editing ends. This keeps rapid UI
+    /// drags from queueing atomic layout writes behind one another.
+    func setGlassMaterialEditing(_ editing: Bool) {
+        isEditingGlassMaterial = editing
+        if !editing {
+            persistBackgroundSettings()
+        }
+    }
+
     private func persist() {
         Task { await model.save() }
+    }
+
+    private func persistBackgroundSettings() {
+        backgroundPersistGeneration &+= 1
+        let generation = backgroundPersistGeneration
+        backgroundPersistTask?.cancel()
+        backgroundPersistTask = Task { @MainActor [weak self] in
+            // Coalesce values emitted by one Slider drag into the latest
+            // configuration without introducing a wall-clock debounce.
+            await Task.yield()
+            guard let self,
+                  !Task.isCancelled,
+                  self.backgroundPersistGeneration == generation else { return }
+            _ = await self.model.save()
+            if self.backgroundPersistGeneration == generation {
+                self.backgroundPersistTask = nil
+            }
+        }
     }
 }
