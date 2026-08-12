@@ -26,6 +26,9 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private let searchResultsCollectionView = SearchResultsCollectionView()
     private let searchResultsScrollView = NSScrollView()
     private let searchResultsLayout = NSCollectionViewFlowLayout()
+    private let emptySearchResultsView = NSStackView()
+    private var searchResultsBottomConstraint: NSLayoutConstraint?
+    private var currentDockInset: CGFloat = 0
     private let itemIdentifier = NSUserInterfaceItemIdentifier("AppIconItem")
     private lazy var gridViewController = GridViewController(
         model: gridModel,
@@ -182,6 +185,44 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchResultsCollectionView.backgroundColors = [.clear]
         searchResultsCollectionView.onBackgroundClick = { [weak self] in self?.onDidCancel() }
 
+        let emptyIcon = NSImageView()
+        emptyIcon.image = NSImage(
+            systemSymbolName: "magnifyingglass",
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(.init(pointSize: 18, weight: .regular))
+        emptyIcon.contentTintColor = .tertiaryLabelColor
+        emptyIcon.setAccessibilityElement(false)
+
+        let emptyTitle = NSTextField(labelWithString: L10n.searchNoResultsTitle)
+        emptyTitle.font = .systemFont(ofSize: 14, weight: .medium)
+        emptyTitle.textColor = .secondaryLabelColor
+        emptyTitle.alignment = .center
+        emptyTitle.setAccessibilityElement(false)
+
+        let emptyMessage = NSTextField(labelWithString: L10n.searchNoResultsMessage)
+        emptyMessage.font = .systemFont(ofSize: 12)
+        emptyMessage.textColor = .tertiaryLabelColor
+        emptyMessage.alignment = .center
+        emptyMessage.setAccessibilityElement(false)
+
+        emptySearchResultsView.translatesAutoresizingMaskIntoConstraints = false
+        emptySearchResultsView.orientation = .vertical
+        emptySearchResultsView.alignment = .centerX
+        emptySearchResultsView.spacing = 4
+        emptySearchResultsView.addArrangedSubview(emptyIcon)
+        emptySearchResultsView.addArrangedSubview(emptyTitle)
+        emptySearchResultsView.addArrangedSubview(emptyMessage)
+        emptySearchResultsView.setAccessibilityElement(true)
+        emptySearchResultsView.setAccessibilityRole(.group)
+        emptySearchResultsView.setAccessibilityLabel(L10n.searchNoResultsTitle)
+        emptySearchResultsView.setAccessibilityHelp(L10n.searchNoResultsMessage)
+        emptySearchResultsView.isHidden = true
+        searchResultsCollectionView.backgroundView = emptySearchResultsView
+        NSLayoutConstraint.activate([
+            emptySearchResultsView.centerXAnchor.constraint(equalTo: searchResultsCollectionView.centerXAnchor),
+            emptySearchResultsView.centerYAnchor.constraint(equalTo: searchResultsCollectionView.centerYAnchor)
+        ])
+
         searchResultsScrollView.translatesAutoresizingMaskIntoConstraints = false
         searchResultsScrollView.documentView = searchResultsCollectionView
         searchResultsScrollView.drawsBackground = false
@@ -208,10 +249,12 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         root.addSubview(searchBar)
         root.addSubview(gridViewController.view)
         root.addSubview(searchResultsScrollView)
+        let searchResultsBottom = searchResultsScrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+        searchResultsBottomConstraint = searchResultsBottom
         NSLayoutConstraint.activate([
             // 300x36 — `TSLayout.searchWidth`/`searchHeight` from the
             // reference exactly; the previous 400x44 was an invented value.
-            searchBar.topAnchor.constraint(equalTo: root.topAnchor, constant: 36),
+            searchBar.topAnchor.constraint(equalTo: root.topAnchor, constant: 52),
             searchBar.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             searchBar.widthAnchor.constraint(equalToConstant: 300),
             searchBar.heightAnchor.constraint(equalToConstant: 36),
@@ -242,28 +285,43 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             quickMenuButton.widthAnchor.constraint(equalToConstant: 20),
             quickMenuButton.heightAnchor.constraint(equalToConstant: 20),
 
-            gridViewController.view.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 24),
+            gridViewController.view.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 30),
             gridViewController.view.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             gridViewController.view.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             gridViewController.view.bottomAnchor.constraint(equalTo: root.bottomAnchor),
 
-            searchResultsScrollView.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 24),
+            searchResultsScrollView.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 30),
             searchResultsScrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             searchResultsScrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            searchResultsScrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+            searchResultsBottom
         ])
 
         view = root
         viewModel.onChange = { [weak self] in
             self?.searchResultsCollectionView.reloadData()
+            self?.updateSearchResultsPresentation()
+            self?.applySearchResultsLayoutMetrics()
         }
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        applySearchResultsLayoutMetrics()
     }
 
     override func viewDidAppear() {
         super.viewDidAppear()
         applySearchResultsLayoutMetrics()
-        view.window?.makeFirstResponder(searchField)
         DiagnosticsLog.launcher.info("viewDidAppear layout: root=\(String(describing: self.view.frame), privacy: .public), grid=\(String(describing: self.gridViewController.view.frame), privacy: .public), searchField=\(String(describing: self.searchField.convert(self.searchField.bounds, to: self.view)), privacy: .public)")
+
+        // AppKit can still be resolving the hosting hierarchy while
+        // viewDidAppear runs. Moving first-responder installation to the next
+        // MainActor turn avoids re-entering layout while preserving immediate
+        // keyboard search focus.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.view.window?.makeFirstResponder(self.searchField)
+        }
     }
 
     func resetSearch() {
@@ -396,6 +454,15 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         applySearchResultsLayoutMetrics()
     }
 
+    func refreshDockLayout() {
+        let dockInset = gridViewController.refreshDockLayout()
+        guard abs(currentDockInset - dockInset) > 0.5 else { return }
+        currentDockInset = dockInset
+        searchResultsBottomConstraint?.constant = -dockInset
+        applySearchResultsLayoutMetrics()
+        view.layoutSubtreeIfNeeded()
+    }
+
     /// Debug-only entry point (`LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG`, wired
     /// in `AppDelegate`) — see `GridViewController.debugSimulatePageDrag`'s
     /// doc comment for why this exists.
@@ -435,7 +502,29 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             ? cellSize
             : NSSize(width: 96, height: 110) // before the grid's first layout pass
         let margin = CGFloat(settings.pageMargins)
-        let insets = NSEdgeInsets(top: margin, left: margin, bottom: margin, right: margin)
+        let itemCount = viewModel.filteredRecords.count
+        let isSingleRowResultSet = !viewModel.query.isEmpty
+            && itemCount > 0
+            && itemCount <= max(settings.columns, 1)
+        let viewport = searchResultsScrollView.contentView.bounds.size
+        let contentWidth = CGFloat(itemCount) * itemSize.width
+            + CGFloat(max(itemCount - 1, 0)) * CGFloat(settings.horizontalSpacing)
+        let horizontalInset = isSingleRowResultSet
+            ? max(margin, (viewport.width - contentWidth) / 2)
+            : margin
+        let verticalInset = isSingleRowResultSet
+            ? max(margin, (viewport.height - itemSize.height) / 2)
+            : margin
+        // The scroll view's bottom constraint already moves up by
+        // `currentDockInset` in `refreshDockLayout()`. Keep the collection
+        // view's own section inset to the persistent page margin only; adding
+        // the Dock inset here as well would reserve that height twice.
+        let insets = NSEdgeInsets(
+            top: verticalInset,
+            left: horizontalInset,
+            bottom: verticalInset,
+            right: horizontalInset
+        )
 
         let currentInset = searchResultsLayout.sectionInset
         let insetsUnchanged = currentInset.top == insets.top && currentInset.left == insets.left
@@ -452,6 +541,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchResultsLayout.invalidateLayout()
     }
 
+    private func updateSearchResultsPresentation() {
+        emptySearchResultsView.isHidden = viewModel.query.isEmpty || !viewModel.filteredRecords.isEmpty
+    }
+
     @objc private func settingsButtonTapped() {
         onOpenSettings()
     }
@@ -461,13 +554,8 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
         let pagedItem = NSMenuItem(title: L10n.layoutModePaged, action: #selector(selectPagedLayoutMode), keyEquivalent: "")
         pagedItem.target = self
-        pagedItem.state = gridModel.layoutMode == .paged ? .on : .off
+        pagedItem.state = .on
         menu.addItem(pagedItem)
-
-        let scrollItem = NSMenuItem(title: L10n.layoutModeVerticalScroll, action: #selector(selectVerticalScrollLayoutMode), keyEquivalent: "")
-        scrollItem.target = self
-        scrollItem.state = gridModel.layoutMode == .verticalScroll ? .on : .off
-        menu.addItem(scrollItem)
 
         menu.addItem(.separator())
         let sortItem = NSMenuItem(title: L10n.sortByLabel, action: nil, keyEquivalent: "")
@@ -498,10 +586,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     }
 
     @objc private func selectPagedLayoutMode() { applyLayoutMode(.paged) }
-    @objc private func selectVerticalScrollLayoutMode() { applyLayoutMode(.verticalScroll) }
 
     private func applyLayoutMode(_ mode: LayoutMode) {
-        gridModel.setLayoutMode(mode)
+        let supportedMode: LayoutMode = mode == .verticalScroll ? .paged : mode
+        gridModel.setLayoutMode(supportedMode)
         Task { await gridModel.save() }
     }
 
@@ -634,7 +722,8 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         let record = viewModel.filteredRecords[indexPath.item]
         let isSelected = viewModel.selectedIndex == indexPath.item
         let iconSize = gridViewController.currentIconSize
-        item.configure(record: record, icon: NSWorkspace.shared.icon(for: .applicationBundle), isSelected: isSelected, iconSize: iconSize)
+        let visualScale = gridViewController.currentEffectiveIconScale
+        item.configure(record: record, icon: NSWorkspace.shared.icon(for: .applicationBundle), isSelected: isSelected, iconSize: iconSize, visualScale: visualScale)
 
         let cache = iconCache
         let expectedKey = record.iconCacheKey
@@ -643,7 +732,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             // Search results reload on every keystroke, recycling cells —
             // same cell-reuse guard as Grid.GridCellItem, see its comment.
             guard item.currentRequestKey == expectedKey else { return }
-            item.configure(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize)
+            item.configure(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale)
         }
         return item
     }

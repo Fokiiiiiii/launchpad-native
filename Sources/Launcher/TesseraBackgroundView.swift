@@ -1,4 +1,5 @@
 import AppKit
+import Diagnostics
 import Persistence
 import QuartzCore
 
@@ -18,19 +19,22 @@ import QuartzCore
 /// direct fix, replacing that edge-to-edge glass usage with a composition
 /// that mirrors what the reference actually does full-screen.
 final class TesseraBackgroundView: NSView {
+    struct GlassMaterialParameters: Equatable {
+        let wallpaperOpacity: Float
+        let blurRadius: CGFloat
+        let sheenOpacity: Float
+    }
+
     struct Configuration {
-        /// Off for `MenuBarCoverWindow`'s narrow strip — the bloom/highlight
-        /// ellipses are sized for a full screen and would barely register
-        /// (or render as an odd partial smear) in a <40pt-tall bar, and
-        /// keeping two independently-animated windows' blooms phase-locked
-        /// isn't worth the complexity for something that wouldn't be visible
-        /// anyway.
+        /// Off for any future narrow decorative surface — the
+        /// bloom/highlight ellipses are sized for a full screen and would
+        /// barely register in a small strip.
         var includeBloomHighlights: Bool = true
-        /// `.glass` (the default) is byte-for-byte the composition this
-        /// view already drew before Round 20 — a dimmed/tinted wallpaper
-        /// with a dark scrim and material sheen. `.wallpaper` shows the
-        /// desktop wallpaper close to full opacity with no scrim, matching
-        /// the reference's own `TSBackgroundMode.wallpaper`.
+        /// `.glass` (the default) keeps a readable Liquid Glass-style
+        /// composition: a visibly present, blurred wallpaper, a moderate
+        /// scrim, and material sheen. `.wallpaper` keeps the desktop image
+        /// first in the stack, optionally blurred, with only a very light
+        /// translucent scrim above it so the wallpaper remains visible.
         var mode: LauncherBackgroundMode = .glass
         /// 0...1, `.glass` mode only — scales the sheen highlight's
         /// opacity. The reference's own default (0.35) is this view's
@@ -49,29 +53,14 @@ final class TesseraBackgroundView: NSView {
     private let sheenLayer = CAGradientLayer()
     private var bloomLayer: CALayer?
     private var highlightLayer: CALayer?
-    private let fullScreenSize: CGSize
-    /// This view's own position within the full screen, in the screen's own
-    /// bottom-left-origin coordinate space (`NSScreen.frame`'s own
-    /// convention). Real, confirmed report ("メニューバーの上の部分が黒く
-    /// なっている"): `MenuBarCoverWindow` and `LauncherWindowController`
-    /// each construct their own independent `TesseraBackgroundView`
-    /// instance, and every gradient here (`scrimLayer`/`sheenLayer`) is
-    /// positioned in *that layer's own* unit square — each view previously
-    /// treated its own bounds as if it were the entire screen, so the menu
-    /// bar strip's gradients ran their own independent 0-to-1 sweep across
-    /// its ~31pt height while the main window ran the *same* 0-to-1 sweep
-    /// across its ~1000pt+ height. Two independently-normalized gradients
-    /// meeting at a shared edge don't produce continuous values there —
-    /// this is why the strip visibly reads as a flat, separate band instead
-    /// of blending into what's directly below it. Fed with the *whole
-    /// screen's* size and this view's own offset within it, every layer
-    /// below is now framed at full-screen size and shifted by
-    /// `-viewportOrigin` — each view becomes a window looking into one
-    /// shared, continuous composition instead of computing its own
-    /// self-contained one.
-    private let viewportOrigin: CGPoint
-    private let screen: NSScreen
+    private var fullScreenSize: CGSize
+    /// This view's offset within the screen's full-frame coordinate space.
+    /// The launcher owns the full target display, so the normal value is
+    /// `.zero`; the parameter remains available for any bounded host view.
+    private var viewportOrigin: CGPoint
+    private var screen: NSScreen
     private var configuration: Configuration
+    private var wallpaperRequestGeneration = 0
 
     init(screen: NSScreen, viewportOrigin: CGPoint = .zero, configuration: Configuration = .init()) {
         self.fullScreenSize = screen.frame.size
@@ -90,8 +79,12 @@ final class TesseraBackgroundView: NSView {
         root.addSublayer(wallpaperLayer)
 
         scrimLayer.colors = [
-            NSColor(srgb: 0x0C0C0D, alpha: 0.92).cgColor,
-            NSColor(srgb: 0x101011, alpha: 0.94).cgColor
+            // Keep the glass mode legible without crushing the wallpaper into
+            // a nearly uniform blue-black surface. Together with the
+            // intensity-dependent wallpaper layer this leaves roughly
+            // 20–25% of the desktop's colour/contrast visible behind the UI.
+            NSColor(srgb: 0x0C0C0D, alpha: 0.62).cgColor,
+            NSColor(srgb: 0x101011, alpha: 0.68).cgColor
         ]
         scrimLayer.startPoint = CGPoint(x: 0.5, y: 1.0)
         scrimLayer.endPoint = CGPoint(x: 0.5, y: 0.0)
@@ -153,24 +146,72 @@ final class TesseraBackgroundView: NSView {
 
     /// Applies `configuration`'s `mode`/`materialIntensity`/`blursWallpaper`
     /// to the already-built layer tree — called once from `init` and again,
-    /// live, from `update(configuration:)`. `.glass` reproduces this view's
-    /// original, pre-Round-20 fixed values exactly (`wallpaperLayer.opacity
-    /// == 0.30`, full scrim, `sheenLayer.opacity == 0.35` when
-    /// `materialIntensity == 0.35`) — a user who never touches the new
-    /// Settings controls sees no visual change at all.
+    /// live, from `update(configuration:)`. Glass mode intentionally keeps
+    /// the wallpaper contribution visible while retaining enough contrast for
+    /// the icon grid; material intensity adjusts opacity, blur, and sheen
+    /// together.
     private func applyConfiguration() {
+        wallpaperRequestGeneration &+= 1
+        let requestGeneration = wallpaperRequestGeneration
+        // A request can target another display, URL, radius, or mode. Never
+        // keep showing a previous display's image while that source is being
+        // resolved; the opaque base is the only valid state until the current
+        // desktop image decodes successfully.
+        wallpaperLayer.contents = nil
         switch configuration.mode {
         case .glass:
-            wallpaperLayer.contents = TesseraWallpaperImageCache.blurredWallpaper(for: screen)
-            wallpaperLayer.opacity = 0.30
+            let material = Self.glassMaterialParameters(for: configuration.materialIntensity)
+            wallpaperLayer.opacity = material.wallpaperOpacity
             scrimLayer.opacity = 1
-            sheenLayer.opacity = Float(configuration.materialIntensity)
+            sheenLayer.opacity = material.sheenOpacity
+            requestWallpaper(radius: material.blurRadius, generation: requestGeneration)
         case .wallpaper:
             let radius: CGFloat = configuration.blursWallpaper ? 26 : 0
-            wallpaperLayer.contents = TesseraWallpaperImageCache.blurredWallpaper(for: screen, radius: radius)
             wallpaperLayer.opacity = 1.0
-            scrimLayer.opacity = 0
+            // Keep a very light translucent scrim above the wallpaper. This
+            // preserves the wallpaper-first composition while preventing the
+            // background from reading as an unmodulated opaque image behind
+            // the content. It is deliberately much lighter than glass mode.
+            scrimLayer.opacity = 0.14
             sheenLayer.opacity = 0
+            requestWallpaper(radius: radius, generation: requestGeneration)
+        }
+    }
+
+    static func glassMaterialParameters(for materialIntensity: Double) -> GlassMaterialParameters {
+        let intensity = materialIntensity.isFinite
+            ? min(max(materialIntensity, 0), 1)
+            : 0
+        return GlassMaterialParameters(
+            wallpaperOpacity: Float(0.78 - 0.37 * intensity),
+            blurRadius: 30 + 40 * CGFloat(intensity),
+            sheenOpacity: Float(intensity)
+        )
+    }
+
+    private func requestWallpaper(radius: CGFloat, generation: Int) {
+        let requestedScreen = screen
+        let displayID = (
+            requestedScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        )?.uint32Value ?? 0
+        let source = TesseraWallpaperImageCache.source(for: requestedScreen)
+        DiagnosticsLog.launcher.info(
+            "wallpaper request: mode=\(self.configuration.mode.rawValue, privacy: .public), sourceKind=\(source.kind.rawValue, privacy: .public), displayID=\(displayID, privacy: .public), resolvedURL=\(source.url?.path ?? "<unavailable>", privacy: .private), radius=\(radius, privacy: .public)"
+        )
+        Task { @MainActor [weak self] in
+            let image = await TesseraWallpaperImageCache.blurredWallpaperAsync(
+                for: requestedScreen,
+                radius: radius
+            )
+            guard let self, self.wallpaperRequestGeneration == generation else { return }
+            guard let image else {
+                // Do not substitute a synthetic asset when the OS wallpaper
+                // cannot be read. The opaque base remains visible and the
+                // cache diagnostics identify the display/URL failure.
+                self.wallpaperLayer.contents = nil
+                return
+            }
+            self.wallpaperLayer.contents = image
         }
     }
 
@@ -182,6 +223,20 @@ final class TesseraBackgroundView: NSView {
     func update(configuration: Configuration) {
         self.configuration = configuration
         applyConfiguration()
+    }
+
+    /// Updates the display geometry when the launcher moves to another
+    /// screen. The view is retained across shows, so keeping the original
+    /// screen/frame would otherwise reuse the wrong wallpaper and gradient
+    /// canvas on a multi-display setup.
+    func update(screen: NSScreen, viewportOrigin: CGPoint? = nil) {
+        self.screen = screen
+        fullScreenSize = screen.frame.size
+        if let viewportOrigin {
+            self.viewportOrigin = viewportOrigin
+        }
+        applyConfiguration()
+        updateLayerFrames()
     }
 
     // Radial CAGradientLayers need their own bounds set explicitly (they
@@ -202,12 +257,9 @@ final class TesseraBackgroundView: NSView {
     }
 
     /// Every layer below is framed at the *whole screen's* size (not this
-    /// view's own, possibly much smaller, bounds) and shifted by
-    /// `-viewportOrigin` — see `viewportOrigin`'s doc comment for why. A
-    /// view whose `viewportOrigin` is `.zero` and whose own bounds already
-    /// equal `fullScreenSize` (the main launcher window) behaves exactly as
-    /// before this change; only a narrower/offset view (the menu bar cover)
-    /// changes behavior.
+    /// view's own, possibly smaller visible-frame bounds) and shifted by
+    /// `-viewportOrigin` so gradients and wallpaper remain aligned with the
+    /// display's full-frame coordinate space.
     private func updateLayerFrames() {
         let size = fullScreenSize
         let origin = CGPoint(x: -viewportOrigin.x, y: -viewportOrigin.y)

@@ -3,7 +3,12 @@ import Foundation
 import Testing
 @testable import Launcher
 
-private func record(_ name: String, id: String, backgroundOnly: Bool = false) -> ApplicationRecord {
+private func record(
+    _ name: String,
+    id: String,
+    backgroundOnly: Bool = false,
+    menuBarApp: Bool = false
+) -> ApplicationRecord {
     ApplicationRecord(
         id: StableAppID(bundleURL: URL(fileURLWithPath: "/tmp/\(name).app"), bundleIdentifier: id, teamIdentifier: nil),
         bundleIdentifier: id,
@@ -17,6 +22,7 @@ private func record(_ name: String, id: String, backgroundOnly: Bool = false) ->
         sourceID: "test",
         isSystemProtected: false,
         isBackgroundOnly: backgroundOnly,
+        isMenuBarApp: menuBarApp,
         iconCacheKey: id,
         canLaunch: true,
         canOpenNewInstance: true,
@@ -46,6 +52,19 @@ private func record(_ name: String, id: String, backgroundOnly: Bool = false) ->
     let records = [record("Visible", id: "v"), record("HelperAgent", id: "h", backgroundOnly: true)]
     let result = LauncherFiltering.filter(records, query: "")
     #expect(result.map(\.displayName) == ["Visible"])
+}
+
+@Test func menuBarAppsAreShownByDefaultAndCanBeExcluded() {
+    let records = [
+        record("Visible", id: "v"),
+        record("CodexBar", id: "cb", menuBarApp: true),
+        record("Agent", id: "agent", backgroundOnly: true, menuBarApp: true)
+    ]
+
+    #expect(LauncherFiltering.filter(records, query: "").map(\.displayName) == ["CodexBar", "Visible"])
+    #expect(LauncherFiltering.filter(records, query: "", showMenuBarApplications: false).map(\.displayName) == ["Visible"])
+    // Background-only wins over the opt-in menu-bar policy.
+    #expect(LauncherFiltering.filter(records, query: "", showMenuBarApplications: true).contains { $0.displayName == "Agent" } == false)
 }
 
 @Test func queryIsCaseInsensitive() {

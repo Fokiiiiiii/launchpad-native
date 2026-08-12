@@ -115,7 +115,10 @@ final class MenuBarCoverWindow: NSWindow {
     /// against `Self.targetScreen()` on every call rather than assuming the
     /// screen never changes between shows.
     func reposition(on screen: NSScreen) {
-        setFrame(Self.coverRect(for: screen), display: true)
+        let rect = Self.coverRect(for: screen)
+        let viewportOrigin = CGPoint(x: rect.minX - screen.frame.minX, y: rect.minY - screen.frame.minY)
+        background?.update(screen: screen, viewportOrigin: viewportOrigin)
+        setFrame(rect, display: true)
     }
 
     /// Mirrors `LauncherWindowController.updateBackgroundSettings` — keeps

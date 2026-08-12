@@ -8,9 +8,18 @@ import Foundation
 /// once `LayoutDocument.aliases` is wired in; this is the substring/sort core
 /// both will share.
 enum LauncherFiltering {
-    static func filter(_ records: [ApplicationRecord], query: String) -> [ApplicationRecord] {
+    static func filter(
+        _ records: [ApplicationRecord],
+        query: String,
+        showMenuBarApplications: Bool = true
+    ) -> [ApplicationRecord] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = records.filter { !$0.isBackgroundOnly }
+        // LSBackgroundOnly is never a launcher candidate. LSUIElement apps
+        // are candidates by default, with the persisted setting providing the
+        // one opt-out used by Settings/GridModel.
+        let base = records.filter {
+            !$0.isBackgroundOnly && (showMenuBarApplications || !$0.isMenuBarApp)
+        }
 
         guard !trimmed.isEmpty else {
             return base.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }

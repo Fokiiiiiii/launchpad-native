@@ -11,13 +11,24 @@ public final class LauncherViewModel {
     public private(set) var filteredRecords: [ApplicationRecord] = []
     public private(set) var query: String = ""
     public private(set) var selectedIndex: Int?
+    /// Controls the LSUIElement candidate policy for every refilter. The
+    /// default is true so existing callers show menu-bar applications.
+    public private(set) var showMenuBarApplications = true
 
     /// Called whenever `filteredRecords` or `selectedIndex` changes, so the
     /// view controller can reload/re-highlight without this model knowing
     /// anything about NSCollectionView.
     public var onChange: (() -> Void)?
 
-    public init() {}
+    public init(showMenuBarApplications: Bool = true) {
+        self.showMenuBarApplications = showMenuBarApplications
+    }
+
+    public func setShowMenuBarApplications(_ value: Bool) {
+        guard showMenuBarApplications != value else { return }
+        showMenuBarApplications = value
+        refilter()
+    }
 
     public func setRecords(_ records: [ApplicationRecord]) {
         allRecords = records
@@ -58,7 +69,11 @@ public final class LauncherViewModel {
         // MainActor while the user is typing — target is <16ms even at
         // catalog sizes around 1,000 apps (one frame at 60Hz).
         let start = DispatchTime.now()
-        filteredRecords = LauncherFiltering.filter(allRecords, query: query)
+        filteredRecords = LauncherFiltering.filter(
+            allRecords,
+            query: query,
+            showMenuBarApplications: showMenuBarApplications
+        )
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.launcher.info("search filter: \(self.allRecords.count, privacy: .public) records took \(ms, privacy: .public)ms")
         if let previouslySelectedID, let newIndex = filteredRecords.firstIndex(where: { $0.id == previouslySelectedID }) {

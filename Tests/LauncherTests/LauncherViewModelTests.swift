@@ -3,7 +3,12 @@ import Foundation
 import Testing
 @testable import Launcher
 
-private func record(_ name: String, id: String) -> ApplicationRecord {
+private func record(
+    _ name: String,
+    id: String,
+    backgroundOnly: Bool = false,
+    menuBarApp: Bool = false
+) -> ApplicationRecord {
     ApplicationRecord(
         id: StableAppID(bundleURL: URL(fileURLWithPath: "/tmp/\(name).app"), bundleIdentifier: id, teamIdentifier: nil),
         bundleIdentifier: id,
@@ -16,12 +21,27 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
         category: nil,
         sourceID: "test",
         isSystemProtected: false,
-        isBackgroundOnly: false,
+        isBackgroundOnly: backgroundOnly,
+        isMenuBarApp: menuBarApp,
         iconCacheKey: id,
         canLaunch: true,
         canOpenNewInstance: true,
         lastSeenModificationDate: Date(timeIntervalSince1970: 0)
     )
+}
+
+@Test @MainActor func menuBarSearchPolicyUpdatesLive() {
+    let vm = LauncherViewModel()
+    let records = [
+        record("Normal", id: "normal"),
+        record("CodexBar", id: "menubar", menuBarApp: true),
+        record("Agent", id: "agent", backgroundOnly: true)
+    ]
+    vm.setRecords(records)
+    // LSBackgroundOnly is always omitted; LSUIElement is visible by default.
+    #expect(vm.filteredRecords.map(\.displayName) == ["CodexBar", "Normal"])
+    vm.setShowMenuBarApplications(false)
+    #expect(vm.filteredRecords.map(\.displayName) == ["Normal"])
 }
 
 @Test @MainActor func selectionDefaultsToFirstItemAfterSettingRecords() {

@@ -15,18 +15,12 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private var viewController: LauncherViewController?
     private var rootContentView: NSView?
     /// Held so `updateBackgroundSettings(mode:materialIntensity:blursWallpaper:)`
-    /// can live-update it when Settings' background controls change —
-    /// `MenuBarCoverWindow` keeps its own separate instance in sync via the
-    /// same call (see that method's doc comment).
+    /// can live-update the retained background when Settings' controls change.
     private var backgroundView: TesseraBackgroundView?
-    /// See `MenuBarCoverWindow`'s doc comment — a more fundamental fix for
-    /// the real menu bar showing over the launcher than the two prior
-    /// presentationOptions-based attempts. Shown/hidden in lockstep with
-    /// the launcher window itself.
-    private var menuBarCoverWindow: MenuBarCoverWindow?
     private let viewModel = LauncherViewModel()
     private let gridModel: GridModel
     private let iconCache: IconCache
+    private let menuBarVisibility = SystemMenuBarVisibility()
     private var hasAttemptedLegacyImport = false
     /// The full, unfiltered scan result from the most recent `updateRecords(_:)`
     /// — kept around so `refreshSearchableRecords()` can re-derive the
@@ -51,7 +45,10 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// reversal here, but a reversal can never leave the window in the
     /// wrong final state either.
     private var animationGeneration = 0
-
+    /// Reflow is sampled once after WindowServer settles the Dock. Retain the
+    /// task so a quick hide/reopen can cancel the old sample instead of
+    /// touching a window that is already closing or has moved screens.
+    private var dockSettleTask: Task<Void, Never>?
     /// Reads the window's own real visibility rather than a separately
     /// tracked bool — a manually-maintained `isVisible` flag drifted out of
     /// sync with the actual window state during hands-on testing (e.g. the
@@ -76,6 +73,73 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         super.init()
     }
 
+    deinit {
+        dockSettleTask?.cancel()
+        let menuBarVisibility = menuBarVisibility
+        Task { @MainActor in
+            _ = menuBarVisibility.setHidden(false)
+            NSApp.presentationOptions = []
+        }
+    }
+
+    private func setLauncherPresentation(active: Bool) {
+        let menuBarStatus = menuBarVisibility.setHidden(active)
+        let menuBarHiddenPrivately = menuBarStatus == 0
+        NSApp.presentationOptions = active
+            ? Self.launcherPresentationOptions(
+                hideDock: gridModel.hideDockWhileLauncherOpen,
+                menuBarHiddenPrivately: menuBarHiddenPrivately
+            )
+            : []
+        if menuBarStatus == nil {
+            DiagnosticsLog.launcher.error(
+                "system menu-bar visibility API unavailable; using presentation-options fallback"
+            )
+        } else if let menuBarStatus, menuBarStatus != 0 {
+            DiagnosticsLog.launcher.error(
+                "system menu-bar visibility update failed with status \(menuBarStatus, privacy: .public)"
+            )
+        }
+        DiagnosticsLog.launcher.info(
+            "launcher presentation: active=\(active, privacy: .public), menuBarStatus=\(String(describing: menuBarStatus), privacy: .public), optionsRaw=\(NSApp.presentationOptions.rawValue, privacy: .public), currentSystemOptionsRaw=\(NSApp.currentSystemPresentationOptions.rawValue, privacy: .public), hideDock=\(self.gridModel.hideDockWhileLauncherOpen, privacy: .public), isActive=\(NSApp.isActive, privacy: .public), frontmostPID=\(Self.frontmostPID, privacy: .public)"
+        )
+    }
+
+    static func launcherPresentationOptions(
+        hideDock: Bool,
+        menuBarHiddenPrivately: Bool
+    ) -> NSApplication.PresentationOptions {
+        if menuBarHiddenPrivately {
+            return hideDock ? [.hideDock] : []
+        }
+        return hideDock ? [.autoHideMenuBar, .hideDock] : [.autoHideMenuBar, .autoHideDock]
+    }
+
+    public func prepareForTermination() {
+        dockSettleTask?.cancel()
+        dockSettleTask = nil
+        setLauncherPresentation(active: false)
+    }
+
+    private static var frontmostPID: pid_t {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+    }
+
+    private func logOverlayState(_ event: String, window: NSWindow? = nil) {
+        let target = window ?? self.window
+        DiagnosticsLog.launcher.info(
+            "overlay state: event=\(event, privacy: .public), styleMaskFullScreen=\(target?.styleMask.contains(.fullScreen) ?? false, privacy: .public), fullScreenPrimary=\(target?.collectionBehavior.contains(.fullScreenPrimary) ?? false, privacy: .public), optionsRaw=\(NSApp.presentationOptions.rawValue, privacy: .public), currentSystemOptionsRaw=\(NSApp.currentSystemPresentationOptions.rawValue, privacy: .public), isActive=\(NSApp.isActive, privacy: .public), frontmostPID=\(Self.frontmostPID, privacy: .public)"
+        )
+    }
+
+    private func refreshOverlayLayout(reason: String) {
+        if let screen = window?.screen {
+            backgroundView?.update(screen: screen, viewportOrigin: .zero)
+        }
+        viewController?.refreshDockLayout()
+        logOverlayState(reason)
+    }
+
     /// Set once by the composition root (`AppDelegate`) after both this
     /// controller and the Settings window controller exist — avoids a
     /// circular initializer dependency between the two.
@@ -98,6 +162,9 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
 
     public func loadGridDocument() async {
         await gridModel.loadDocument()
+        // The layout document owns this setting; synchronize the search
+        // model before the first catalog snapshot arrives.
+        viewModel.setShowMenuBarApplications(gridModel.showMenuBarApplications)
     }
 
     /// Debug-only — see `AppDelegate`'s `LAUNCHPAD_DEBUG_SEARCH_QUERY` doc
@@ -162,7 +229,15 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     public func updateDockVisibilityPreference(_ hideDock: Bool) {
         gridModel.setHideDockWhileLauncherOpen(hideDock)
         Task { await gridModel.save() }
-        window?.applyDockVisibilityPreference(hideDock: hideDock)
+        if isVisible {
+            setLauncherPresentation(active: true)
+        }
+        window?.applyDockVisibilityPreference(
+            hideDock: hideDock,
+            reason: "settings update",
+            screenFrame: window?.screen?.frame
+        )
+        viewController?.refreshDockLayout()
     }
 
     private func currentBackgroundConfiguration() -> TesseraBackgroundView.Configuration {
@@ -178,23 +253,20 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// the new value to `GridModel` itself (mirroring `appIconStyle`'s own
     /// "model write + separate live-apply" split, not `hideDockWhileLauncherOpen`'s
     /// single-callback-does-both shape), so this only needs to push the new
-    /// values into the already-live `TesseraBackgroundView` instances —
-    /// both the main window's and `MenuBarCoverWindow`'s own separate copy,
-    /// so the two stay visually identical.
+    /// values into the already-live `TesseraBackgroundView` instance.
     public func updateBackgroundSettings(mode: LauncherBackgroundMode, materialIntensity: Double, blursWallpaper: Bool) {
         var config = TesseraBackgroundView.Configuration()
         config.mode = mode
         config.materialIntensity = materialIntensity
         config.blursWallpaper = blursWallpaper
         backgroundView?.update(configuration: config)
-        menuBarCoverWindow?.updateBackgroundSettings(mode: mode, materialIntensity: materialIntensity, blursWallpaper: blursWallpaper)
     }
 
     /// Called when Settings (which floats *above* the launcher without
     /// hiding it — see `SettingsWindowController`'s doc comment) closes —
     /// see `SettingsWindowController.windowWillClose`'s doc comment for the
-    /// full explanation of why `LauncherWindow` (a `.nonactivatingPanel`)
-    /// doesn't automatically regain key status on its own. A no-op if the
+    /// full explanation of why the launcher does not automatically regain
+    /// key status on its own. A no-op if the
     /// launcher isn't currently visible (e.g. the user hid it first, then
     /// closed Settings separately) — nothing to reclaim in that case, and
     /// forcing a hidden window key/front would show it unexpectedly.
@@ -209,8 +281,8 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // out of the active/frontmost state, same as `show()`'s own reason
         // for calling `NSApp.activate` before `makeKeyAndOrderFront` (see
         // that method's doc comment). Without reactivating the app first,
-        // asking a nonactivating panel to become key while some other app
-        // is frontmost doesn't actually succeed.
+        // asking the launcher window to become key while some other app is
+        // frontmost doesn't actually succeed.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         DiagnosticsLog.launcher.info("reclaimKeyIfVisible: requested key, isKeyWindow now \(window.isKeyWindow, privacy: .public)")
@@ -256,6 +328,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// this fixes the app into, not the old undocumented "always included"
     /// one).
     private func applySearchableRecords() {
+        viewModel.setShowMenuBarApplications(gridModel.showMenuBarApplications)
         if gridModel.showsHiddenAppsInSearch {
             viewModel.setRecords(latestRecords)
         } else {
@@ -269,6 +342,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// catalog scan/FSEvents update.
     public func refreshSearchableRecords() {
         applySearchableRecords()
+        viewController?.reloadGrid()
     }
 
     /// Same-trigger reinvocation closes it; otherwise it opens (or moves to
@@ -286,10 +360,31 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // already exists on every call after the first, so this number
         // reflects steady-state (warm) open latency, not cold construction.
         let start = DispatchTime.now()
-        let screen = Self.targetScreen()
+        guard let screen = Self.targetScreen() else {
+            DiagnosticsLog.launcher.error("show(): aborted because no NSScreen is available")
+            return
+        }
         let window = window ?? makeWindow(on: screen)
         let wasVisible = window.isVisible
+        dockSettleTask?.cancel()
+        dockSettleTask = nil
+        // The resident helper becomes regular only while the overlay is
+        // visible; it returns to accessory after the overlay is ordered out.
+        guard NSApp.setActivationPolicy(.regular) else {
+            DiagnosticsLog.launcher.error("show(): could not switch activation policy to regular")
+            return
+        }
+        // Apply the valid menu-bar/Dock pair before ordering the overlay front.
+        setLauncherPresentation(active: true)
         window.setFrame(screen.frame, display: true)
+        window.applyDockVisibilityPreference(
+            hideDock: gridModel.hideDockWhileLauncherOpen,
+            reason: "show before frame",
+            screenFrame: screen.frame
+        )
+        // The launcher window is reused across displays; refresh the retained
+        // Tessera view's wallpaper source and full-frame gradient canvas too.
+        backgroundView?.update(screen: screen, viewportOrigin: .zero)
         viewController?.resetSearch()
 
         animationGeneration += 1
@@ -309,72 +404,56 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             }
         }
 
-        // Activate the app *before* asking the panel to become key — doing
+        // Activate the app *before* asking the launcher window to become key — doing
         // it in the other order (as a prior version did) let `activate`
         // reassign key status right after `makeKeyAndOrderFront`, which
         // showed up live as the launcher opening and immediately resigning
         // key (closing itself) within ~50ms of every trigger firing.
         NSApp.activate(ignoringOtherApps: true)
-        // Real Launchpad/Mission Control convention: the real macOS menu
-        // bar shouldn't sit visibly over a fullscreen-style launcher.
-        // `.autoHideMenuBar` slides it away and only reveals it again on a
-        // deliberate mouse-to-top-edge gesture, matching how every other
-        // fullscreen-presenting app on macOS behaves. Left independent of
-        // the existing `hideDockWhileLauncherOpen` window-level toggle —
-        // that one is a user preference for whether the Dock icon strip
-        // itself should show through; the menu bar isn't part of that
-        // choice. Kept alongside `menuBarCoverWindow` below (belt-and-
-        // suspenders) since this alone was repeatedly confirmed, via real
-        // screenshots, not to actually retract the menu bar in practice.
-        //
-        // `.hideMenuBar` (the stronger, unconditional option — no
-        // fullscreen heuristic involved) was tried in response to a direct
-        // user ask for something more fundamental than the cover-window
-        // workaround below, but caused a real, reproduced crash
-        // (EXC_BAD_ACCESS / SIGSEGV) on this exact launch path: inserting
-        // it appears to trigger an immediate, synchronous screen
-        // frame/`visibleFrame` change that cascades into an
-        // `NSCollectionView` frame-change notification
-        // (`_resizeToFitContentAndClipView` → `LauncherViewController
-        // .numberOfSections(in:)`) landing on a thread Swift's actor-
-        // isolation runtime check doesn't recognize as the main executor —
-        // confirmed via a real crash report, not a hunch. `.autoHideMenuBar`
-        // never triggers this same cascade, so it's kept as the only
-        // presentation-options mechanism here; a genuine menu-bar removal
-        // would need either real `NSWindow` fullscreen (a much larger,
-        // separately-tracked change — see the plan's "windowed mode
-        // deferred to a separate round" note) or a fix for this crash
-        // path, neither of which this round attempts.
-        NSApp.presentationOptions.insert(.autoHideMenuBar)
         window.makeKeyAndOrderFront(nil)
-
-        // See `MenuBarCoverWindow`'s doc comment: `.autoHideMenuBar` above
-        // has repeatedly failed to actually hide the real menu bar (per
-        // direct screenshot evidence), so this physically paints over its
-        // screen rect instead of continuing to rely on WindowServer's
-        // cooperation.
-        let cover = menuBarCoverWindow ?? {
-            var config = currentBackgroundConfiguration()
-            config.includeBloomHighlights = false
-            return MenuBarCoverWindow(screen: screen, backgroundConfiguration: config)
-        }()
-        menuBarCoverWindow = cover
-        cover.reposition(on: screen)
-        cover.orderFront(nil)
-        DiagnosticsLog.launcher.info("show(): after makeKeyAndOrderFront, isVisible=\(window.isVisible, privacy: .public), isKeyWindow=\(window.isKeyWindow, privacy: .public), menuBarCover.frame=\(String(describing: cover.frame), privacy: .public), menuBarCover.level=\(cover.level.rawValue, privacy: .public), menuBarLevel=\(Int(CGWindowLevelForKey(.mainMenuWindow)), privacy: .public), screen.frame=\(String(describing: screen.frame), privacy: .public), screen.visibleFrame=\(String(describing: screen.visibleFrame), privacy: .public), screen.safeAreaInsets.top=\(screen.safeAreaInsets.top, privacy: .public)")
-
-        if !wasVisible {
-            animateIn(window: window)
+        // An accessory app can be ordered while another app owns a fullscreen
+        // Space. `makeKeyAndOrderFront` alone may leave the window attached to
+        // that non-active Space; explicitly ordering it regardless of app
+        // activation keeps this overlay on the current display/Space.
+        window.orderFrontRegardless()
+        // This is a same-desktop overlay, not an AppKit fullscreen
+        // transition. Animate immediately so a missing WindowServer callback
+        // can never leave the window at alpha 0 (the previous black-screen
+        // failure mode).
+        refreshOverlayLayout(reason: "show overlay")
+        // Do not rely on CA's animator to perform the first visibility
+        // transition. If the window was ordered while the app was changing
+        // activation policy, the animation transaction can be deferred and
+        // leave the whole-screen window at alpha 0. Make the visible state
+        // authoritative first, then add the cosmetic animation.
+        window.alphaValue = 1
+        if !wasVisible { animateIn(window: window) }
+        dockSettleTask = Task { @MainActor [weak self] in
+            defer { self?.dockSettleTask = nil }
+            do {
+                try await Task.sleep(nanoseconds: 180_000_000)
+            } catch {
+                return
+            }
+            guard let self, self.isVisible else { return }
+            self.viewController?.refreshDockLayout()
         }
+
+        DiagnosticsLog.launcher.info("show(): after makeKeyAndOrderFront, isVisible=\(window.isVisible, privacy: .public), isKeyWindow=\(window.isKeyWindow, privacy: .public), windowFrame=\(String(describing: window.frame), privacy: .public), screenFrame=\(String(describing: screen.frame), privacy: .public), optionsRaw=\(NSApp.presentationOptions.rawValue, privacy: .public), currentSystemOptionsRaw=\(NSApp.currentSystemPresentationOptions.rawValue, privacy: .public), isActive=\(NSApp.isActive, privacy: .public), frontmostPID=\(Self.frontmostPID, privacy: .public)")
 
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.launcher.info("warm open: trigger to makeKeyAndOrderFront took \(ms, privacy: .public)ms")
     }
 
     public func hide() {
-        guard let window, window.isVisible else { return }
+        dockSettleTask?.cancel()
+        dockSettleTask = nil
+        guard let window, window.isVisible else {
+            setLauncherPresentation(active: false)
+            _ = NSApp.setActivationPolicy(.accessory)
+            return
+        }
         onDidHide?()
-        NSApp.presentationOptions.remove(.autoHideMenuBar)
         animationGeneration += 1
         let generation = animationGeneration
 
@@ -399,22 +478,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             // nominally-Sendable closure.
             Task { @MainActor in
                 guard let self, self.animationGeneration == generation, let window else { return }
-                window.orderOut(nil)
-                // Hidden alongside the launcher's own fade completion (not
-                // immediately at the top of hide()) — ordering it out any
-                // earlier would reveal the real menu bar while the launcher
-                // itself is still visibly fading out.
-                self.menuBarCoverWindow?.orderOut(nil)
-                // Reset to the resting state so the next show() starts clean —
-                // this only runs if nothing interrupted this close (the
-                // generation check above), so it never clobbers a reopen.
-                window.alphaValue = 1
-                if let layer = self.rootContentView?.layer {
-                    CATransaction.begin()
-                    CATransaction.setDisableActions(true)
-                    layer.transform = CATransform3DIdentity
-                    CATransaction.commit()
-                }
+                self.finishHide(window: window, generation: generation)
             }
         })
     }
@@ -455,6 +519,21 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         }
     }
 
+    private func finishHide(window: LauncherWindow, generation: Int) {
+        guard animationGeneration == generation else { return }
+        window.orderOut(nil)
+        setLauncherPresentation(active: false)
+        _ = NSApp.setActivationPolicy(.accessory)
+        window.alphaValue = 1
+        if let layer = rootContentView?.layer {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.transform = CATransform3DIdentity
+            CATransaction.commit()
+        }
+        refreshOverlayLayout(reason: "hide completed")
+    }
+
     /// Builds a `CASpringAnimation` from Apple's damping-ratio/response
     /// parameters (see apple-design's spring guidance) rather than the raw
     /// mass/stiffness/damping triplet `CASpringAnimation` actually takes —
@@ -478,6 +557,13 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         let window = LauncherWindow(contentRect: screen.frame, hideDock: gridModel.hideDockWhileLauncherOpen)
         window.delegate = self
         window.onCancel = { [weak self] in self?.hide() }
+
+        // Hidden-app mutations can originate from the grid's context menu,
+        // not only Settings. Attach a dedicated observer so an active search
+        // query reflects hide/unhide immediately without waiting for a scan.
+        gridModel.onHiddenApplicationsChange = { [weak self] in
+            self?.refreshSearchableRecords()
+        }
 
         let content = LauncherViewController(
             viewModel: viewModel,
@@ -504,7 +590,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // also hard-disables itself, same discipline `GlassBackgroundView
         // .swift`'s doc comment establishes for why: a purely decorative
         // background must never be a hit-test target).
-        let root = NSView(frame: screen.frame)
+        let root = NSView(frame: NSRect(origin: .zero, size: screen.frame.size))
         // Backs the open/close scale animation — animated on `root`'s own
         // layer, a level above `background`/`content.view`, so scaling
         // never fights with either of their own layer usage.
@@ -520,7 +606,10 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // mirrors that reference composition (blurred desktop wallpaper +
         // scrim + material sheen + ambient blooms) instead of routing
         // through the same glass factory used for cards.
-        let background = TesseraBackgroundView(screen: screen, configuration: currentBackgroundConfiguration())
+        let background = TesseraBackgroundView(
+            screen: screen,
+            configuration: currentBackgroundConfiguration()
+        )
         background.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(background)
         backgroundView = background
@@ -552,8 +641,8 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     }
 
     /// `windowDidResignKey` alone turned out to be an unreliable dismiss
-    /// signal for a `.nonactivatingPanel` (clicking another app's window
-    /// didn't reliably resign key status during hands-on testing). A global
+    /// signal for a full-screen launcher window (clicking another app's
+    /// window didn't reliably resign key status during hands-on testing). A global
     /// mouse-down monitor is an explicit, direct signal: any click that
     /// lands outside this window's frame while it's visible closes it,
     /// independent of key-window bookkeeping.
@@ -568,10 +657,10 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// this window (or even this process) ever observes. `NSWorkspace`'s
     /// `didActivateApplicationNotification` is the one reliable, app-switch-
     /// method-agnostic signal for "some other app just became frontmost" —
-    /// this app's own `.autoHideMenuBar` presentation option only ever
-    /// applies while *this* app is the frontmost one, so as soon as another
-    /// app activates, that app's menu bar takes over regardless of what
-    /// this window's own level/collectionBehavior/presentationOptions say.
+    /// the launcher now keeps the menu bar in its native reserved area via
+    /// `screen.visibleFrame`, so as soon as another app activates its menu
+    /// bar naturally remains authoritative without any process-wide
+    /// presentation option to undo.
     /// The fix is to hide the launcher the instant that happens, matching
     /// real Launchpad/Mission Control's own behavior (losing focus dismisses
     /// the overlay) — not to keep trying to suppress a menu bar this app no
@@ -580,33 +669,38 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
 
     private func startOutsideClickMonitorIfNeeded() {
         guard outsideClickMonitor == nil else { return }
-        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self else { return }
-            DiagnosticsLog.launcher.info("outsideClickMonitor fired, isVisible=\(self.isVisible, privacy: .public)")
-            guard self.isVisible else { return }
-            self.hide()
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                DiagnosticsLog.launcher.info("outsideClickMonitor fired, isVisible=\(self.isVisible, privacy: .public)")
+                guard self.isVisible else { return }
+                self.hide()
+            }
         }
         DiagnosticsLog.launcher.info("outsideClickMonitor installed: \(self.outsideClickMonitor != nil, privacy: .public)")
-
         guard appActivationObserver == nil else { return }
         appActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            guard let self else { return }
             let activatedApp = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            let activatedBundleID = activatedApp?.bundleIdentifier ?? "?"
             let isThisApp = activatedApp?.processIdentifier == ProcessInfo.processInfo.processIdentifier
-            DiagnosticsLog.launcher.info("appActivationObserver fired: activatedBundleID=\(activatedApp?.bundleIdentifier ?? "?", privacy: .public), isThisApp=\(isThisApp, privacy: .public), isVisible=\(self.isVisible, privacy: .public)")
-            guard self.isVisible, !isThisApp else { return }
-            self.hide()
+
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                DiagnosticsLog.launcher.info("appActivationObserver fired: activatedBundleID=\(activatedBundleID, privacy: .public), isThisApp=\(isThisApp, privacy: .public), isVisible=\(self.isVisible, privacy: .public)")
+                guard self.isVisible, !isThisApp else { return }
+                self.hide()
+            }
         }
     }
 
     /// "ポインタまたはアクティブウインドウが存在するディスプレイ" — the
     /// pointer's screen is checked first; if that lookup fails for any
     /// reason, fall back to the key window's screen, then the main screen.
-    private static func targetScreen() -> NSScreen {
+    private static func targetScreen() -> NSScreen? {
         let mouseLocation = NSEvent.mouseLocation
         if let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) {
             return screen
@@ -614,7 +708,14 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         if let keyScreen = NSApp.keyWindow?.screen {
             return keyScreen
         }
-        return NSScreen.main ?? NSScreen.screens[0]
+        if let mainScreen = NSScreen.main {
+            return mainScreen
+        }
+        guard let fallbackScreen = NSScreen.screens.first else {
+            DiagnosticsLog.launcher.error("targetScreen(): no NSScreen is available")
+            return nil
+        }
+        return fallbackScreen
     }
 
     // MARK: NSWindowDelegate
@@ -644,5 +745,29 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         }
         DiagnosticsLog.launcher.info("windowDidResignKey fired, app resigned active — hiding")
         hide()
+    }
+
+    public func windowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? LauncherWindow else { return }
+        guard window.isVisible else { return }
+        setLauncherPresentation(active: true)
+        window.applyDockVisibilityPreference(
+            hideDock: gridModel.hideDockWhileLauncherOpen,
+            reason: "windowDidBecomeKey",
+            screenFrame: window.screen?.frame
+        )
+        viewController?.refreshDockLayout()
+    }
+
+    public func windowDidChangeScreen(_ notification: Notification) {
+        guard let window = notification.object as? LauncherWindow else { return }
+        guard window.isVisible else { return }
+        setLauncherPresentation(active: true)
+        window.applyDockVisibilityPreference(
+            hideDock: gridModel.hideDockWhileLauncherOpen,
+            reason: "windowDidChangeScreen",
+            screenFrame: window.screen?.frame
+        )
+        refreshOverlayLayout(reason: "did change screen")
     }
 }

@@ -1,48 +1,58 @@
 import AppKit
 import CoreGraphics
+import Diagnostics
 
-/// Borderless overlay panel, not a normal document window: it can become key
-/// (so the search field can type) but never main, joins every Space, and
-/// floats above fullscreen apps via `collectionBehavior`.
-final class LauncherWindow: NSPanel {
+/// The launcher's full-frame borderless overlay. It stays on the current
+/// desktop instead of entering AppKit's dedicated full-screen Space.
+final class LauncherWindow: NSWindow {
     var onCancel: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
+    override var canBecomeMain: Bool { true }
+
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
 
     convenience init(contentRect: NSRect, hideDock: Bool = false) {
         self.init(
             contentRect: contentRect,
-            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        applyDockVisibilityPreference(hideDock: hideDock)
+        applyDockVisibilityPreference(hideDock: hideDock, reason: "init")
+        // `toggleFullScreen` creates a separate Space. The launcher is an
+        // overlay, so join the current/all Spaces and remain auxiliary to an
+        // existing fullscreen app instead of becoming a new fullscreen app.
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
         isMovable = false
         hidesOnDeactivate = false
+        // Preserve mouse-move delivery for AppKit's normal window handling;
+        // the controller intentionally does not install a global mouse-move
+        // monitor, which would create a task for every pointer event.
+        acceptsMouseMovedEvents = true
     }
 
-    /// `.popUpMenu` (101) sat well above the real Dock's window level
-    /// (`CGWindowLevelForKey(.dockWindow)`, ~20), so the launcher always
-    /// painted over the Dock, hiding it — unlike real Launchpad, where the
-    /// Dock stays visible on top. `CGWindowLevelForKey`/`.dockWindow` are
-    /// public CoreGraphics API (Quartz Window Services), not private.
-    ///
-    /// `hideDock` (the Settings "Hide Dock" toggle, default off) switches
-    /// which side of the Dock's own level the launcher sits on: off (the
-    /// default) keeps the launcher one level *below* the Dock so it renders
-    /// on top, matching real Launchpad; on puts the launcher one level
-    /// *above* instead, so it paints over the Dock — the pre-Phase-14
-    /// behavior, now opt-in. Either way this never touches the real Dock
-    /// process or macOS's own autohide setting — only this window's own
-    /// level changes.
-    func applyDockVisibilityPreference(hideDock: Bool) {
+    /// Keep the overlay below the Dock unless the user explicitly asks to
+    /// hide it. The real Dock must remain above the launcher in the default
+    /// presentation.
+    func applyDockVisibilityPreference(
+        hideDock: Bool,
+        reason: String = "unspecified",
+        screenFrame: NSRect? = nil
+    ) {
         let dockLevel = Int(CGWindowLevelForKey(.dockWindow))
         level = NSWindow.Level(rawValue: hideDock ? dockLevel + 1 : dockLevel - 1)
+        if let displayFrame = screenFrame ?? screen?.frame {
+            setFrame(displayFrame, display: true)
+        }
+        DiagnosticsLog.launcher.info(
+            "dock visibility policy: hideDock=\(hideDock, privacy: .public), level=\(self.level.rawValue, privacy: .public), dockLevel=\(dockLevel, privacy: .public), reason=\(reason, privacy: .public)"
+        )
     }
 
     /// Escape reaches here via the standard responder chain when no control
