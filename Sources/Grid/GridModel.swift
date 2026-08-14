@@ -325,13 +325,29 @@ public final class GridModel {
     /// Reconciles the live catalog against the persisted arrangement: apps no
     /// longer installed (or newly hidden) are pruned from pages/folders;
     /// newly discovered apps are appended in alphabetical order.
-    public func reconcile(with records: [ApplicationRecord]) {
+    ///
+    /// - Parameter prunesMissingItems: whether `records` is authoritative
+    ///   about what is installed. Real, confirmed data-corruption bug: the
+    ///   startup path restores a cached catalog snapshot to get a first frame
+    ///   up early, and that snapshot legitimately lags the real disk state
+    ///   (observed live: 94 cached records restored, `Pruned 4 item(s) from
+    ///   page 3` 6ms later, then `Full scan complete: 98 applications` 1.6s
+    ///   later). Treating that partial set as authoritative deleted the four
+    ///   apps it hadn't cached yet, and the completed scan then re-appended
+    ///   them as "new" at the end of the grid — silently reshuffling the
+    ///   user's last page on *every* launch, with the exact order depending on
+    ///   which records the snapshot happened to hold. A cached snapshot can
+    ///   only ever add confidence that an app exists, never that one is gone,
+    ///   so removal stays gated on a completed scan.
+    public func reconcile(with records: [ApplicationRecord], prunesMissingItems: Bool = true) {
         recordsByIDValue = Dictionary(uniqueKeysWithValues: records.map { ($0.id.value, $0) })
         let hiddenIDs = Set(document.hiddenApplicationIDs.map(\.value))
         let validIDs = Set(recordsByIDValue.values.filter(isEligibleForGrid(_:)).map { $0.id.value })
             .subtracting(hiddenIDs)
 
-        pruneMissingItems(validIDs: validIDs)
+        if prunesMissingItems {
+            pruneMissingItems(validIDs: validIDs)
+        }
         backfillMissingDateAdded()
 
         let placedIDs = allPlacedAppIdentifierValues()

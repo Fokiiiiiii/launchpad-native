@@ -44,7 +44,10 @@ func launcherViewLoadsEmptySearchStateWithoutInvalidCrossHierarchyConstraints() 
     #expect(window.collectionBehavior.contains(.canJoinAllSpaces))
     #expect(window.collectionBehavior.contains(.fullScreenAuxiliary))
     #expect(!window.collectionBehavior.contains(.fullScreenPrimary))
-    #expect(window.hidesOnDeactivate)
+    // Must stay false: `show()` toggles the activation policy on every open,
+    // and AppKit's blanket hide-on-deactivate ordered the overlay out mid-open.
+    // Dismissal on another app activating is the controller's observer's job.
+    #expect(!window.hidesOnDeactivate)
 }
 
 @Test @MainActor func launcherDoesNotConstrainTheOverlayBelowTheHiddenMenuBar() {
@@ -82,8 +85,11 @@ func launcherViewLoadsEmptySearchStateWithoutInvalidCrossHierarchyConstraints() 
 
     window.applyDockVisibilityPreference(hideDock: false)
 
-    #expect(window.level == .normal)
     #expect(window.level.rawValue < dockLevel)
+    // Below the Dock, but still above ordinary application windows (`.normal`)
+    // — a full-display overlay sharing `.normal` has no guaranteed ordering
+    // against other apps' windows.
+    #expect(window.level.rawValue > NSWindow.Level.normal.rawValue)
 }
 
 @Test @MainActor func launcherStaysAboveDockOnlyWhenDockIsExplicitlyHidden() {

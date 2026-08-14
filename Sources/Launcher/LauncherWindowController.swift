@@ -294,7 +294,11 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         window?.isKeyWindow ?? false
     }
 
-    public func updateRecords(_ records: [ApplicationRecord]) {
+    /// - Parameter isAuthoritative: `false` when `records` came from the
+    ///   startup cache rather than a completed scan — see
+    ///   `GridModel.reconcile(with:prunesMissingItems:)` for the grid-
+    ///   reshuffling bug that distinction exists to prevent.
+    public func updateRecords(_ records: [ApplicationRecord], isAuthoritative: Bool = true) {
         latestRecords = records
         applySearchableRecords()
 
@@ -315,7 +319,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             }
         }
 
-        gridModel.reconcile(with: records)
+        gridModel.reconcile(with: records, prunesMissingItems: isAuthoritative)
         Task { await gridModel.save() }
     }
 

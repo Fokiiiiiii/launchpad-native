@@ -30,27 +30,38 @@ final class LauncherWindow: NSWindow {
         // existing fullscreen app instead of becoming a new fullscreen app.
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
         isMovable = false
-        // Never leave a full-display overlay above the app the user just
-        // opened. AppKit handles the deactivation transition synchronously;
-        // the controller's observer remains as a fallback for Space/app
-        // switches that do not generate a key-window transition.
-        hidesOnDeactivate = true
+        // Deliberately `false`, despite the goal of never leaving the overlay
+        // above the app the user just opened. `show()` flips the process
+        // between `.accessory` and `.regular` on every open; AppKit re-evaluates
+        // activation across that switch, and `hidesOnDeactivate` reacts to a
+        // momentary resign by ordering the window out with no way to opt out —
+        // producing exactly the "opens, then vanishes immediately" symptom this
+        // file's own `show()` comment already records from a prior ordering bug.
+        // It also orders out behind the controller's back, stranding the
+        // activation policy at `.regular`. `LauncherWindowController`'s
+        // `appActivationObserver` covers the real case (another app activating)
+        // with an `isThisApp` guard that AppKit's blanket behavior lacks.
+        hidesOnDeactivate = false
         // Preserve mouse-move delivery for AppKit's normal window handling;
         // the controller intentionally does not install a global mouse-move
         // monitor, which would create a task for every pointer event.
         acceptsMouseMovedEvents = true
     }
 
-    /// Keep the overlay at normal application level unless the user
-    /// explicitly asks to hide the Dock. A dock-adjacent level can leave the
-    /// full-display overlay above another app after deactivation.
+    /// Keep the overlay just below the Dock unless the user explicitly asks to
+    /// hide it: the real Dock stays above the launcher in the default
+    /// presentation, while the overlay still sits above every ordinary
+    /// application window. `.normal` is deliberately *not* used here — it is
+    /// the same level every other app's windows occupy, so a full-display
+    /// overlay at that level has no guaranteed ordering against them and gets
+    /// covered as soon as anything else takes activation.
     func applyDockVisibilityPreference(
         hideDock: Bool,
         reason: String = "unspecified",
         screenFrame: NSRect? = nil
     ) {
         let dockLevel = Int(CGWindowLevelForKey(.dockWindow))
-        level = hideDock ? NSWindow.Level(rawValue: dockLevel + 1) : .normal
+        level = NSWindow.Level(rawValue: hideDock ? dockLevel + 1 : dockLevel - 1)
         if let displayFrame = screenFrame ?? screen?.frame {
             setFrame(displayFrame, display: true)
         }

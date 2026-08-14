@@ -203,7 +203,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let cachedRecords = CatalogSnapshotStore.load(sources: configuredSources)
             await scanner.restoreCachedRecords(cachedRecords)
             if !cachedRecords.isEmpty {
-                launcherWindowController.updateRecords(cachedRecords)
+                // Not authoritative: this snapshot exists to get a first frame
+                // up quickly and can lag the real disk state, so it must not
+                // drive removals. `performFullScan()` below reconciles again
+                // with the authoritative set.
+                launcherWindowController.updateRecords(cachedRecords, isAuthoritative: false)
             }
             await scanner.startWatching()
 

@@ -165,6 +165,30 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(model.pages[0].count == 1)
 }
 
+/// Regression: the startup cache path restores a snapshot that can lag the
+/// real disk state. Reconciling it as if it were authoritative removed the
+/// not-yet-cached apps, and the completed scan then re-appended them as
+/// "new" at the end — reshuffling the user's last page on every launch.
+@Test @MainActor func reconcileWithANonAuthoritativeSnapshotNeverRemovesPlacedApps() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+
+    let full = [record("Apple", id: "a"), record("Banana", id: "b"), record("Cherry", id: "c")]
+    model.reconcile(with: full)
+    let arrangementBefore = model.pages
+
+    // A cache that happens to be missing one app must not delete it...
+    model.reconcile(with: [record("Apple", id: "a"), record("Banana", id: "b")], prunesMissingItems: false)
+    #expect(model.pages == arrangementBefore)
+
+    // ...and the authoritative scan that follows must leave the order intact,
+    // rather than re-appending the survivor as if it were newly installed.
+    model.reconcile(with: full)
+    #expect(model.pages == arrangementBefore)
+}
+
 @Test @MainActor func reconcileStartsNewPageWhenCapacityExceeded() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
