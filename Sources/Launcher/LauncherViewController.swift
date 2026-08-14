@@ -612,9 +612,16 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // `SortMode.lastUsed` (see `GridModel.recordLaunch`'s doc comment).
         gridModel.recordLaunch(for: record.id)
         Task { await gridModel.save() }
-        AppLauncher.launch(record) { [weak self] in
-            self?.onDidLaunch()
-        }
+        AppLauncher.launch(record)
+        // Dismiss immediately rather than from a launch-completion callback.
+        // `NSWorkspace.openApplication`'s completion handler doesn't fire when
+        // the *request* is accepted — it fires once the app has actually
+        // finished launching, which for a cold start is hundreds of
+        // milliseconds to several seconds. Waiting for it left the full-screen
+        // overlay sitting on top of the app the user just opened for that
+        // whole time. The click already settles the user's intent, so the
+        // overlay leaves on the click, matching the real Launchpad.
+        onDidLaunch()
     }
 
     // MARK: NSTextFieldDelegate
