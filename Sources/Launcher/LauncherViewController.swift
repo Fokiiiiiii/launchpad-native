@@ -733,16 +733,27 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         let isSelected = viewModel.selectedIndex == indexPath.item
         let iconSize = gridViewController.currentIconSize
         let visualScale = gridViewController.currentEffectiveIconScale
-        item.configure(record: record, icon: NSWorkspace.shared.icon(for: .applicationBundle), isSelected: isSelected, iconSize: iconSize, visualScale: visualScale)
-
         let cache = iconCache
         let expectedKey = record.iconCacheKey
-        Task { @MainActor in
-            let icon = await cache.icon(for: record)
-            // Search results reload on every keystroke, recycling cells —
-            // same cell-reuse guard as Grid.GridCellItem, see its comment.
-            guard item.currentRequestKey == expectedKey else { return }
-            item.configure(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale)
+        // Settle synchronously on a cache hit. Results reload on *every*
+        // keystroke, and unconditionally configuring with the generic bundle
+        // icon first meant every visible cell repainted as the generic icon
+        // for a frame before its real icon came back through the task — while
+        // typing, that reads as the whole result list flickering. Anything the
+        // user has already seen is normally in the memory cache by now, so the
+        // hit path is the common one; it also skips a per-cell task and a
+        // synchronous `NSWorkspace.shared.icon(for:)` call.
+        if let cached = cache.cachedIconIfAvailable(for: record) {
+            item.configure(record: record, icon: cached, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale)
+        } else {
+            item.configure(record: record, icon: NSWorkspace.shared.icon(for: .applicationBundle), isSelected: isSelected, iconSize: iconSize, visualScale: visualScale)
+            Task { @MainActor in
+                let icon = await cache.icon(for: record)
+                // Search results reload on every keystroke, recycling cells —
+                // same cell-reuse guard as Grid.GridCellItem, see its comment.
+                guard item.currentRequestKey == expectedKey else { return }
+                item.configure(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale)
+            }
         }
         return item
     }

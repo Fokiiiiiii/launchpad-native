@@ -20,6 +20,10 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private let viewModel = LauncherViewModel()
     private let gridModel: GridModel
     private let iconCache: IconCache
+    /// Pending delayed release of the decoded-icon memory cache — see
+    /// `scheduleIconCacheEviction()`. Cancelled whenever the launcher reopens.
+    private var iconEvictionTask: Task<Void, Never>?
+    private static let iconEvictionDelayNanoseconds: UInt64 = 60_000_000_000
     private let menuBarVisibility = SystemMenuBarVisibility()
     private var hasAttemptedLegacyImport = false
     /// The full, unfiltered scan result from the most recent `updateRecords(_:)`
@@ -371,6 +375,10 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         let wasVisible = window.isVisible
         dockSettleTask?.cancel()
         dockSettleTask = nil
+        // Reopening keeps the warm icon cache — only a launcher that stays
+        // closed pays the eviction.
+        iconEvictionTask?.cancel()
+        iconEvictionTask = nil
         // The resident helper becomes regular only while the overlay is
         // visible; it returns to accessory after the overlay is ordered out.
         guard NSApp.setActivationPolicy(.regular) else {
@@ -535,6 +543,32 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             CATransaction.commit()
         }
         refreshOverlayLayout(reason: "hide completed")
+        scheduleIconCacheEviction()
+    }
+
+    /// Releases the decoded-icon memory cache once the launcher has stayed
+    /// hidden for a while. `IconCache` bounds itself at 192 entries, which its
+    /// own comment puts at roughly 48 MiB of 2x RGBA pixels, and nothing ever
+    /// called `evictMemoryCache()` — so a resident menu-bar app that the user
+    /// opens once keeps that memory for the rest of the session, and
+    /// `prefetchAdjacentPageIcons` keeps refilling it. Eviction is delayed
+    /// rather than immediate because reopening within a few seconds is the
+    /// common case and should stay instant; the disk cache also survives, so
+    /// even a post-eviction reopen re-decodes rather than re-renders from
+    /// scratch.
+    private func scheduleIconCacheEviction() {
+        iconEvictionTask?.cancel()
+        iconEvictionTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.iconEvictionDelayNanoseconds)
+            } catch {
+                return
+            }
+            guard let self, !self.isVisible else { return }
+            self.iconCache.evictMemoryCache()
+            DiagnosticsLog.launcher.info("icon memory cache evicted after idle")
+            self.iconEvictionTask = nil
+        }
     }
 
     /// Builds a `CASpringAnimation` from Apple's damping-ratio/response

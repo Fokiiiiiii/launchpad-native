@@ -179,8 +179,20 @@ public final class TriggerCoordinator {
             }
         }
 
-        hotCorner.configure(Self.hotCornerConfigs(from: settings))
-        hotCorner.start()
+        let hotCornerConfigs = Self.hotCornerConfigs(from: settings)
+        hotCorner.configure(hotCornerConfigs)
+        // Only hold the global mouseMoved monitor when a corner can actually
+        // fire. `hotCornerConfigs(from:)` always returns an entry per corner
+        // (disabled ones included), so starting unconditionally installed a
+        // monitor that hops to the main actor for *every* pointer movement —
+        // dozens to hundreds of tasks a second — even for users who have every
+        // corner switched off. `apply` runs on each settings change, so
+        // enabling a corner starts the monitor right back up.
+        if hotCornerConfigs.values.contains(where: \.enabled) {
+            hotCorner.start()
+        } else {
+            hotCorner.stop()
+        }
 
         f4.stop()
         var f4Active = false

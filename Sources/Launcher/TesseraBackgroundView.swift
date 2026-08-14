@@ -282,6 +282,16 @@ final class TesseraBackgroundView: NSView {
     /// screen/frame would otherwise reuse the wrong wallpaper and gradient
     /// canvas on a multi-display setup.
     func update(screen: NSScreen, viewportOrigin: CGPoint? = nil) {
+        // Only a genuine display change invalidates the image already on
+        // screen. `LauncherWindowController.show()` calls this on *every* open,
+        // and clearing unconditionally meant the wallpaper layer was reset to
+        // nil right before the window became visible — so each open started on
+        // the flat base color and only painted the wallpaper a run loop later,
+        // once the (usually already cached) image came back through the async
+        // path. Reloading still happens either way, so a wallpaper the user
+        // changed since the last open is still picked up; what changes is that
+        // the previous image stays on screen until the new one is ready.
+        let displayChanged = Self.displayID(of: self.screen) != Self.displayID(of: screen)
         self.screen = screen
         fullScreenSize = screen.frame.size
         if let viewportOrigin {
@@ -290,8 +300,12 @@ final class TesseraBackgroundView: NSView {
         configurationTask?.cancel()
         configurationTask = nil
         configurationGeneration &+= 1
-        applyConfiguration()
+        applyConfiguration(clearWallpaper: displayChanged)
         updateLayerFrames()
+    }
+
+    static func displayID(of screen: NSScreen) -> CGDirectDisplayID {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
     }
 
     // Radial CAGradientLayers need their own bounds set explicitly (they

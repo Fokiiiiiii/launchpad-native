@@ -99,6 +99,16 @@ final class WindowBrowserPopoverController: NSViewController, NSCollectionViewDa
         return cell
     }
 
+    /// Release the captured window images as soon as the browser goes away.
+    /// The service's TTL only governs whether a *requested* thumbnail is
+    /// reused; without this, the last set of captures stayed resident for the
+    /// rest of the session even though nothing can display them again.
+    override func viewDidDisappear() {
+        super.viewDidDisappear()
+        let service = thumbnailService
+        Task { await service.evictAll() }
+    }
+
     func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
         guard let index = indexPaths.first?.item, windows.indices.contains(index) else { return }
         WindowActivator.activate(windows[index])
