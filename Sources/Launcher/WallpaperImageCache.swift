@@ -660,11 +660,10 @@ enum WallpaperImageCache {
     /// from accumulating intermediate buffers between the infrequent,
     /// full-screen-sized renders this does.
     ///
-    /// `nonisolated(unsafe)` because the blur runs off the main actor and
-    /// `CIContext` is not `Sendable`-annotated in the SDK, while Apple's own
-    /// documentation states a `CIContext` may be shared across threads
-    /// ("you can use a single CIContext object from multiple threads"). The
-    /// value is immutable after this initializer, so there is nothing to race
-    /// on beyond that documented guarantee.
-    private nonisolated(unsafe) static let renderContext = CIContext(options: [.cacheIntermediates: false])
+    /// `nonisolated` because the blur runs off the main actor while this type
+    /// is `@MainActor`. Sharing one context across those threads is what Apple
+    /// documents ("you can use a single CIContext object from multiple
+    /// threads"), and `CIContext` is `Sendable`, so no `unsafe` opt-out is
+    /// needed to say so.
+    private nonisolated static let renderContext = CIContext(options: [.cacheIntermediates: false])
 }
