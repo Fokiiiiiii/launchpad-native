@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The closed folder icon — adapted directly from the user-supplied
-/// "Tessera" SwiftUI design reference (`LaunchpadView.swift`'s
+/// SwiftUI design reference (`LaunchpadView.swift`'s
 /// `AppTile.icon` folder branch + `FolderThumbnail`), not a from-scratch
 /// AppKit/Core Graphics reinterpretation of its numbers. Two attempts at
 /// hand-translating this into `NSBezierPath`/`CALayer` drawing were both

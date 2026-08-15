@@ -7,7 +7,7 @@ func resolverPrefersUsableStaticDesktopImage() {
     let desktopURL = URL(fileURLWithPath: "/tmp/current-wallpaper.jpg")
     let configuredURL = URL(fileURLWithPath: "/tmp/aerial.mov")
 
-    let source = TesseraWallpaperSourceResolver.resolve(
+    let source = WallpaperSourceResolver.resolve(
         desktopURL: desktopURL,
         configuredURL: configuredURL,
         isUsableFile: { _ in true }
@@ -22,7 +22,7 @@ func resolverUsesConfiguredAerialWhenWorkspaceReportsDefaultDesktop() {
     let desktopURL = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")
     let configuredURL = URL(fileURLWithPath: "/Library/Application Support/com.apple.idleassetsd/Customer/Aerial.mov")
 
-    let source = TesseraWallpaperSourceResolver.resolve(
+    let source = WallpaperSourceResolver.resolve(
         desktopURL: desktopURL,
         configuredURL: configuredURL,
         isUsableFile: { _ in true }
@@ -37,7 +37,7 @@ func resolverReturnsUnavailableInsteadOfDefaultDesktopWhenConfiguredSourceCannot
     let desktopURL = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")
     let configuredURL = URL(fileURLWithPath: "/Library/Application Support/com.apple.idleassetsd/Customer/Missing.mov")
 
-    let source = TesseraWallpaperSourceResolver.resolve(
+    let source = WallpaperSourceResolver.resolve(
         desktopURL: desktopURL,
         configuredURL: configuredURL,
         isUsableFile: { url in url.lastPathComponent != "Missing.mov" }
@@ -50,7 +50,7 @@ func resolverReturnsUnavailableInsteadOfDefaultDesktopWhenConfiguredSourceCannot
 func resolverClassifiesDirectMovieWorkspaceSourceAsAerial() {
     let desktopURL = URL(fileURLWithPath: "/tmp/current-wallpaper.m4v")
 
-    let source = TesseraWallpaperSourceResolver.resolve(
+    let source = WallpaperSourceResolver.resolve(
         desktopURL: desktopURL,
         configuredURL: nil,
         isUsableFile: { _ in true }
@@ -62,7 +62,7 @@ func resolverClassifiesDirectMovieWorkspaceSourceAsAerial() {
 
 @Test
 func wallpaperWindowCandidateFilteringRejectsUnrelatedWindows() {
-    let valid = TesseraWallpaperWindowCandidate(
+    let valid = WallpaperWindowCandidate(
         windowID: 1545,
         ownerName: "Dock",
         windowName: "Wallpaper-1",
@@ -71,7 +71,7 @@ func wallpaperWindowCandidateFilteringRejectsUnrelatedWindows() {
         isOnscreen: true,
         alpha: 1
     )
-    let unrelatedName = TesseraWallpaperWindowCandidate(
+    let unrelatedName = WallpaperWindowCandidate(
         windowID: 2000,
         ownerName: "Dock",
         windowName: "Dock",
@@ -80,7 +80,7 @@ func wallpaperWindowCandidateFilteringRejectsUnrelatedWindows() {
         isOnscreen: true,
         alpha: 1
     )
-    let unrelatedLayer = TesseraWallpaperWindowCandidate(
+    let unrelatedLayer = WallpaperWindowCandidate(
         windowID: 2001,
         ownerName: "Safari",
         windowName: "Wallpaper Preview",
@@ -90,15 +90,15 @@ func wallpaperWindowCandidateFilteringRejectsUnrelatedWindows() {
         alpha: 1
     )
 
-    #expect(TesseraWallpaperSourceResolver.isWallpaperWindowCandidate(valid))
-    #expect(!TesseraWallpaperSourceResolver.isWallpaperWindowCandidate(unrelatedName))
-    #expect(!TesseraWallpaperSourceResolver.isWallpaperWindowCandidate(unrelatedLayer))
+    #expect(WallpaperSourceResolver.isWallpaperWindowCandidate(valid))
+    #expect(!WallpaperSourceResolver.isWallpaperWindowCandidate(unrelatedName))
+    #expect(!WallpaperSourceResolver.isWallpaperWindowCandidate(unrelatedLayer))
 }
 
 @Test
 func wallpaperWindowSelectionPrefersTargetDisplayAndOnscreenLayer() {
     let targetBounds = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
-    let targetWindow = TesseraWallpaperWindowCandidate(
+    let targetWindow = WallpaperWindowCandidate(
         windowID: 1545,
         ownerName: "Dock",
         windowName: "Wallpaper-1",
@@ -107,7 +107,7 @@ func wallpaperWindowSelectionPrefersTargetDisplayAndOnscreenLayer() {
         isOnscreen: true,
         alpha: 1
     )
-    let offscreenTarget = TesseraWallpaperWindowCandidate(
+    let offscreenTarget = WallpaperWindowCandidate(
         windowID: 1951,
         ownerName: "壁紙",
         windowName: "Offscreen Wallpaper Window",
@@ -116,7 +116,7 @@ func wallpaperWindowSelectionPrefersTargetDisplayAndOnscreenLayer() {
         isOnscreen: false,
         alpha: 1
     )
-    let otherDisplay = TesseraWallpaperWindowCandidate(
+    let otherDisplay = WallpaperWindowCandidate(
         windowID: 3000,
         ownerName: "Dock",
         windowName: "Wallpaper-2",
@@ -126,7 +126,7 @@ func wallpaperWindowSelectionPrefersTargetDisplayAndOnscreenLayer() {
         alpha: 1
     )
 
-    let selected = TesseraWallpaperSourceResolver.selectWallpaperWindow(
+    let selected = WallpaperSourceResolver.selectWallpaperWindow(
         candidates: [offscreenTarget, otherDisplay, targetWindow],
         targetBounds: targetBounds
     )
@@ -137,7 +137,7 @@ func wallpaperWindowSelectionPrefersTargetDisplayAndOnscreenLayer() {
 @Test
 func wallpaperWindowSelectionDoesNotBorrowAnotherDisplay() {
     let targetBounds = CGRect(x: 0, y: 0, width: 1_920, height: 1_080)
-    let otherDisplay = TesseraWallpaperWindowCandidate(
+    let otherDisplay = WallpaperWindowCandidate(
         windowID: 3000,
         ownerName: "Dock",
         windowName: "Wallpaper-2",
@@ -147,7 +147,7 @@ func wallpaperWindowSelectionDoesNotBorrowAnotherDisplay() {
         alpha: 1
     )
 
-    #expect(TesseraWallpaperSourceResolver.selectWallpaperWindow(
+    #expect(WallpaperSourceResolver.selectWallpaperWindow(
         candidates: [otherDisplay],
         targetBounds: targetBounds
     ) == nil)
@@ -157,7 +157,7 @@ func wallpaperWindowSelectionDoesNotBorrowAnotherDisplay() {
 func resolverPrefersWindowCaptureBeforeWorkspaceAndConfiguredSources() {
     let desktopURL = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")
     let configuredURL = URL(fileURLWithPath: "/Library/Application Support/com.apple.idleassetsd/Customer/Aerial.mov")
-    let candidate = TesseraWallpaperWindowCandidate(
+    let candidate = WallpaperWindowCandidate(
         windowID: 1545,
         ownerName: "Dock",
         windowName: "Wallpaper-1",
@@ -167,7 +167,7 @@ func resolverPrefersWindowCaptureBeforeWorkspaceAndConfiguredSources() {
         alpha: 1
     )
 
-    let source = TesseraWallpaperSourceResolver.resolve(
+    let source = WallpaperSourceResolver.resolve(
         desktopURL: desktopURL,
         configuredURL: configuredURL,
         windowCandidates: [candidate],
@@ -186,7 +186,7 @@ func resolverFallsBackToConfiguredAerialWhenNoWallpaperWindowMatches() {
     let desktopURL = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")
     let configuredURL = URL(fileURLWithPath: "/Library/Application Support/com.apple.idleassetsd/Customer/Aerial.mov")
 
-    let source = TesseraWallpaperSourceResolver.resolve(
+    let source = WallpaperSourceResolver.resolve(
         desktopURL: desktopURL,
         configuredURL: configuredURL,
         windowCandidates: [],

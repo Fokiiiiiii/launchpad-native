@@ -62,7 +62,7 @@ public enum AppIconStyle: String, Codable, Sendable, CaseIterable {
     case diagonal
 }
 
-/// Whether the launcher's full-screen backdrop (`TesseraBackgroundView`)
+/// Whether the launcher's full-screen backdrop (`LauncherBackgroundView`)
 /// shows the real desktop wallpaper directly, or a dimmed/tinted "glass"
 /// treatment over it. Adding new raw-`String` cases here is backward
 /// compatible on its own, same reasoning as `SortMode` above.
@@ -456,10 +456,10 @@ public struct LayoutDocument: Codable, Sendable {
     public var showsHiddenAppsInSearch: Bool
     public var backgroundMode: LauncherBackgroundMode
     /// 0...1 — only meaningful when `backgroundMode == .glass`; see
-    /// `TesseraBackgroundView.Configuration.materialIntensity`.
+    /// `LauncherBackgroundView.Configuration.materialIntensity`.
     public var glassMaterialIntensity: Double
     /// Only meaningful when `backgroundMode == .wallpaper`; see
-    /// `TesseraBackgroundView.Configuration.blursWallpaper`.
+    /// `LauncherBackgroundView.Configuration.blursWallpaper`.
     public var blursWallpaper: Bool
 
     public init(

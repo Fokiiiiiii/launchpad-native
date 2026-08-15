@@ -1204,7 +1204,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    /// Full-screen dimmed take-over, matching the user-supplied "Tessera"
+    /// Full-screen dimmed take-over, matching the user-supplied
     /// design reference's own `FolderOverlay` exactly (explicit request:
     /// "フォルダ名の中身は全画面で表示されるzipのやつにして") — a small
     /// anchored `NSPopover` (this project's prior, safer choice) was
@@ -2784,7 +2784,7 @@ private final class FolderOverlayBackdropView: NSView {
 }
 
 /// Blurs the live grid content behind the folder overlay — matching the
-/// Tessera reference's own `.dc.html` mockup
+/// design reference's own mockup
 /// (`background:rgba(8,8,9,.55);backdrop-filter:blur(22px)`), which shows
 /// the grid as visibly *blurred and darkened*, not just darkened. A purely
 /// decorative background must never intercept clicks (same reasoning as

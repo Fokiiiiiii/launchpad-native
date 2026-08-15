@@ -16,7 +16,7 @@ import SwiftUI
 ///
 /// The tile grid itself is real SwiftUI (`FolderOverlayGridContent`/
 /// `FolderOverlayTileView`, hosted via `NSHostingView`), directly adapted
-/// from the user-supplied "Tessera" design reference's own `FolderOverlay`/
+/// from the user-supplied design reference's own `FolderOverlay`/
 /// `AppTile` — not a hand-translated AppKit/`NSCollectionView` reinterpretation
 /// of its numbers. This follows the same lesson already applied to the
 /// closed folder icon (`FolderIconView`): tuning AppKit geometry to
@@ -56,7 +56,7 @@ final class FolderContentsViewController: NSViewController {
     /// `loadView()`'s doc comment for why `root`'s own outer frame is set
     /// directly by the caller rather than via Auto Layout constraints.
     private let panelWidth: CGFloat
-    /// Matches the "Tessera" design reference's `LazyVGrid(..., spacing: 26)`
+    /// Matches the design reference's `LazyVGrid(..., spacing: 26)`
     /// exactly — the previous 16pt was an invented value, not taken from
     /// the reference.
     private static let cellSpacing: CGFloat = 26

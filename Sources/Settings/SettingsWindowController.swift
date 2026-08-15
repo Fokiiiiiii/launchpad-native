@@ -5,7 +5,7 @@ import Persistence
 import SwiftUI
 
 enum SettingsWindowMetrics {
-    // Tessera's reference card is 400pt wide. A 360pt card keeps the same
+    // The design reference's card is 400pt wide. A 360pt card keeps the same
     // hierarchy at a compact scale while leaving enough width for localized
     // labels; rows grow vertically when a Dynamic Type size needs more room.
     static let width: CGFloat = 360
@@ -133,7 +133,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
                 .environment(\.colorScheme, .dark)
         )
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
-        // The card uses a fixed dark Liquid Glass tint to match Tessera. Keep
+        // The card uses a fixed dark Liquid Glass tint to match the design reference. Keep
         // AppKit and SwiftUI on the same appearance so adaptive `.primary`
         // and `.secondary` text never resolve to dark ink on the dark card in
         // macOS Light appearance.

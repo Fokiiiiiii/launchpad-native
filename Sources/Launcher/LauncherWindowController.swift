@@ -16,7 +16,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private var rootContentView: NSView?
     /// Held so `updateBackgroundSettings(mode:materialIntensity:blursWallpaper:)`
     /// can live-update the retained background when Settings' controls change.
-    private var backgroundView: TesseraBackgroundView?
+    private var backgroundView: LauncherBackgroundView?
     private let viewModel = LauncherViewModel()
     private let gridModel: GridModel
     private let iconCache: IconCache
@@ -244,8 +244,8 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         viewController?.refreshDockLayout()
     }
 
-    private func currentBackgroundConfiguration() -> TesseraBackgroundView.Configuration {
-        var config = TesseraBackgroundView.Configuration()
+    private func currentBackgroundConfiguration() -> LauncherBackgroundView.Configuration {
+        var config = LauncherBackgroundView.Configuration()
         config.mode = gridModel.backgroundMode
         config.materialIntensity = gridModel.glassMaterialIntensity
         config.blursWallpaper = gridModel.blursWallpaper
@@ -257,9 +257,9 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// the new value to `GridModel` itself (mirroring `appIconStyle`'s own
     /// "model write + separate live-apply" split, not `hideDockWhileLauncherOpen`'s
     /// single-callback-does-both shape), so this only needs to push the new
-    /// values into the already-live `TesseraBackgroundView` instance.
+    /// values into the already-live `LauncherBackgroundView` instance.
     public func updateBackgroundSettings(mode: LauncherBackgroundMode, materialIntensity: Double, blursWallpaper: Bool) {
-        var config = TesseraBackgroundView.Configuration()
+        var config = LauncherBackgroundView.Configuration()
         config.mode = mode
         config.materialIntensity = materialIntensity
         config.blursWallpaper = blursWallpaper
@@ -394,7 +394,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             screenFrame: screen.frame
         )
         // The launcher window is reused across displays; refresh the retained
-        // Tessera view's wallpaper source and full-frame gradient canvas too.
+        // background view's wallpaper source and full-frame gradient canvas too.
         backgroundView?.update(screen: screen, viewportOrigin: .zero)
         viewController?.resetSearch()
 
@@ -569,7 +569,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             // Same reasoning, same timer: the blurred wallpapers are
             // full-screen-derived images kept in `static` storage with no
             // release path of their own.
-            TesseraWallpaperImageCache.evictAll()
+            WallpaperImageCache.evictAll()
             DiagnosticsLog.launcher.info("icon and wallpaper memory caches evicted after idle")
             self.iconEvictionTask = nil
         }
@@ -627,7 +627,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
 
         // The background is a plain sibling subview behind the real
         // content — not a container for it — so normal AppKit hit-testing
-        // applies to every button/cell (`TesseraBackgroundView.hitTest`
+        // applies to every button/cell (`LauncherBackgroundView.hitTest`
         // also hard-disables itself, same discipline `GlassBackgroundView
         // .swift`'s doc comment establishes for why: a purely decorative
         // background must never be a hit-test target).
@@ -636,18 +636,18 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // layer, a level above `background`/`content.view`, so scaling
         // never fights with either of their own layer usage.
         root.wantsLayer = true
-        // `TesseraBackgroundView`, not `GlassBackgroundFactory` — a real,
+        // `LauncherBackgroundView`, not `GlassBackgroundFactory` — a real,
         // confirmed regression ("アプリの周りにある謎の枠を消してくれ")
         // traced back to stretching `NSGlassEffectView`'s own Liquid Glass
         // material (which self-draws a specular/edge highlight as part of
         // the material itself) edge-to-edge across the entire screen. The
-        // Tessera reference's own full-screen background (`TSBackground`)
+        // design reference's own full-screen background (`TSBackground`)
         // never uses glass at all — only small cards/chips do (search bar,
         // folder panel, Settings) — so the whole-window background now
         // mirrors that reference composition (blurred desktop wallpaper +
         // scrim + material sheen + ambient blooms) instead of routing
         // through the same glass factory used for cards.
-        let background = TesseraBackgroundView(
+        let background = LauncherBackgroundView(
             screen: screen,
             configuration: currentBackgroundConfiguration()
         )

@@ -4,7 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// One app tile inside an opened folder's grid — adapted directly from the
-/// user-supplied "Tessera" design reference's `AppTile` (icon branch) and
+/// user-supplied design reference's `AppTile` (icon branch) and
 /// `TileButtonStyle`: same squircle corner ratio (`icon * 0.236`), same
 /// top-light gradient overlay + hairline stroke, same hover lift
 /// (`offset(y: -2)`) and press scale (`0.90`) driven by the reference's own
@@ -209,7 +209,7 @@ final class FolderOverlayGridModel: ObservableObject {
     @Published var draggingID: String?
 }
 
-/// Adapted directly from the Tessera reference's `FolderOverlay`'s inner
+/// Adapted directly from the design reference's `FolderOverlay`'s inner
 /// grid (`LazyVGrid(columns: Array(repeating: .flexible(), count:
 /// metrics.columns), spacing: 26)` + the same horizontal/vertical padding)
 /// — always exactly `columns` columns regardless of item count, matching

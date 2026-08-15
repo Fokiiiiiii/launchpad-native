@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Settings
 
-@Test("settings window stays close to the Tessera compact reference")
+@Test("settings window stays close to the compact design reference")
 func settingsWindowUsesCompactMetrics() {
     #expect(SettingsWindowMetrics.width == 360)
     #expect(SettingsWindowMetrics.height == 480)

@@ -156,7 +156,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         //
         // The quick-menu button itself now lives *inside* the search bar's
         // own pill (trailing edge) instead of as a separate floating chip
-        // beside it — matches the "Tessera" reference's `SearchField`
+        // beside it — matches the design reference's `SearchField`
         // exactly, whose "•••" button is one more element in the same
         // `HStack` as the magnifying glass and text field, not a second
         // glass shape. Symbol is plain `ellipsis` (not `ellipsis.circle` —

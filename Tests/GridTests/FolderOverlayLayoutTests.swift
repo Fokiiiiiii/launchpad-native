@@ -11,6 +11,6 @@ import Testing
     #expect(FolderContentsViewController.panelWidth(availableWidth: 1_488, columns: 7, iconSize: 96, usesWideLayout: true) == 1_488)
 }
 
-@Test @MainActor func folderPanelWidthNeverExceedsTheAvailableTesseraWidth() {
+@Test @MainActor func folderPanelWidthNeverExceedsTheAvailablePanelWidth() {
     #expect(FolderContentsViewController.panelWidth(availableWidth: 600, columns: 7, iconSize: 96, usesWideLayout: true) == 600)
 }

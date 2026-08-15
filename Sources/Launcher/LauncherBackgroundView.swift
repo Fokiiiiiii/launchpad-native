@@ -3,9 +3,9 @@ import Diagnostics
 import Persistence
 import QuartzCore
 
-/// Full-screen decorative background matching the "Tessera" design
-/// reference's own `TSBackground` composition (`TesseraDesign.swift`'s
-/// `.glass` mode / `Tessera.dc.html`'s Stage layer stack): a base fill, a
+/// Full-screen decorative background matching the design
+/// reference's own `TSBackground` composition (the reference's
+/// `.glass` mode / the reference mockup's Stage layer stack): a base fill, a
 /// blurred wallpaper layer, a dark scrim, a soft "material sheen" highlight,
 /// and (main window only) two ambient light blooms.
 ///
@@ -18,7 +18,7 @@ import QuartzCore
 /// confirmed "mysterious frame around the whole app" — this view is the
 /// direct fix, replacing that edge-to-edge glass usage with a composition
 /// that mirrors what the reference actually does full-screen.
-final class TesseraBackgroundView: NSView {
+final class LauncherBackgroundView: NSView {
     struct GlassMaterialParameters: Equatable {
         let wallpaperOpacity: Float
         let blurRadius: CGFloat
@@ -232,7 +232,7 @@ final class TesseraBackgroundView: NSView {
             "wallpaper request: mode=\(self.configuration.mode.rawValue, privacy: .public), displayID=\(displayID, privacy: .public), radius=\(radius, privacy: .public)"
         )
         wallpaperTask = Task { @MainActor [weak self] in
-            let image = await TesseraWallpaperImageCache.blurredWallpaperAsync(
+            let image = await WallpaperImageCache.blurredWallpaperAsync(
                 for: requestedScreen,
                 radius: radius
             )
@@ -375,7 +375,7 @@ final class TesseraBackgroundView: NSView {
     }
 
     /// Matches the reference's own `bloomDrift` CSS keyframe animation
-    /// (`Tessera.dc.html`'s `@keyframes bloomDrift`, 26s ease-in-out loop) —
+    /// (the reference mockup's `@keyframes bloomDrift`, 26s ease-in-out loop) —
     /// a slow, subtle wander so the background doesn't read as a static
     /// image.
     private func addBloomDrift(to layer: CALayer) {

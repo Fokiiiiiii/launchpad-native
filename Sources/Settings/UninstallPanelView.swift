@@ -3,7 +3,7 @@ import Localization
 import SwiftUI
 
 /// Floating panel shown from the grid's "Uninstall…" context menu item.
-/// Adapted directly from the user-supplied "Tessera" design reference's
+/// Adapted directly from the user-supplied design reference's
 /// `UninstallSheet` (`Dialogs.swift`) — same header (icon/name/total size),
 /// same collapsible-group-with-checkbox layout, same per-row "show in
 /// Finder" magnifying-glass button and monospaced path text — wired to

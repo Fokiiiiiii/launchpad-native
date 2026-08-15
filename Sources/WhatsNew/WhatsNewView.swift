@@ -1,7 +1,7 @@
 import Localization
 import SwiftUI
 
-/// Ported from the "Tessera" design reference's `Dialogs.swift`
+/// Ported from the design reference's `Dialogs.swift`
 /// `WhatsNewView`/`WhatsNewRow` — same width (640), padding, spacing, and
 /// typography, with real content in place of the reference's placeholder
 /// rows (see `WhatsNewFeature`'s doc comment for why a plain SF Symbol

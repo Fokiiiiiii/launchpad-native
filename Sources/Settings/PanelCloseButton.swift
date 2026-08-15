@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Discoverable close affordance for borderless glass panels.
 ///
-/// The Tessera mock uses the familiar macOS red traffic-light position. The
+/// The design reference's mock uses the familiar macOS red traffic-light position. The
 /// glyph appears on hover, matching the native control without introducing a
 /// full title bar.
 struct PanelCloseButton: View {

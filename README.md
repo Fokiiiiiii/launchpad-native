@@ -1876,7 +1876,7 @@ above — the user's original premises for both didn't hold up technically,
 and that's stated plainly here rather than reinterpreted into a
 change that wasn't actually made.
 
-## Folder mosaic + gesture auto-disable, then a "Tessera" reference redesign saga (2026-07-31)
+## Folder mosaic + gesture auto-disable, then a design-reference redesign saga (2026-07-31)
 
 Two independent efforts, in order:
 
@@ -1906,8 +1906,8 @@ takes effect without logout, and what "0" actually means, are described by
 outside sources only — not confirmed by toggling and observing this
 session, since there's no physical trackpad to test with here.
 
-**The "Tessera" redesign saga.** The user sent a ZIP of a SwiftUI design
-reference ("Tessera") with an explicit instruction — *use the zip's own
+**The design-reference redesign saga.** The user sent a ZIP of a SwiftUI design
+reference with an explicit instruction — *use the zip's own
 implementation directly, not just its numbers* — followed by a long back-
 and-forth of screenshots and corrections (closed folder icon looked
 "huge"/had an unwanted shadow; opened-folder presentation had to become a
@@ -1970,9 +1970,9 @@ menu, the gesture auto-disable actually silencing the OS gesture) needs
 the user's own hardware — this remains a standing, disclosed limit of
 this session's environment, not a claim of full verification.
 
-## Settings/Uninstall/Onboarding + a new "What's New" panel, ported to the "Tessera" reference (2026-08-02)
+## Settings/Uninstall/Onboarding + a new "What's New" panel, ported to the supplied design reference (2026-08-02)
 
-The "Tessera" ZIP (see previous section) had two more un-ported surfaces —
+The supplied design-reference ZIP (see previous section) had two more un-ported surfaces —
 Settings, the Uninstall confirmation panel, the first-run Onboarding wizard —
 plus a "What's New" panel the reference has but this app never had. Scoped
 via two `AskUserQuestion` confirmations: include What's New (yes), and give
@@ -2014,7 +2014,7 @@ in search (a real, newly-implemented filter — the prior doc comment claiming
 hidden apps were already excluded from search turned out to be aspirational,
 not actual, confirmed by reading `LauncherWindowController.updateRecords`),
 and a wallpaper/glass background-mode toggle with a material-intensity
-slider and a blur toggle (`TesseraBackgroundView.Configuration` gained
+slider and a blur toggle (`LauncherBackgroundView.Configuration` gained
 `mode`/`materialIntensity`/`blursWallpaper`, all defaulted to reproduce the
 pre-existing hardcoded glass look exactly — zero visual change for anyone
 who never opens the new controls).
@@ -2084,7 +2084,7 @@ correct," not "looks/feels right."
 
 ## Liquid Glass foundation audit and visual verification (2026-08-02)
 
-A follow-up audit against the supplied `Tessera Launchpad デザイン.zip`
+A follow-up audit against the supplied design-reference ZIP
 identified four separate copies of the same AppKit glass-surface recipe.
 Those copies had drifted: only some honored Increase Contrast, some used
 non-interactive glass subclasses, and each feature module carried its own
@@ -2119,7 +2119,7 @@ Verification: warning-free debug and production builds, `swift test`
 on-screen screenshots of the launcher plus the General and Screen Settings
 tabs. The observed launcher/card geometry, page controls, Dock composition,
 close control, tab chrome, section hierarchy, and accessibility tree all
-match the supplied Tessera direction. The only app-owned startup error still
+match the supplied design direction. The only app-owned startup error still
 observed is the expected `CGEventTap creation failed` when Input Monitoring
 has not been granted. Real trackpad momentum/gesture feel, Reduce Transparency
 live toggling, and search-after-typing layout still require a hands-on pass;

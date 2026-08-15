@@ -4,11 +4,11 @@ import Testing
 
 @Test @MainActor
 func glassMaterialIntensityClampsAndChangesAllMaterialParametersMonotonically() {
-    let belowRange = TesseraBackgroundView.glassMaterialParameters(for: -1)
-    let low = TesseraBackgroundView.glassMaterialParameters(for: 0)
-    let middle = TesseraBackgroundView.glassMaterialParameters(for: 0.35)
-    let high = TesseraBackgroundView.glassMaterialParameters(for: 1)
-    let aboveRange = TesseraBackgroundView.glassMaterialParameters(for: 2)
+    let belowRange = LauncherBackgroundView.glassMaterialParameters(for: -1)
+    let low = LauncherBackgroundView.glassMaterialParameters(for: 0)
+    let middle = LauncherBackgroundView.glassMaterialParameters(for: 0.35)
+    let high = LauncherBackgroundView.glassMaterialParameters(for: 1)
+    let aboveRange = LauncherBackgroundView.glassMaterialParameters(for: 2)
 
     #expect(belowRange == low)
     #expect(aboveRange == high)

@@ -5,21 +5,21 @@ import CoreImage.CIFilterBuiltins
 import Diagnostics
 import Darwin
 
-enum TesseraWallpaperSourceKind: String, Equatable, Hashable, Sendable {
+enum WallpaperSourceKind: String, Equatable, Hashable, Sendable {
     case windowCapture
     case staticImage
     case aerialVideo
     case unavailable
 }
 
-struct TesseraWallpaperSource: Equatable, Sendable {
-    let kind: TesseraWallpaperSourceKind
+struct WallpaperSource: Equatable, Sendable {
+    let kind: WallpaperSourceKind
     let url: URL?
     let windowID: CGWindowID?
     let captureBounds: CGRect?
 
     init(
-        kind: TesseraWallpaperSourceKind,
+        kind: WallpaperSourceKind,
         url: URL?,
         windowID: CGWindowID? = nil,
         captureBounds: CGRect? = nil
@@ -30,13 +30,13 @@ struct TesseraWallpaperSource: Equatable, Sendable {
         self.captureBounds = captureBounds
     }
 
-    static let unavailable = TesseraWallpaperSource(kind: .unavailable, url: nil)
+    static let unavailable = WallpaperSource(kind: .unavailable, url: nil)
 }
 
 /// The small, value-only subset of WindowServer metadata needed to identify a
 /// wallpaper window. Keeping this separate from the CoreGraphics dictionary
 /// makes filtering and per-display selection testable without a live desktop.
-struct TesseraWallpaperWindowCandidate: Equatable, Sendable {
+struct WallpaperWindowCandidate: Equatable, Sendable {
     let windowID: CGWindowID
     let ownerName: String
     let windowName: String
@@ -52,11 +52,11 @@ struct TesseraWallpaperWindowCandidate: Equatable, Sendable {
 /// because `NSWorkspace` may expose `DefaultDesktop.heic` while the rendered
 /// desktop is supplied by Dock. The file-backed path remains available as an
 /// explicit fallback when window capture is unavailable.
-enum TesseraWallpaperSourceResolver {
+enum WallpaperSourceResolver {
     private static let videoExtensions: Set<String> = ["mov", "mp4", "m4v"]
     private static let wallpaperLayerThreshold = -2_000_000_000
 
-    static func resolve(desktopURL: URL?, configuredURL: URL?) -> TesseraWallpaperSource {
+    static func resolve(desktopURL: URL?, configuredURL: URL?) -> WallpaperSource {
         resolve(
             desktopURL: desktopURL,
             configuredURL: configuredURL,
@@ -70,7 +70,7 @@ enum TesseraWallpaperSourceResolver {
         desktopURL: URL?,
         configuredURL: URL?,
         isUsableFile: (URL) -> Bool
-    ) -> TesseraWallpaperSource {
+    ) -> WallpaperSource {
         if let desktopURL,
            isUsableFile(desktopURL),
            !isDefaultDesktopURL(desktopURL) {
@@ -94,10 +94,10 @@ enum TesseraWallpaperSourceResolver {
     static func resolve(
         desktopURL: URL?,
         configuredURL: URL?,
-        windowCandidates: [TesseraWallpaperWindowCandidate],
+        windowCandidates: [WallpaperWindowCandidate],
         targetBounds: CGRect?,
         isUsableFile: (URL) -> Bool
-    ) -> TesseraWallpaperSource {
+    ) -> WallpaperSource {
         if let candidate = selectWallpaperWindow(
             candidates: windowCandidates,
             targetBounds: targetBounds
@@ -109,7 +109,7 @@ enum TesseraWallpaperSourceResolver {
             } else {
                 captureBounds = candidate.bounds
             }
-            return TesseraWallpaperSource(
+            return WallpaperSource(
                 kind: .windowCapture,
                 url: nil,
                 windowID: candidate.windowID,
@@ -127,9 +127,9 @@ enum TesseraWallpaperSourceResolver {
     static func resolve(
         desktopURL: URL?,
         configuredURL: URL?,
-        windowCandidates: [TesseraWallpaperWindowCandidate],
+        windowCandidates: [WallpaperWindowCandidate],
         targetBounds: CGRect?
-    ) -> TesseraWallpaperSource {
+    ) -> WallpaperSource {
         resolve(
             desktopURL: desktopURL,
             configuredURL: configuredURL,
@@ -140,7 +140,7 @@ enum TesseraWallpaperSourceResolver {
     }
 
     static func isWallpaperWindowCandidate(
-        _ candidate: TesseraWallpaperWindowCandidate
+        _ candidate: WallpaperWindowCandidate
     ) -> Bool {
         guard candidate.bounds.width > 1,
               candidate.bounds.height > 1,
@@ -165,13 +165,13 @@ enum TesseraWallpaperSourceResolver {
     /// If any candidates intersect `targetBounds`, candidates from other
     /// displays are discarded; on-screen state and layer then break ties.
     static func selectWallpaperWindow(
-        candidates: [TesseraWallpaperWindowCandidate],
+        candidates: [WallpaperWindowCandidate],
         targetBounds: CGRect?
-    ) -> TesseraWallpaperWindowCandidate? {
+    ) -> WallpaperWindowCandidate? {
         let filtered = candidates.filter(isWallpaperWindowCandidate)
         guard !filtered.isEmpty else { return nil }
 
-        let scoped: [TesseraWallpaperWindowCandidate]
+        let scoped: [WallpaperWindowCandidate]
         if let targetBounds {
             let intersecting = filtered.filter { $0.bounds.intersects(targetBounds) }
             // Never borrow another display's wallpaper when WindowServer
@@ -201,11 +201,11 @@ enum TesseraWallpaperSourceResolver {
         }
     }
 
-    private static func source(for url: URL) -> TesseraWallpaperSource {
-        let kind: TesseraWallpaperSourceKind = videoExtensions.contains(url.pathExtension.lowercased())
+    private static func source(for url: URL) -> WallpaperSource {
+        let kind: WallpaperSourceKind = videoExtensions.contains(url.pathExtension.lowercased())
             ? .aerialVideo
             : .staticImage
-        return TesseraWallpaperSource(kind: kind, url: url)
+        return WallpaperSource(kind: kind, url: url)
     }
 
     private static func isDefaultDesktopURL(_ url: URL) -> Bool {
@@ -228,17 +228,17 @@ enum TesseraWallpaperSourceResolver {
     }
 }
 
-/// Provides the blurred desktop-wallpaper image `TesseraBackgroundView` uses.
+/// Provides the blurred desktop-wallpaper image `LauncherBackgroundView` uses.
 ///
 /// The source is resolved from the display's WindowServer wallpaper window
 /// first, then from the normal workspace image and read-only
 /// `com.apple.wallpaper` Aerial setting. A movie is sampled once at a bounded
 /// time; it is never played or retained as a video layer.
 @MainActor
-enum TesseraWallpaperImageCache {
+enum WallpaperImageCache {
     private struct CacheKey: Hashable {
         let displayID: CGDirectDisplayID
-        let sourceKind: TesseraWallpaperSourceKind
+        let sourceKind: WallpaperSourceKind
         let url: URL?
         let windowID: CGWindowID?
         let captureBounds: CGRect?
@@ -249,8 +249,8 @@ enum TesseraWallpaperImageCache {
 
     private struct Descriptor {
         let key: CacheKey
-        let source: TesseraWallpaperSource
-        let fallbackSource: TesseraWallpaperSource?
+        let source: WallpaperSource
+        let fallbackSource: WallpaperSource?
     }
 
     private static var cache: [CacheKey: CGImage] = [:]
@@ -261,7 +261,7 @@ enum TesseraWallpaperImageCache {
     private static let maxVideoFrameWaitNanoseconds: UInt64 = 750_000_000
 
     /// Returns the source selected for a screen without loading or decoding it.
-    static func source(for screen: NSScreen) -> TesseraWallpaperSource {
+    static func source(for screen: NSScreen) -> WallpaperSource {
         resolveSources(for: screen).source
     }
 
@@ -342,25 +342,25 @@ enum TesseraWallpaperImageCache {
     }
 
     private struct ResolvedSources {
-        let source: TesseraWallpaperSource
-        let fallbackSource: TesseraWallpaperSource?
+        let source: WallpaperSource
+        let fallbackSource: WallpaperSource?
     }
 
     private static func resolveSources(for screen: NSScreen) -> ResolvedSources {
         let desktopURL = NSWorkspace.shared.desktopImageURL(for: screen)
         let configuredURL = configuredWallpaperURL()
-        let source = TesseraWallpaperSourceResolver.resolve(
+        let source = WallpaperSourceResolver.resolve(
             desktopURL: desktopURL,
             configuredURL: configuredURL,
             windowCandidates: wallpaperWindowCandidates(),
             targetBounds: windowServerBounds(for: screen)
         )
-        let fallbackSource: TesseraWallpaperSource?
+        let fallbackSource: WallpaperSource?
         if source.kind == .windowCapture {
             // A WindowServer image can be unavailable when Screen Recording
             // permission is denied. Keep the old file/Aerial path explicit so
             // the utility task can try it without touching AppKit again.
-            fallbackSource = TesseraWallpaperSourceResolver.resolve(
+            fallbackSource = WallpaperSourceResolver.resolve(
                 desktopURL: desktopURL,
                 configuredURL: configuredURL
             )
@@ -370,7 +370,7 @@ enum TesseraWallpaperImageCache {
         return ResolvedSources(source: source, fallbackSource: fallbackSource)
     }
 
-    private static func wallpaperWindowCandidates() -> [TesseraWallpaperWindowCandidate] {
+    private static func wallpaperWindowCandidates() -> [WallpaperWindowCandidate] {
         guard let windowInfo = CGWindowListCopyWindowInfo([], kCGNullWindowID) as? [[String: Any]] else {
             return []
         }
@@ -391,7 +391,7 @@ enum TesseraWallpaperImageCache {
             let layer = (info[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
             let isOnscreen = (info[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false
             let alpha = (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
-            return TesseraWallpaperWindowCandidate(
+            return WallpaperWindowCandidate(
                 windowID: CGWindowID(windowID),
                 ownerName: ownerName,
                 windowName: windowName,
@@ -474,7 +474,7 @@ enum TesseraWallpaperImageCache {
     }
 
     nonisolated private static func loadAndBlurSynchronously(
-        source: TesseraWallpaperSource,
+        source: WallpaperSource,
         radius: CGFloat
     ) -> CGImage? {
         guard source.kind == .staticImage, let url = source.url else {
@@ -489,8 +489,8 @@ enum TesseraWallpaperImageCache {
     }
 
     nonisolated private static func loadAndBlur(
-        source: TesseraWallpaperSource,
-        fallbackSource: TesseraWallpaperSource?,
+        source: WallpaperSource,
+        fallbackSource: WallpaperSource?,
         radius: CGFloat
     ) async -> CGImage? {
         if let image = await loadSourceImage(source) {
@@ -506,7 +506,7 @@ enum TesseraWallpaperImageCache {
     }
 
     nonisolated private static func loadSourceImage(
-        _ source: TesseraWallpaperSource
+        _ source: WallpaperSource
     ) async -> CIImage? {
         switch source.kind {
         case .windowCapture:
