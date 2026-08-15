@@ -463,6 +463,16 @@ enum TesseraWallpaperImageCache {
         }
     }
 
+    /// Releases every cached blurred wallpaper. These are full-screen-derived
+    /// images held in `static` storage, so without this they lived for the
+    /// whole process — a resident launcher that the user opened once kept them
+    /// for the rest of the session. Called on the same idle timer that releases
+    /// the icon memory cache; the next open re-blurs from the wallpaper file.
+    static func evictAll() {
+        cache.removeAll()
+        cacheOrder.removeAll()
+    }
+
     nonisolated private static func loadAndBlurSynchronously(
         source: TesseraWallpaperSource,
         radius: CGFloat
@@ -639,6 +649,22 @@ enum TesseraWallpaperImageCache {
 
         guard let output = colorFilter.outputImage else { return nil }
         let cropped = output.cropped(to: downsampled.extent)
-        return CIContext().createCGImage(cropped, from: cropped.extent)
+        return Self.renderContext.createCGImage(cropped, from: cropped.extent)
     }
+
+    /// `CIContext` is expensive to create and is designed to be kept alive and
+    /// reused — each instance sets up its own GPU command queue and
+    /// intermediate buffers. This used to be constructed per blur, so every
+    /// cache miss (display change, wallpaper change, material slider drag) paid
+    /// that setup again. `cacheIntermediates: false` keeps the shared instance
+    /// from accumulating intermediate buffers between the infrequent,
+    /// full-screen-sized renders this does.
+    ///
+    /// `nonisolated(unsafe)` because the blur runs off the main actor and
+    /// `CIContext` is not `Sendable`-annotated in the SDK, while Apple's own
+    /// documentation states a `CIContext` may be shared across threads
+    /// ("you can use a single CIContext object from multiple threads"). The
+    /// value is immutable after this initializer, so there is nothing to race
+    /// on beyond that documented guarantee.
+    private nonisolated(unsafe) static let renderContext = CIContext(options: [.cacheIntermediates: false])
 }

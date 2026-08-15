@@ -566,7 +566,11 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             }
             guard let self, !self.isVisible else { return }
             self.iconCache.evictMemoryCache()
-            DiagnosticsLog.launcher.info("icon memory cache evicted after idle")
+            // Same reasoning, same timer: the blurred wallpapers are
+            // full-screen-derived images kept in `static` storage with no
+            // release path of their own.
+            TesseraWallpaperImageCache.evictAll()
+            DiagnosticsLog.launcher.info("icon and wallpaper memory caches evicted after idle")
             self.iconEvictionTask = nil
         }
     }

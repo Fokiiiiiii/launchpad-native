@@ -1071,6 +1071,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         defer {
             hostWindow.contentView = nil
+            // Also shrink the window itself. Clearing `contentView` releases
+            // the collection view, but the window keeps a backing store sized
+            // to the last snapshot — i.e. the full grid viewport, which on a
+            // Retina display is (width x 2) * (height x 2) * 4 bytes held for
+            // the rest of the session. The window deliberately stays ordered
+            // front (see `snapshotHostWindow`: ordering it in and out per
+            // gesture caused a flicker regression); only its size shrinks.
+            hostWindow.setContentSize(NSSize(width: 1, height: 1))
         }
 
         guard let bitmap = tempCollectionView.bitmapImageRepForCachingDisplay(in: tempCollectionView.bounds) else { return nil }
