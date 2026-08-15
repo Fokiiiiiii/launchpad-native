@@ -79,7 +79,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private var dockReservedHeight: CGFloat = 0
 
     private var currentPage = 0
-    private var folderOverlayBackdrop: FolderOverlayBackdropView?
     /// Real, confirmed lifecycle bug: nothing previously retained the
     /// `FolderContentsViewController` created in `openFolder` beyond that
     /// function's own local scope — its `.view` stayed alive (retained by
@@ -94,7 +93,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// the controller outlives its view). Retaining it here for as long as
     /// the overlay is shown is the correct, necessary fix regardless of any
     /// single symptom it happens to explain.
-    private var folderContentsViewController: FolderContentsViewController?
+    private lazy var folderOverlay = FolderOverlayPresenter(model: model, iconCache: iconCache)
     private let windowThumbnailService = WindowThumbnailService()
 
     // MARK: Drag-tracked page paging state (see `beginPageDrag`)
@@ -1087,7 +1086,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             return
         }
         DiagnosticsLog.launcher.info("debugOpenFirstFolder: opening folder at index \(index, privacy: .public)")
-        openFolder(folderID, anchorIndexPath: IndexPath(item: index, section: 0))
+        openFolder(folderID)
     }
 
     /// Debug-only — this session has no Accessibility/GUI-scripting
@@ -1237,180 +1236,43 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             guard let record = model.record(for: id) else { return }
             onLaunch(record)
         case .folder(let folderID):
-            openFolder(folderID, anchorIndexPath: indexPath)
+            openFolder(folderID)
         }
     }
 
-    /// Full-screen dimmed take-over, matching the user-supplied
-    /// design reference's own `FolderOverlay` exactly (explicit request:
-    /// "フォルダ名の中身は全画面で表示されるzipのやつにして") — a small
-    /// anchored `NSPopover` (this project's prior, safer choice) was
-    /// rejected as not matching. Deliberately keeps `FolderContentsViewController`
-    /// and all of its already-proven AppKit interaction code (click-to-
-    /// launch, right-click context menu, drag-out-to-remove) completely
-    /// unchanged — only the *presentation container* changes, from an
-    /// anchored popover to a full-bounds dimming backdrop with the same
-    /// content view centered within it. This avoids re-risking interaction
-    /// logic that's already been fixed multiple times in this project's
-    /// history for a purely visual change.
-    private func openFolder(_ folderID: FolderID, anchorIndexPath: IndexPath) {
-        let start = DispatchTime.now()
-        guard model.folders[folderID] != nil else { return }
-
-        // The reference's own `FolderOverlay` is a full-screen `ZStack`
-        // sibling covering the *entire* launcher (search bar included) —
-        // not scoped to just the grid area. `GridViewController.view` itself
-        // is only the bottom ~954pt of the 1050pt-tall window (the search
-        // bar occupies the top ~96pt as a sibling within
-        // `LauncherViewController.view`), so anchoring the backdrop to
-        // `view` left the search bar strip completely undimmed/unblurred
-        // while a folder was open — a real, confirmed visual bug
-        // ("上の部分がおかしい": the search bar area read as a bright,
-        // untouched strip floating above the darkened grid instead of
-        // being part of the same full-screen overlay). `view.window?
-        // .contentView` is the window's actual full-bounds root view (see
-        // `LauncherWindowController.makeWindow`'s own `root`), so anchoring
-        // there instead covers the whole screen, exactly like the
-        // reference.
-        let hostView = view.window?.contentView ?? view
-
-        let itemCount = model.folders[folderID]?.pages.reduce(0) { $0 + $1.count } ?? 0
-        let configuredColumns = max(model.gridSettings.columns, 1)
-        let folderColumns = FolderContentsViewController.displayedColumnCount(
-            itemCount: itemCount,
-            configuredColumns: configuredColumns
-        )
-        let panelWidth = FolderContentsViewController.panelWidth(
-            availableWidth: hostView.bounds.width - 192,
-            columns: folderColumns,
-            iconSize: CGFloat(currentIconSize * currentEffectiveIconScale),
-            usesWideLayout: itemCount >= configuredColumns
-        )
-
-        let folderVC = FolderContentsViewController(
-            model: model,
-            folderID: folderID,
-            iconCache: iconCache,
-            // The open-folder tiles are SwiftUI content rather than
-            // `GridCellItem`, so they do not receive the cell layer transform
-            // below. Pass the same effective visual size into that surface so
-            // its mosaic and card height follow the main grid scale.
-            iconSize: currentIconSize * currentEffectiveIconScale,
-            columns: folderColumns,
-            panelWidth: panelWidth,
-            onLaunch: { [weak self] record in
-                self?.closeFolderOverlay()
-                self?.onLaunch(record)
-            },
+    /// - Parameter hostView: the reference's own `FolderOverlay` is a
+    ///   full-screen `ZStack` sibling covering the *entire* launcher (search
+    ///   bar included) — not scoped to just the grid area. `GridViewController
+    ///   .view` itself is only the bottom ~954pt of the 1050pt-tall window (the
+    ///   search bar occupies the top ~96pt as a sibling within
+    ///   `LauncherViewController.view`), so anchoring the backdrop to `view`
+    ///   left the search bar strip completely undimmed/unblurred while a folder
+    ///   was open — a real, confirmed visual bug ("上の部分がおかしい": the
+    ///   search bar area read as a bright, untouched strip floating above the
+    ///   darkened grid instead of being part of the same full-screen overlay).
+    ///   `view.window?.contentView` is the window's actual full-bounds root view
+    ///   (see `LauncherWindowController.makeWindow`'s own `root`), so anchoring
+    ///   there instead covers the whole screen, exactly like the reference.
+    private func openFolder(_ folderID: FolderID) {
+        folderOverlay.open(
+            folderID,
+            in: view.window?.contentView ?? view,
+            metrics: FolderOverlayPresenter.Metrics(
+                iconSize: currentIconSize * currentEffectiveIconScale,
+                configuredColumns: model.gridSettings.columns
+            ),
+            onLaunch: { [weak self] record in self?.onLaunch(record) },
             onItemDraggedOut: { [weak self] folderPage, folderIndex in
                 guard let self else { return }
-                self.model.removeFromFolder(folderID, folderPage: folderPage, folderIndex: folderIndex, toPage: self.currentPage)
+                self.model.removeFromFolder(
+                    folderID,
+                    folderPage: folderPage,
+                    folderIndex: folderIndex,
+                    toPage: self.currentPage
+                )
                 Task { await self.model.save() }
             }
         )
-        folderVC.loadViewIfNeeded()
-
-        let backdrop = FolderOverlayBackdropView()
-        backdrop.translatesAutoresizingMaskIntoConstraints = false
-        backdrop.onDismiss = { [weak self] in self?.closeFolderOverlay() }
-
-        // Blurs the grid behind the overlay, then darkens on top — matches
-        // the reference's `blur(22px)` + `rgba(8,8,9,.55)` exactly (a flat
-        // dim color alone, the previous implementation, left the grid
-        // sharply visible underneath instead of visibly blurred).
-        let blur = NonInteractiveFolderBlurView(frame: backdrop.bounds)
-        blur.autoresizingMask = [.width, .height]
-        blur.material = .fullScreenUI
-        blur.blendingMode = .withinWindow
-        blur.state = .active
-        backdrop.addSubview(blur)
-
-        let tint = NSView(frame: backdrop.bounds)
-        tint.autoresizingMask = [.width, .height]
-        tint.wantsLayer = true
-        tint.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
-        backdrop.addSubview(tint)
-
-        let panel = folderVC.view
-        backdrop.addSubview(panel)
-        hostView.addSubview(backdrop)
-
-        let size = folderVC.preferredContentSize
-        NSLayoutConstraint.activate([
-            backdrop.topAnchor.constraint(equalTo: hostView.topAnchor),
-            backdrop.leadingAnchor.constraint(equalTo: hostView.leadingAnchor),
-            backdrop.trailingAnchor.constraint(equalTo: hostView.trailingAnchor),
-            backdrop.bottomAnchor.constraint(equalTo: hostView.bottomAnchor)
-        ])
-
-        // `panel` is positioned via a direct, one-time frame assignment —
-        // not Auto Layout constraints — see `FolderContentsViewController
-        // .loadView()`'s doc comment for why (a real, confirmed regression
-        // where AppKit's own `preferredContentSize`-mirrored width
-        // constraint intermittently won over an explicit Auto Layout
-        // constraint of equal or higher priority). `backdrop`'s eventual
-        // size is already known here without waiting for its own Auto
-        // Layout resolution: it's pinned 1:1 to `hostView`'s edges above, so
-        // its size always equals `hostView.bounds.size` (already read into
-        // `panelWidth`). 96pt side insets match the reference's own
-        // `.padding(.horizontal, TSLayout.folderPanelInsetH)` exactly.
-        //
-        // Vertically centered on screen rather than the reference's own
-        // literal fixed `.padding(.top, 196)` — a real, confirmed complaint
-        // ("画面の中央からずれてる"): the reference's fixed offset assumes a
-        // card tall enough to roughly fill the remaining space below it,
-        // but for a folder with only a couple of rows the card ends up far
-        // short of the 480pt height cap, leaving a much bigger gap below
-        // the card than above it — reading as pushed toward the top rather
-        // than centered. True vertical centering keeps the composition
-        // balanced regardless of how many rows the folder actually has,
-        // and matches the broader macOS convention of centering modal-style
-        // overlays (Quick Look, alerts, About panels) rather than pinning
-        // them to a fixed offset tuned for one specific content size.
-        let backdropSize = hostView.bounds.size
-        panel.frame = NSRect(
-            x: (backdropSize.width - size.width) / 2,
-            y: (backdropSize.height - size.height) / 2,
-            width: size.width,
-            height: size.height
-        )
-        // Forces `root`'s internal Auto Layout children (title/scroll view/
-        // hosted SwiftUI grid, all pinned to `root`'s now-final frame) to
-        // resolve synchronously against that frame before the entrance
-        // animation starts, rather than depending on some later, unrelated
-        // event (an async icon load's own `layoutIfNeeded()` call) to
-        // eventually force the correct layout — the same class of
-        // intermittent race already fixed once for the icon-trickle case in
-        // `FolderContentsViewController.refresh()`.
-        panel.layoutSubtreeIfNeeded()
-
-        folderOverlayBackdrop?.removeFromSuperview()
-        folderOverlayBackdrop = backdrop
-        folderContentsViewController = folderVC
-        view.window?.makeFirstResponder(backdrop)
-
-        backdrop.alphaValue = 0
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
-            backdrop.animator().alphaValue = 1
-        }
-
-        let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
-        DiagnosticsLog.launcher.info("folder transition: build+show full-screen overlay took \(ms, privacy: .public)ms")
-    }
-
-    private func closeFolderOverlay() {
-        guard let backdrop = folderOverlayBackdrop else { return }
-        folderOverlayBackdrop = nil
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.14
-            backdrop.animator().alphaValue = 0
-        }, completionHandler: { [weak self] in
-            Task { @MainActor [weak self] in
-                backdrop.removeFromSuperview()
-                self?.folderContentsViewController = nil
-            }
-        })
     }
 
     private func showWindows(for record: ApplicationRecord, anchorIndexPath: IndexPath) {
@@ -1436,7 +1298,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         switch item {
         case .folder(let folderID):
             return ContextMenuBuilder.folderMenu(
-                open: { [weak self] in self?.openFolder(folderID, anchorIndexPath: indexPath) },
+                open: { [weak self] in self?.openFolder(folderID) },
                 rename: { [weak self] in self?.promptRenameFolder(at: indexPath) },
                 ungroup: { [weak self] in
                     guard let self else { return }
@@ -2815,44 +2677,4 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             item.view.layer?.removeAnimation(forKey: "wobble")
         }
     }
-}
-
-/// Full-bounds dimming backdrop for the opened-folder overlay (see
-/// `GridViewController.openFolder`'s doc comment). Clicking anywhere on
-/// the backdrop itself dismisses — clicks on the folder panel (a subview
-/// added on top) never reach here at all, since AppKit hit-tests subviews
-/// before their parent, so the panel's own click-to-launch/context-menu
-/// handling is completely unaffected. Also intercepts Escape
-/// (`cancelOperation`, standard AppKit convention for the Escape key) so
-/// it closes just the folder overlay rather than propagating up to the
-/// launcher window's own Escape-hides-the-whole-launcher handling — this
-/// view must be made first responder when shown for that interception to
-/// actually happen (see the call site).
-private final class FolderOverlayBackdropView: NSView {
-    var onDismiss: (() -> Void)?
-
-    override var acceptsFirstResponder: Bool { true }
-
-    override func mouseDown(with event: NSEvent) {
-        onDismiss?()
-    }
-
-    override func cancelOperation(_ sender: Any?) {
-        onDismiss?()
-    }
-}
-
-/// Blurs the live grid content behind the folder overlay — matching the
-/// design reference's own mockup
-/// (`background:rgba(8,8,9,.55);backdrop-filter:blur(22px)`), which shows
-/// the grid as visibly *blurred and darkened*, not just darkened. A purely
-/// decorative background must never intercept clicks (same reasoning as
-/// `Launcher.NonInteractiveVisualEffectView`, which this file can't import
-/// across the module boundary — `Grid` sits below `Launcher` — so this is a
-/// local copy of the same one-line fix): overriding `hitTest` to
-/// unconditionally return `nil` lets every click fall through to
-/// `FolderOverlayBackdropView.mouseDown` (the actual dismiss handler)
-/// regardless of this view sitting on top of it in z-order.
-private final class NonInteractiveFolderBlurView: NSVisualEffectView {
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
