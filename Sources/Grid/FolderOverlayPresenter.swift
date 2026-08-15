@@ -63,7 +63,9 @@ final class FolderOverlayPresenter {
         let start = DispatchTime.now()
         guard model.folders[folderID] != nil else { return }
 
-        let itemCount = model.folders[folderID]?.pages.reduce(0) { $0 + $1.count } ?? 0
+        // The fullest page, not the folder's total: the panel shows one page at
+        // a time, and its shape must not change as the user pages through.
+        let itemCount = model.folders[folderID]?.pages.map(\.count).max() ?? 0
         let configuredColumns = max(metrics.configuredColumns, 1)
         let folderColumns = FolderContentsViewController.displayedColumnCount(
             itemCount: itemCount,
@@ -96,6 +98,12 @@ final class FolderOverlayPresenter {
         let backdrop = FolderOverlayBackdropView()
         backdrop.translatesAutoresizingMaskIntoConstraints = false
         backdrop.onDismiss = { [weak self] in self?.close() }
+        // The backdrop is first responder while a folder is open (that is what
+        // makes Escape work), so arrow keys arrive here rather than at the
+        // panel that acts on them.
+        backdrop.onArrowKey = { [weak self] delta in
+            self?.contentsViewController?.handleArrowKey(delta: delta) ?? false
+        }
 
         // Blurs the grid behind the overlay, then darkens on top — matches
         // the reference's `blur(22px)` + `rgba(8,8,9,.55)` exactly (a flat
@@ -209,6 +217,9 @@ final class FolderOverlayPresenter {
 /// (see `FolderOverlayPresenter.open`).
 private final class FolderOverlayBackdropView: NSView {
     var onDismiss: (() -> Void)?
+    /// Returns whether the panel consumed the key, so an unhandled arrow still
+    /// falls through to whatever would normally have received it.
+    var onArrowKey: ((Int) -> Bool)?
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -218,6 +229,20 @@ private final class FolderOverlayBackdropView: NSView {
 
     override func cancelOperation(_ sender: Any?) {
         onDismiss?()
+    }
+
+    override func moveLeft(_ sender: Any?) {
+        if onArrowKey?(-1) != true { super.moveLeft(sender) }
+    }
+
+    override func moveRight(_ sender: Any?) {
+        if onArrowKey?(1) != true { super.moveRight(sender) }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        // Routes Escape/arrows through the standard action selectors above
+        // rather than matching key codes by hand.
+        interpretKeyEvents([event])
     }
 }
 

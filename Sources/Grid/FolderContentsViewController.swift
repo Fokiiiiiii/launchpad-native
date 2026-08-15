@@ -8,11 +8,13 @@ import SwiftUI
 /// (`GridViewController.openFolder`/`FolderOverlayBackdropView`) — this
 /// controller only owns its own content (title + tile grid + glass card
 /// background); the full-screen take-over presentation is entirely the
-/// caller's concern. Folder-internal paging (`Folder.pages`) is flattened to
-/// one scrollable list here — the data model still tracks per-page ordering
-/// (needed for legacy import fidelity), but a folder rarely holds enough
-/// items to need its own paging UI, so this is a deliberate simplification,
-/// not a data loss.
+/// caller's concern. One of `Folder.pages` is shown at a time, with the same
+/// dot/chevron control the main grid uses — matching how the system's own
+/// Launchpad pages through a folder, and matching the data model, which has
+/// always packed folders into pages of `GridSettings.folderGridSize`. An
+/// earlier version flattened every page into one vertically scrolling list;
+/// that hid the fact that some folders held pages packed past that capacity
+/// (see `GridModel.normalizeFolderPages`).
 ///
 /// The tile grid itself is real SwiftUI (`FolderOverlayGridContent`/
 /// `FolderOverlayTileView`, hosted via `NSHostingView`), directly adapted
@@ -32,10 +34,17 @@ final class FolderContentsViewController: NSViewController {
     private let onItemDraggedOut: (Int, Int) -> Void
 
     private let titleField = NSTextField(labelWithString: "")
-    private let scrollView = NSScrollView()
-    /// Masks the scroll view so content fades where it continues past the
-    /// card's edge — see `updateScrollFade()`.
-    private let scrollFadeMask = CAGradientLayer()
+    /// Hosts one folder page at a time. Sized directly against `root` rather
+    /// than living in a scroll view: a folder pages sideways now, the way the
+    /// main grid does, so there is nothing left to scroll.
+    private var gridHost: NSHostingView<FolderOverlayGridContent>?
+    /// The same dot/chevron control the main grid uses, reused unchanged — it
+    /// holds no reference to the grid, and hides its chevrons on its own when
+    /// there is only one page.
+    private let pageControl = PageControlView(frame: NSRect(x: 0, y: 0, width: 200, height: 28))
+    private var pageControlHeight: NSLayoutConstraint?
+    /// Which of `Folder.pages` is on screen.
+    private var currentFolderPage = 0
     private let gridModel = FolderOverlayGridModel()
     /// The main grid's own current icon size (`GridViewController.currentIconSize`)
     /// — a real design reference the user supplied directly asked for
@@ -96,9 +105,10 @@ final class FolderContentsViewController: NSViewController {
     /// at 0.62 the third row was still cut in half, which is the same clipping
     /// in a new place rather than a fix.
     private static let maximumHeightFraction: CGFloat = 0.80
-    /// Length of the soft fade at whichever edge has more content beyond it —
-    /// the scroll edge effect, in place of a hard cut at the card's boundary.
-    private static let scrollFadeLength: CGFloat = 30
+    private static let pageControlHeight: CGFloat = 28
+    /// How far a page slides as it leaves/enters, matching the main grid's own
+    /// `pageSlideOffset`.
+    private static let pageSlideOffset: CGFloat = 18
     /// The shape a folder is laid out around — see `displayedColumnCount`.
     private static let preferredRowCount = 3
 
@@ -196,7 +206,7 @@ final class FolderContentsViewController: NSViewController {
         // held). Never having `root` participate in Auto Layout for its own
         // frame in the first place removes the interaction entirely: Auto
         // Layout still governs everything *inside* `root` (background/
-        // titleField/scrollView/hosting, all pinned to `root`'s bounds),
+        // titleField/hosting/pageControl, all pinned to `root`'s bounds),
         // which works identically regardless of whether `root` itself is
         // frame- or constraint-positioned by its own superview.
 
@@ -223,50 +233,20 @@ final class FolderContentsViewController: NSViewController {
             onDragCancelled: { [weak self] in self?.cancelTileDrag() }
         ))
         hosting.translatesAutoresizingMaskIntoConstraints = false
-        // Defense in depth alongside the explicit widthAnchor below and the
-        // forced layoutIfNeeded() calls in refresh() — never let SwiftUI's
-        // own intrinsic-size measurement win a priority tie-break against
-        // the imposed Auto Layout width.
+        // Defense in depth alongside the explicit pinning below and the forced
+        // layoutIfNeeded() calls in refresh() — never let SwiftUI's own
+        // intrinsic-size measurement win a priority tie-break against the
+        // imposed Auto Layout width. A folder that lost its firm width
+        // proposal once rendered as a garbled vertical sliver instead of a
+        // grid, so this is guarded from both sides.
         hosting.setContentCompressionResistancePriority(.required, for: .horizontal)
+        hosting.wantsLayer = true
+        gridHost = hosting
 
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = hosting
-        scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
-        // Real, confirmed report ("フォルダの中身の枠線が消えたりまた
-        // 黒色の枠が出てきて"): neither `scrollerStyle` nor `borderType`
-        // was ever set explicitly, so both silently followed the system's
-        // own settings. With "always show scrollbars" enabled, `.legacy`
-        // draws a persistent tracked scroller whose dark track reads as a
-        // stray border against this panel's own blurred/dimmed backdrop;
-        // even under "show on scroll," the fade in/out as content height
-        // crosses the 480pt cap in `updatePreferredContentSize` looks like
-        // a border flickering in and out. Forcing `.overlay` makes the
-        // scroller a thin, content-hugging indicator that only appears
-        // during an actual scroll gesture and fades away immediately after,
-        // regardless of the user's system setting. `borderType` is made
-        // explicit too, closing the same kind of implicit-default gap.
-        scrollView.scrollerStyle = .overlay
-        scrollView.borderType = .noBorder
-        scrollView.wantsLayer = true
-        scrollFadeMask.colors = [
-            NSColor.clear.cgColor,
-            NSColor.black.cgColor,
-            NSColor.black.cgColor,
-            NSColor.clear.cgColor
-        ]
-        scrollFadeMask.startPoint = CGPoint(x: 0.5, y: 0)
-        scrollFadeMask.endPoint = CGPoint(x: 0.5, y: 1)
-        scrollFadeMask.locations = [0, 0, 1, 1]
-        scrollView.layer?.mask = scrollFadeMask
-        scrollView.contentView.postsBoundsChangedNotifications = true
-        NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateScrollFade() }
-        }
+        pageControl.translatesAutoresizingMaskIntoConstraints = false
+        pageControl.onSelectPage = { [weak self] index in self?.goToPage(index) }
+        pageControl.onPrevious = { [weak self] in self?.goToAdjacentPage(-1) }
+        pageControl.onNext = { [weak self] in self?.goToAdjacentPage(1) }
 
         // Light, barely-tinted frosted-glass card background — a decorative
         // sibling behind the grid only (not the title, which floats
@@ -280,46 +260,40 @@ final class FolderContentsViewController: NSViewController {
 
         root.addSubview(background)
         root.addSubview(titleField)
-        root.addSubview(scrollView)
-        NSLayoutConstraint.activate([
-            // The reference applies the card background *only* to the
-            // grid, matching `scrollView`'s own bounds exactly — the title
-            // above it floats directly on the backdrop with no card behind
-            // it. Pinning `background` to `root`'s full bounds instead put
-            // the title *inside* the same boxed card as the grid, a real,
-            // confirmed regression ("その他の文字が枠内にはいてるのが気
-            // になる") from an earlier pass.
-            background.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            background.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
-            background.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
-            background.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+        root.addSubview(hosting)
+        root.addSubview(pageControl)
 
-            titleField.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
+        let pageControlHeight = pageControl.heightAnchor.constraint(equalToConstant: Self.pageControlHeight)
+        self.pageControlHeight = pageControlHeight
+
+        NSLayoutConstraint.activate([
+            // The card background covers the grid and the page dots, but not
+            // the title — which floats directly on the backdrop above it.
+            // Pinning `background` to `root`'s full bounds instead put the
+            // title *inside* the same boxed card as the grid, a real,
+            // confirmed regression ("その他の文字が枠内にはいてるのが気に
+            // なる") from an earlier pass.
+            background.topAnchor.constraint(equalTo: hosting.topAnchor),
+            background.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            background.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+            titleField.topAnchor.constraint(equalTo: root.topAnchor, constant: Self.titleTopInset),
             titleField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             titleField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
 
-            // 28pt — the reference's own `VStack(spacing: 28)` wrapping the
-            // title and grid; the previous 8pt was an invented value.
-            scrollView.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: 28),
-            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+            // Pinned directly to `root` — with the scroll view gone, this is
+            // the firm width proposal SwiftUI needs, and `root`'s own frame is
+            // set by the caller (see this method's doc comment above).
+            hosting.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: Self.titleToGridGap),
+            hosting.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: root.trailingAnchor),
 
-            // Pinned to `scrollView.contentView` (the NSClipView), not
-            // `scrollView` itself — the documented-correct anchor target
-            // for a constraint-based documentView. Anchoring to the scroll
-            // view directly (two levels above hosting's actual superview)
-            // previously left NSHostingView without a firm width proposal,
-            // so SwiftUI fell back to its own intrinsic-size measurement
-            // and the whole panel rendered as a collapsed, narrow column —
-            // a real screenshot showed the folder as a garbled vertical
-            // sliver instead of a wide grid. The explicit widthAnchor is
-            // redundant with leading+trailing (consistent, not
-            // conflicting) but makes the firm-width requirement explicit.
-            hosting.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
-            hosting.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
-            hosting.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            hosting.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
+            pageControl.topAnchor.constraint(equalTo: hosting.bottomAnchor),
+            pageControl.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            pageControl.widthAnchor.constraint(equalToConstant: 200),
+            pageControlHeight,
+            pageControl.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.cardBottomInset)
         ])
         view = root
         refresh()
@@ -337,7 +311,9 @@ final class FolderContentsViewController: NSViewController {
     /// under a single row, and no row clipped in half when a second one would
     /// have fitted.
     private func updatePreferredContentSize() {
-        let itemCount = max(flattenedItems.count, 1)
+        // The fullest page, not this one: a card that shrank when the user
+        // paged onto a half-empty last page would jump under the cursor.
+        let itemCount = max(folderPages.map(\.count).max() ?? 0, 1)
         let rows = max(1, Int(ceil(Double(itemCount) / Double(columns))))
         let gridHeight = CGFloat(rows) * itemHeight
             + CGFloat(rows - 1) * Self.cellSpacing
@@ -346,54 +322,94 @@ final class FolderContentsViewController: NSViewController {
             + titleField.intrinsicContentSize.height
             + Self.titleToGridGap
             + Self.cardBottomInset
-        let height = min(gridHeight + chromeHeight, maximumHeight)
+        let pagingHeight = folderPages.count > 1 ? Self.pageControlHeight : 0
+        let height = min(gridHeight + chromeHeight + pagingHeight, maximumHeight)
         preferredContentSize = NSSize(width: panelWidth, height: max(height, 180))
+        pageControlHeight?.constant = pagingHeight
+        pageControl.isHidden = folderPages.count <= 1
     }
 
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        // `refresh()` runs from `loadView()`, before the panel has any size, so
-        // the fade cannot be decided there — by this point the scroll view has
-        // its real bounds and the answer is knowable.
-        updateScrollFade()
-    }
+    // MARK: - Paging
 
-    /// Fades content in and out at whichever card edge it continues past,
-    /// instead of letting it stop dead against the edge.
+    /// Swaps the visible page, sliding the outgoing one out and the incoming
+    /// one in from the direction of travel.
     ///
-    /// Reported ("中身でスクロールをしたりすると微妙"): a folder taller than
-    /// the card simply cut off at the boundary, so a half-visible row of icons
-    /// read as broken layout rather than as "there is more below". A fade only
-    /// appears on a side that actually has content beyond it, so a folder that
-    /// fits — the common case — is not softened at all.
-    ///
-    /// The mask lives on the scroll view rather than its clip view because the
-    /// clip view's bounds origin moves as the user scrolls: anchoring here
-    /// keeps the fade fixed to the card while the content slides underneath it.
-    private func updateScrollFade() {
-        guard let mask = scrollView.layer?.mask as? CAGradientLayer else { return }
-        let visibleHeight = scrollView.contentView.bounds.height
-        let contentHeight = scrollView.documentView?.frame.height ?? 0
-        let scrolledFromTop = scrollView.contentView.bounds.origin.y
-        let scrolledFromBottom = contentHeight - visibleHeight - scrolledFromTop
-
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        mask.frame = scrollView.bounds
-        let fade = Self.scrollFadeLength
-        guard contentHeight > visibleHeight + 0.5, visibleHeight > fade * 2 else {
-            // Fully opaque: nothing is hidden, so nothing should look faded.
-            mask.locations = [0, 0, 1, 1]
-            CATransaction.commit()
+    /// Mirrors the main grid's own `jumpToPage`: a page is a *data swap*, not a
+    /// scroll position — the same tiles are rebuilt for the new page while the
+    /// host slides. Doing it as one continuous strip is what the main grid
+    /// tried first and abandoned, so this deliberately does not.
+    private func goToPage(_ index: Int) {
+        let clamped = min(max(index, 0), folderPages.count - 1)
+        guard clamped != currentFolderPage, let host = gridHost, let layer = host.layer else {
+            currentFolderPage = clamped
+            refresh()
             return
         }
-        // Ramp each fade in with the first `fade` points of travel so the
-        // effect appears as the content starts moving rather than snapping on.
-        let top = min(max(scrolledFromTop, 0) / fade, 1) * fade / visibleHeight
-        let bottom = min(max(scrolledFromBottom, 0) / fade, 1) * fade / visibleHeight
-        // AppKit layers are not flipped, so location 0 is the bottom edge.
-        mask.locations = [0, NSNumber(value: Double(bottom)), NSNumber(value: Double(1 - top)), 1]
-        CATransaction.commit()
+        let direction: CGFloat = clamped > currentFolderPage ? -1 : 1
+        currentFolderPage = clamped
+
+        let exit = GridSpring.animation(
+            keyPath: "transform.translation.x",
+            from: 0,
+            to: direction * Self.pageSlideOffset,
+            damping: 1.0,
+            response: 0.20
+        )
+        layer.add(exit, forKey: "folderPageExit")
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.10
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            host.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let host = self.gridHost, let layer = host.layer else { return }
+                // Rebuilt while invisible, so the swap itself is never on screen
+                // — the same ordering the main grid's page change relies on.
+                self.refresh()
+                self.view.layoutSubtreeIfNeeded()
+                layer.add(
+                    GridSpring.animation(
+                        keyPath: "transform.translation.x",
+                        from: -direction * Self.pageSlideOffset,
+                        to: 0,
+                        damping: 1.0,
+                        response: 0.24
+                    ),
+                    forKey: "folderPageEnter"
+                )
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.13
+                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    host.animator().alphaValue = 1
+                }
+            }
+        }
+    }
+
+    private func goToAdjacentPage(_ delta: Int) {
+        goToPage(currentFolderPage + delta)
+    }
+
+    /// Left/right arrows move between folder pages. The backdrop is first
+    /// responder while a folder is open (that is what makes Escape close it),
+    /// and it forwards unhandled keys down to this panel.
+    func handleArrowKey(delta: Int) -> Bool {
+        guard folderPages.count > 1 else { return false }
+        goToAdjacentPage(delta)
+        return true
+    }
+
+    /// Test hooks: a panel showing one page at a time has no other observable
+    /// surface for "which page, and what is on it" — same reasoning as
+    /// `PageControlView.dotButtonCountForTesting`.
+    var pageCountForTesting: Int { folderPages.count }
+    var visibleTileCountForTesting: Int { gridModel.tiles.count }
+    var currentPageForTesting: Int { currentFolderPage }
+
+    /// The folder's own pages, or a single empty page if it has none.
+    private var folderPages: [[LayoutItem]] {
+        let pages = model.folders[folderID]?.pages ?? []
+        return pages.isEmpty ? [[]] : pages
     }
 
     private func refresh() {
@@ -406,6 +422,11 @@ final class FolderContentsViewController: NSViewController {
                 }
             }
         }
+        // A page can disappear underneath the user — the last item on the last
+        // page being dragged out is enough.
+        currentFolderPage = min(max(currentFolderPage, 0), folderPages.count - 1)
+        pageControl.numberOfPages = folderPages.count
+        pageControl.currentPage = currentFolderPage
         updatePreferredContentSize()
 
         refreshGeneration += 1
@@ -413,7 +434,7 @@ final class FolderContentsViewController: NSViewController {
         let cache = iconCache
 
         var tiles: [FolderOverlayTile] = []
-        for entry in flattenedItems {
+        for entry in flattenedItems where entry.page == currentFolderPage {
             guard case .app(let id) = entry.item, let record = model.record(for: id) else { continue }
             let tileID = record.iconCacheKey
             let cachedIcon = cache.cachedIconIfAvailable(for: record)
@@ -452,7 +473,7 @@ final class FolderContentsViewController: NSViewController {
                     // re-render can race Auto Layout's width-constraint
                     // resolution and leave `NSHostingView` measured against
                     // its own narrower SwiftUI-computed intrinsic size
-                    // instead of the imposed `scrollView.contentView.widthAnchor`
+                    // instead of the width imposed by its pinning to `root`
                     // — exactly the collapsed-column symptom, just
                     // intermittent depending on how many icons are still
                     // loading when a screenshot is taken. Forcing a
@@ -465,7 +486,6 @@ final class FolderContentsViewController: NSViewController {
         }
         gridModel.tiles = tiles
         view.window?.layoutIfNeeded()
-        updateScrollFade()
     }
 
     /// Real, confirmed report ("フォルダ内のアプリ移動が違和感がある...
