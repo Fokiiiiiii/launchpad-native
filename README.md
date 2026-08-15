@@ -2155,6 +2155,22 @@ See module boundaries and phase plan in `Sources/` as they land:
 new front-end design the round after — see "UI overhaul + Uninstall
 removal" and "Folder redesign, Uninstall restored, ..." above.)
 
+Inside `Grid`, `GridViewController` had grown to roughly 3,100 lines and was
+split by responsibility (2026-08-15). It kept the collection view, the data
+source, page paging, keyboard navigation and the context menus; four
+responsibilities moved out, each behaviour-for-behaviour unchanged:
+
+| Type | What it owns |
+| --- | --- |
+| `ItemDragController` | The item-drag state machine — press feedback, lift, live reorder preview, folder creation, drag-to-the-edge page turning, and every exit path. Reaches the controller through an explicit `Callbacks` struct. |
+| `FolderOverlayPresenter` | The opened-folder take-over: backdrop, blur, tint, and the hosted `FolderContentsViewController`. |
+| `PageSnapshotRenderer` | Offscreen rendering of a page, plus the neighbour image view both drag systems show. |
+| `GridSlotGeometry` / `GridSpring` | The pure functions underneath both — slot geometry, hysteresis, folder zones; and the damping-ratio/response spring, rubber band, velocity estimate. |
+
+The geometry and spring math are the parts under unit test
+(`GridSlotGeometryTests`, `GridSpringTests`), including the measured values
+their tuning comments cite as justification.
+
 Private/undocumented system APIs (LaunchServices SPI, SkyLight,
 MultitouchSupport, low-level HID key handling) are used where no public
 equivalent exists, always behind a resolver that verifies symbols at runtime
