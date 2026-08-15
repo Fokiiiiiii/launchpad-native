@@ -477,10 +477,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     }
 
     /// Debug-only entry point (`LAUNCHPAD_DEBUG_OPEN_FIRST_FOLDER`, wired
-    /// in `AppDelegate`) — see `GridViewController.debugOpenFirstFolder`'s
+    /// in `AppDelegate`) — see `GridViewController.debugOpenFolder`'s
     /// doc comment for why this exists.
-    func debugOpenFirstFolder() {
-        gridViewController.debugOpenFirstFolder()
+    func debugOpenFolder(ordinal: Int) {
+        gridViewController.debugOpenFolder(ordinal: ordinal)
     }
 
     /// Debug-only entry point (`LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG`, wired

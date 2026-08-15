@@ -1017,16 +1017,23 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// without crashing — real click-to-dismiss-on-backdrop and drag-out-
     /// of-folder still need the user's own hands-on confirmation, since
     /// those depend on real event delivery this session can't fully drive.
-    public func debugOpenFirstFolder() {
+    /// - Parameter ordinal: which folder on the current page to open, 1-based.
+    ///   Folder panels size themselves from their item count, so checking the
+    ///   layout at all means being able to reach a folder with a given number
+    ///   of items rather than only whichever one happens to come first.
+    public func debugOpenFolder(ordinal: Int) {
         guard model.pages.indices.contains(currentPage) else { return }
-        guard let index = model.pages[currentPage].firstIndex(where: {
-            if case .folder = $0 { return true }
+        let folderIndices = model.pages[currentPage].indices.filter {
+            if case .folder = model.pages[currentPage][$0] { return true }
             return false
-        }), case .folder(let folderID) = model.pages[currentPage][index] else {
-            DiagnosticsLog.launcher.info("debugOpenFirstFolder: no folder on page \(self.currentPage, privacy: .public)")
+        }
+        let position = max(ordinal, 1) - 1
+        guard folderIndices.indices.contains(position),
+              case .folder(let folderID) = model.pages[currentPage][folderIndices[position]] else {
+            DiagnosticsLog.launcher.info("debugOpenFolder: page \(self.currentPage, privacy: .public) has \(folderIndices.count, privacy: .public) folder(s), no #\(ordinal, privacy: .public)")
             return
         }
-        DiagnosticsLog.launcher.info("debugOpenFirstFolder: opening folder at index \(index, privacy: .public)")
+        DiagnosticsLog.launcher.info("debugOpenFolder: opening folder #\(ordinal, privacy: .public) at index \(folderIndices[position], privacy: .public)")
         openFolder(folderID)
     }
 

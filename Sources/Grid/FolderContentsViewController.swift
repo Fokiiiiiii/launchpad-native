@@ -32,6 +32,10 @@ final class FolderContentsViewController: NSViewController {
     private let onItemDraggedOut: (Int, Int) -> Void
 
     private let titleField = NSTextField(labelWithString: "")
+    private let scrollView = NSScrollView()
+    /// Masks the scroll view so content fades where it continues past the
+    /// card's edge — see `updateScrollFade()`.
+    private let scrollFadeMask = CAGradientLayer()
     private let gridModel = FolderOverlayGridModel()
     /// The main grid's own current icon size (`GridViewController.currentIconSize`)
     /// — a real design reference the user supplied directly asked for
@@ -56,6 +60,10 @@ final class FolderContentsViewController: NSViewController {
     /// `loadView()`'s doc comment for why `root`'s own outer frame is set
     /// directly by the caller rather than via Auto Layout constraints.
     private let panelWidth: CGFloat
+    /// The tallest the card may become before its content scrolls — derived
+    /// from the screen by `maximumPanelHeight(availableHeight:)`, not a fixed
+    /// number, so the same folder is not clipped on a large display.
+    private let maximumHeight: CGFloat
     /// Matches the design reference's `LazyVGrid(..., spacing: 26)`
     /// exactly — the previous 16pt was an invented value, not taken from
     /// the reference.
@@ -65,16 +73,67 @@ final class FolderContentsViewController: NSViewController {
     private static let minimumPanelWidth: CGFloat = 240
     private var itemHeight: CGFloat { CGFloat(iconSize) + 40 }
 
+    // The card's own vertical layout, spelled out rather than folded into one
+    // magic number. `updatePreferredContentSize` used to add a flat `88 + 70`,
+    // which matched no actual measurement: it left ~39pt of dead space below a
+    // single row (the card read as oddly tall for two apps) while being ~94pt
+    // short for two rows, so the second row was clipped mid-icon with its
+    // labels cut off — both reported ("小さい時の画面が微妙", "中身で
+    // スクロールをしたりすると微妙").
+    /// `FolderOverlayGridContent`'s own `.padding(.vertical, 34)`.
+    private static let gridVerticalPadding: CGFloat = 34
+    private static let titleTopInset: CGFloat = 14
+    /// The reference's `VStack(spacing: 28)` between the title and the grid.
+    private static let titleToGridGap: CGFloat = 28
+    private static let cardBottomInset: CGFloat = 10
+    /// How much of the screen the card may occupy before its content starts
+    /// scrolling. The previous flat 480pt cap was set without reference to the
+    /// display: on a 1050pt-tall screen it clipped a second row that had ample
+    /// room to fit, and on a short screen it would have overflowed instead.
+    ///
+    /// Sized so the three rows a folder is laid out around (see
+    /// `displayedColumnCount`) actually fit at the icon sizes this grid uses —
+    /// at 0.62 the third row was still cut in half, which is the same clipping
+    /// in a new place rather than a fix.
+    private static let maximumHeightFraction: CGFloat = 0.80
+    /// Length of the soft fade at whichever edge has more content beyond it —
+    /// the scroll edge effect, in place of a hard cut at the card's boundary.
+    private static let scrollFadeLength: CGFloat = 30
+    /// The shape a folder is laid out around — see `displayedColumnCount`.
+    private static let preferredRowCount = 3
+
+    /// Three rows is what a folder is laid out around ("基本縦3段を基準にして
+    /// 例えば3かけ3とかただ2かけ3とかはそのままでいい"), so the column count
+    /// follows from the item count rather than from the main grid's own.
+    ///
+    /// Nine items become 3×3 and six become 2×3, instead of one long row of six
+    /// with three stragglers underneath — which is what using the grid's column
+    /// count produced, and why an opened folder stretched most of the way
+    /// across the screen no matter how little was in it. Up to three items stay
+    /// on one row; past three, columns grow while the height stays put. The
+    /// main grid's column count still caps the result, so a very full folder
+    /// gains a fourth row and scrolls rather than growing wider forever.
     static func displayedColumnCount(itemCount: Int, configuredColumns: Int) -> Int {
-        min(max(itemCount, 1), max(configuredColumns, 1))
+        let count = max(itemCount, 1)
+        guard count > Self.preferredRowCount else { return count }
+        let columns = Int(ceil(Double(count) / Double(Self.preferredRowCount)))
+        return min(columns, max(configuredColumns, 1))
     }
 
-    static func panelWidth(availableWidth: CGFloat, columns: Int, iconSize: CGFloat, usesWideLayout: Bool) -> CGFloat {
-        let compactWidth = CGFloat(max(columns, 1)) * (max(iconSize, 1) + Self.tileLabelAllowance)
+    static func maximumPanelHeight(availableHeight: CGFloat) -> CGFloat {
+        max(availableHeight * Self.maximumHeightFraction, 320)
+    }
+
+    /// Always the width the chosen column count actually needs, bounded by the
+    /// space available. There is no separate "wide" mode any more: it existed
+    /// because the column count came from the main grid, so a folder with more
+    /// items than columns had to be stretched to fit them — with columns now
+    /// derived from the item count, the natural width is the correct one.
+    static func panelWidth(availableWidth: CGFloat, columns: Int, iconSize: CGFloat) -> CGFloat {
+        let naturalWidth = CGFloat(max(columns, 1)) * (max(iconSize, 1) + Self.tileLabelAllowance)
             + 2 * Self.gridHorizontalInset
         let maximumWidth = max(availableWidth, Self.minimumPanelWidth)
-        guard !usesWideLayout else { return maximumWidth }
-        return min(max(compactWidth, Self.minimumPanelWidth), maximumWidth)
+        return min(max(naturalWidth, Self.minimumPanelWidth), maximumWidth)
     }
 
     /// Flattened (folderPage, folderIndex, item) so "Remove from Folder" can
@@ -95,6 +154,7 @@ final class FolderContentsViewController: NSViewController {
         iconSize: Double,
         columns: Int,
         panelWidth: CGFloat,
+        maximumHeight: CGFloat,
         onLaunch: @escaping (ApplicationRecord) -> Void,
         onItemDraggedOut: @escaping (Int, Int) -> Void
     ) {
@@ -104,6 +164,7 @@ final class FolderContentsViewController: NSViewController {
         self.iconSize = iconSize
         self.columns = max(columns, 1)
         self.panelWidth = max(panelWidth, Self.minimumPanelWidth)
+        self.maximumHeight = max(maximumHeight, 180)
         self.onLaunch = onLaunch
         self.onItemDraggedOut = onItemDraggedOut
         super.init(nibName: nil, bundle: nil)
@@ -168,7 +229,6 @@ final class FolderContentsViewController: NSViewController {
         // the imposed Auto Layout width.
         hosting.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = hosting
         scrollView.drawsBackground = false
@@ -188,6 +248,25 @@ final class FolderContentsViewController: NSViewController {
         // explicit too, closing the same kind of implicit-default gap.
         scrollView.scrollerStyle = .overlay
         scrollView.borderType = .noBorder
+        scrollView.wantsLayer = true
+        scrollFadeMask.colors = [
+            NSColor.clear.cgColor,
+            NSColor.black.cgColor,
+            NSColor.black.cgColor,
+            NSColor.clear.cgColor
+        ]
+        scrollFadeMask.startPoint = CGPoint(x: 0.5, y: 0)
+        scrollFadeMask.endPoint = CGPoint(x: 0.5, y: 1)
+        scrollFadeMask.locations = [0, 0, 1, 1]
+        scrollView.layer?.mask = scrollFadeMask
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateScrollFade() }
+        }
 
         // Light, barely-tinted frosted-glass card background — a decorative
         // sibling behind the grid only (not the title, which floats
@@ -251,16 +330,70 @@ final class FolderContentsViewController: NSViewController {
     /// exactly); only the height is derived here, from the fixed `columns`
     /// count (the main grid's own column count — see that property's doc
     /// comment for why this isn't a per-item-count heuristic) and the actual
-    /// row count (up to the 480pt/scrolling cap).
+    /// row count, capped at `maximumHeight`.
+    ///
+    /// Every term is a real distance in the layout above, so a folder that fits
+    /// gets a card that ends exactly where its content does — no dead space
+    /// under a single row, and no row clipped in half when a second one would
+    /// have fitted.
     private func updatePreferredContentSize() {
         let itemCount = max(flattenedItems.count, 1)
         let rows = max(1, Int(ceil(Double(itemCount) / Double(columns))))
-        let cellHeight = itemHeight + Self.cellSpacing
-        // Title field's own area above the grid (21pt font + its top
-        // padding + the 28pt title-to-grid gap) and the scroll view's
-        // bottom inset.
-        let height = min(CGFloat(rows) * cellHeight + 88 + 70, 480)
+        let gridHeight = CGFloat(rows) * itemHeight
+            + CGFloat(rows - 1) * Self.cellSpacing
+            + 2 * Self.gridVerticalPadding
+        let chromeHeight = Self.titleTopInset
+            + titleField.intrinsicContentSize.height
+            + Self.titleToGridGap
+            + Self.cardBottomInset
+        let height = min(gridHeight + chromeHeight, maximumHeight)
         preferredContentSize = NSSize(width: panelWidth, height: max(height, 180))
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        // `refresh()` runs from `loadView()`, before the panel has any size, so
+        // the fade cannot be decided there — by this point the scroll view has
+        // its real bounds and the answer is knowable.
+        updateScrollFade()
+    }
+
+    /// Fades content in and out at whichever card edge it continues past,
+    /// instead of letting it stop dead against the edge.
+    ///
+    /// Reported ("中身でスクロールをしたりすると微妙"): a folder taller than
+    /// the card simply cut off at the boundary, so a half-visible row of icons
+    /// read as broken layout rather than as "there is more below". A fade only
+    /// appears on a side that actually has content beyond it, so a folder that
+    /// fits — the common case — is not softened at all.
+    ///
+    /// The mask lives on the scroll view rather than its clip view because the
+    /// clip view's bounds origin moves as the user scrolls: anchoring here
+    /// keeps the fade fixed to the card while the content slides underneath it.
+    private func updateScrollFade() {
+        guard let mask = scrollView.layer?.mask as? CAGradientLayer else { return }
+        let visibleHeight = scrollView.contentView.bounds.height
+        let contentHeight = scrollView.documentView?.frame.height ?? 0
+        let scrolledFromTop = scrollView.contentView.bounds.origin.y
+        let scrolledFromBottom = contentHeight - visibleHeight - scrolledFromTop
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mask.frame = scrollView.bounds
+        let fade = Self.scrollFadeLength
+        guard contentHeight > visibleHeight + 0.5, visibleHeight > fade * 2 else {
+            // Fully opaque: nothing is hidden, so nothing should look faded.
+            mask.locations = [0, 0, 1, 1]
+            CATransaction.commit()
+            return
+        }
+        // Ramp each fade in with the first `fade` points of travel so the
+        // effect appears as the content starts moving rather than snapping on.
+        let top = min(max(scrolledFromTop, 0) / fade, 1) * fade / visibleHeight
+        let bottom = min(max(scrolledFromBottom, 0) / fade, 1) * fade / visibleHeight
+        // AppKit layers are not flipped, so location 0 is the bottom edge.
+        mask.locations = [0, NSNumber(value: Double(bottom)), NSNumber(value: Double(1 - top)), 1]
+        CATransaction.commit()
     }
 
     private func refresh() {
@@ -332,6 +465,7 @@ final class FolderContentsViewController: NSViewController {
         }
         gridModel.tiles = tiles
         view.window?.layoutIfNeeded()
+        updateScrollFade()
     }
 
     /// Real, confirmed report ("フォルダ内のアプリ移動が違和感がある...

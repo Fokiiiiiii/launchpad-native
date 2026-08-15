@@ -72,8 +72,7 @@ final class FolderOverlayPresenter {
         let panelWidth = FolderContentsViewController.panelWidth(
             availableWidth: hostView.bounds.width - 192,
             columns: folderColumns,
-            iconSize: CGFloat(metrics.iconSize),
-            usesWideLayout: itemCount >= configuredColumns
+            iconSize: CGFloat(metrics.iconSize)
         )
 
         let folderVC = FolderContentsViewController(
@@ -83,6 +82,9 @@ final class FolderOverlayPresenter {
             iconSize: metrics.iconSize,
             columns: folderColumns,
             panelWidth: panelWidth,
+            maximumHeight: FolderContentsViewController.maximumPanelHeight(
+                availableHeight: hostView.bounds.height
+            ),
             onLaunch: { [weak self] record in
                 self?.close()
                 onLaunch(record)
