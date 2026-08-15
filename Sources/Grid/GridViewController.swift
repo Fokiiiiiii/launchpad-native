@@ -941,7 +941,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     /// Hard safety net, reachable from three independent places (the fixed
-    /// 1s fallback timer, a background click during a drag, and every time
+    /// safety-net fallback timer (30s), a background click during a drag, and every time
     /// the launcher shows) — forces the grid back to a normal, fully-
     /// visible state no matter what state the drag machinery is in. Safe
     /// to call even when no drag is active (idempotent no-op beyond a
@@ -1927,7 +1927,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // evaluated first, and while the pointer is inside another app's
         // center zone, reorder candidate evaluation is skipped entirely
         // (not just gated on the folder candidate having *committed* —
-        // gating this early, before the 0.5s hover delay fires, is what
+        // gating this early, before the folder hover delay fires, is what
         // keeps the target from being nudged in the first place).
         let folderTarget = folderZoneTarget(session: session, point: point)
         if folderTarget != nil {
@@ -2161,7 +2161,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // now gets its own immediate feedback — a visible drop-zone ring
         // with a progress sweep timed to the hover delay, and the dragged
         // icon itself pulling inward — instead of nothing changing until
-        // `commitFolderCandidate` fires 0.5s later.
+        // `commitFolderCandidate` fires after the hover delay.
         showFolderZoneIndicator(session: session, targetIndex: zoneTarget)
         beginFloatingViewFolderPull(session: session, engaged: true)
         session.folderTimer = Timer.scheduledTimer(withTimeInterval: ItemDrag.itemDragFolderHoverDelay, repeats: false) { [weak self, weak session] _ in
@@ -2206,7 +2206,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     /// Real, confirmed report ("グループ化しようとするとアプリが逃げる"):
     /// called from `updateItemDrag` whenever the pointer is inside another
-    /// app's folder drop zone, *before* the 0.5s hover delay confirms a
+    /// app's folder drop zone, *before* the hover delay confirms a
     /// folder candidate — pins the reorder preview back to its identity
     /// state (every item at its own natural slot, zero visual
     /// displacement) so the target app being hovered over never gets
