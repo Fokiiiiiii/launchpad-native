@@ -432,6 +432,16 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // can never leave the window at alpha 0 (the previous black-screen
         // failure mode).
         refreshOverlayLayout(reason: "show overlay")
+        // Settle the layout *before* the window becomes visible. Reserving
+        // room for the Dock is a constraint change, and a constraint change
+        // does not reach `PagedGridLayout`'s cell size until the next layout
+        // pass — so the first frame was drawn with the pre-Dock viewport and
+        // the icons visibly shrank a moment later once that pass ran
+        // (measured: icon size 152pt on the first pass, 136pt after, the 63pt
+        // difference being exactly the Dock's reserved height). Forcing the
+        // pass here means the first visible frame already has the final
+        // geometry.
+        viewController?.view.layoutSubtreeIfNeeded()
         // Do not rely on CA's animator to perform the first visibility
         // transition. If the window was ordered while the app was changing
         // activation policy, the animation transaction can be deferred and
