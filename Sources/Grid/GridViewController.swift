@@ -709,16 +709,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             if hasNeighbor, dragNeighborImageView == nil {
                 prefetchAdjacentPageIcons(including: currentPage + dragDirection)
                 if let image = renderPageSnapshot(forPage: currentPage + dragDirection, size: collectionView.bounds.size) {
-                    let xOffset = dragDirection > 0 ? width : -width
-                    let imageView = NSImageView(frame: NSRect(
-                        x: scrollView.frame.origin.x + xOffset,
-                        y: scrollView.frame.origin.y,
-                        width: scrollView.frame.width,
-                        height: scrollView.frame.height
-                    ))
-                    imageView.image = image
-                    imageView.imageScaling = .scaleNone
-                    imageView.wantsLayer = true
+                    let imageView = PageSnapshotRenderer.makeNeighborImageView(
+                        image: image,
+                        direction: dragDirection,
+                        pageWidth: width,
+                        scrollViewFrame: scrollView.frame
+                    )
                     view.addSubview(imageView, positioned: .above, relativeTo: scrollView)
                     dragNeighborImageView = imageView
                     DiagnosticsLog.grid.notice("updatePageDrag: neighbor snapshot created for page \(self.currentPage + self.dragDirection, privacy: .public)")
@@ -971,121 +967,19 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         dragGeneration += 1
     }
 
-    /// A permanently-off-screen, never-ordered-visible host window, reused
-    /// across every snapshot render. `cacheDisplay(in:to:)` re-drives a
-    /// view's normal display path — for a layer-backed hierarchy (every
-    /// `GridCellItem` sets `view.wantsLayer = true`), that path only
-    /// produces real pixel content once the view has actually been asked to
-    /// display by a real window's rendering machinery at least once. A
-    /// view that has never belonged to any `NSWindow` (the original
-    /// implementation here) never gets that: `cacheDisplay` still reports
-    /// success (returns a non-nil bitmap) but every pixel comes back fully
-    /// transparent. Confirmed empirically via `debugSimulatePageDrag` +
-    /// `log stream`: a since-removed pixel-sampling diagnostic read
-    /// "0/64 sampled points non-transparent" before this fix — this is what the user's report ("next page's
-    /// content isn't visible during the drag") was actually seeing; the
-    /// snapshot mechanism itself was working (non-nil, correctly
-    /// positioned/transformed), it just had nothing drawn in it. Parking
-    /// the render host far outside any real display's coordinate space
-    /// (rather than merely `alphaValue = 0` on-screen) keeps this
-    /// invisible to the user while still giving AppKit a real window to
-    /// render into.
-    ///
-    /// Ordered front exactly once, right here, and never ordered out again
-    /// — a real, confirmed follow-up regression: the first version of this
-    /// fix called `orderFront`/`orderOut` on every single drag gesture (in
-    /// `renderPageSnapshot`, once direction resolves), and a user report of
-    /// a brief flicker on every page move followed shortly after that fix
-    /// shipped. Repeatedly ordering *any* real window in and out of the
-    /// window list — even one permanently parked off-screen — still forces
-    /// a WindowServer-level composite pass each time, which is a plausible
-    /// source of a screen-wide flicker distinct from the earlier "flash of
-    /// the previous page's content" bug (already fixed in `finishPageDrag`).
-    /// Ordering front once, up front, still satisfies `cacheDisplay`'s
-    /// requirement that the view belong to a window that's actually been
-    /// displayed — there's no need to repeat it per gesture, and since the
-    /// window never visually appears anywhere real, there's no downside to
-    /// leaving it ordered front indefinitely.
-    private static let snapshotHostWindow: NSWindow = {
-        let window = NSWindow(
-            contentRect: NSRect(x: -20000, y: -20000, width: 1, height: 1),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        window.isReleasedWhenClosed = false
-        window.ignoresMouseEvents = true
-        window.hasShadow = false
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.orderFront(nil)
-        return window
-    }()
-
-    /// Renders `model.pages[page]` into a standalone offscreen
-    /// `NSCollectionView` (its own `PagedGridLayout`, sized to match the
-    /// live grid exactly) and rasterizes it to a static image via
-    /// `cacheDisplay(in:to:)`. Icons use `IconCache.cachedIconIfAvailable`
-    /// (synchronous, best-effort) rather than the live grid's async
-    /// `icon(for:)` fetch — waiting on a disk/system icon load would delay
-    /// the drag's very first frame, and every icon on any page the user has
-    /// already seen is normally already memory-cached by this point. A
-    /// genuinely never-seen page's icons render blank until the real grid
-    /// takes back over at the end of the drag — an accepted, minor
-    /// trade-off, not a bug.
+    /// Binds the controller's current geometry to `PageSnapshotRenderer`, which
+    /// holds the rendering itself (and the offscreen host window it needs).
     private func renderPageSnapshot(forPage page: Int, size: NSSize) -> NSImage? {
         guard model.pages.indices.contains(page) else { return nil }
-
-        let tempLayout = PagedGridLayout()
-        tempLayout.settings = model.gridSettings
-        let tempCollectionView = NSCollectionView(frame: NSRect(origin: .zero, size: size))
-        tempCollectionView.collectionViewLayout = tempLayout
-        tempCollectionView.register(GridCellItem.self, forItemWithIdentifier: itemIdentifier)
-        tempCollectionView.backgroundColors = [.clear]
-
-        let dataSource = SnapshotDataSource(
+        return PageSnapshotRenderer.render(
             items: model.pages[page],
             model: model,
             iconCache: iconCache,
             itemIdentifier: itemIdentifier,
             iconSize: currentIconSize,
-            visualScale: currentEffectiveIconScale
+            visualScale: currentEffectiveIconScale,
+            size: size
         )
-        // `dataSource` is only needed for this synchronous render (no
-        // async work happens between here and the function returning), so
-        // the local `let` staying in scope through `cacheDisplay` is
-        // sufficient — `NSCollectionView.dataSource` itself doesn't retain.
-        tempCollectionView.dataSource = dataSource
-        tempCollectionView.reloadData()
-
-        // See `snapshotHostWindow`'s doc comment: this view must actually
-        // belong to a real window before `cacheDisplay` will capture
-        // anything but transparent pixels from its layer-backed cells. The
-        // window is already ordered front permanently (once, at creation) —
-        // only the content view is swapped in/out here, per gesture.
-        let hostWindow = Self.snapshotHostWindow
-        hostWindow.setContentSize(size)
-        hostWindow.contentView = tempCollectionView
-        tempCollectionView.layoutSubtreeIfNeeded()
-        tempCollectionView.displayIfNeeded()
-
-        defer {
-            hostWindow.contentView = nil
-            // Also shrink the window itself. Clearing `contentView` releases
-            // the collection view, but the window keeps a backing store sized
-            // to the last snapshot — i.e. the full grid viewport, which on a
-            // Retina display is (width x 2) * (height x 2) * 4 bytes held for
-            // the rest of the session. The window deliberately stays ordered
-            // front (see `snapshotHostWindow`: ordering it in and out per
-            // gesture caused a flicker regression); only its size shrinks.
-            hostWindow.setContentSize(NSSize(width: 1, height: 1))
-        }
-
-        guard let bitmap = tempCollectionView.bitmapImageRepForCachingDisplay(in: tempCollectionView.bounds) else { return nil }
-        tempCollectionView.cacheDisplay(in: tempCollectionView.bounds, to: bitmap)
-        let image = NSImage(size: size)
-        image.addRepresentation(bitmap)
-        return image
     }
 
     /// Apple's standard rubber-band resistance formula (see apple-design's
@@ -2723,22 +2617,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         if session.edgePeekImageView == nil {
             prefetchAdjacentPageIcons(including: currentPage + direction)
             guard let image = renderPageSnapshot(forPage: currentPage + direction, size: collectionView.bounds.size) else { return }
-            let xOffset = direction > 0 ? width : -width
-            // Same parent/frame convention as the trackpad-swipe path's own
-            // `dragNeighborImageView` (`updatePageDrag`) — added to `view`
-            // (not `collectionView`'s actual superview, the scroll view's
-            // internal clip view, which has its own scrolled coordinate
-            // space) positioned just above `scrollView`, sized from
-            // `scrollView.frame` rather than `collectionView.frame`.
-            let imageView = NSImageView(frame: NSRect(
-                x: scrollView.frame.origin.x + xOffset,
-                y: scrollView.frame.origin.y,
-                width: scrollView.frame.width,
-                height: scrollView.frame.height
-            ))
-            imageView.image = image
-            imageView.imageScaling = .scaleNone
-            imageView.wantsLayer = true
+            let imageView = PageSnapshotRenderer.makeNeighborImageView(
+                image: image,
+                direction: direction,
+                pageWidth: width,
+                scrollViewFrame: scrollView.frame
+            )
             view.addSubview(imageView, positioned: .above, relativeTo: scrollView)
             session.edgePeekImageView = imageView
         }
@@ -3047,67 +2931,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         for item in collectionView.visibleItems() {
             item.view.layer?.removeAnimation(forKey: "wobble")
         }
-    }
-}
-
-/// A minimal, throwaway `NSCollectionViewDataSource` for rendering one
-/// page's worth of cells into an offscreen snapshot (see
-/// `GridViewController.renderPageSnapshot(forPage:size:)`) — deliberately
-/// independent of `GridViewController`'s own data-source conformance
-/// (which always reads `currentPage`) so building a snapshot of an
-/// *adjacent* page never has to temporarily perturb the live grid's state.
-private final class SnapshotDataSource: NSObject, NSCollectionViewDataSource {
-    private let items: [LayoutItem]
-    private let model: GridModel
-    private let iconCache: IconCache
-    private let itemIdentifier: NSUserInterfaceItemIdentifier
-    private let iconSize: Double
-    private let visualScale: Double
-
-    init(items: [LayoutItem], model: GridModel, iconCache: IconCache, itemIdentifier: NSUserInterfaceItemIdentifier, iconSize: Double, visualScale: Double = 1) {
-        self.items = items
-        self.model = model
-        self.iconCache = iconCache
-        self.itemIdentifier = itemIdentifier
-        self.iconSize = iconSize
-        self.visualScale = visualScale
-    }
-
-    func numberOfSections(in collectionView: NSCollectionView) -> Int { 1 }
-
-    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
-        items.count
-    }
-
-    func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
-        guard let cell = collectionView.makeItem(withIdentifier: itemIdentifier, for: indexPath) as? GridCellItem,
-              items.indices.contains(indexPath.item) else {
-            return NSCollectionViewItem()
-        }
-        switch items[indexPath.item] {
-        case .app(let id):
-            guard let record = model.record(for: id) else { return cell }
-            let icon = iconCache.cachedIconIfAvailable(for: record) ?? NSImage()
-            let displayName = model.displayName(for: record)
-            cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: iconSize, visualScale: visualScale, displayName: displayName)
-        case .folder(let folderID):
-            let folder = model.folders[folderID]
-            let name = folder?.name ?? L10n.defaultFolderName
-            // Synchronous, cache-only icons: this data source only renders
-            // one offscreen snapshot bitmap with no async work in between
-            // (see this type's doc comment and `IconCache.icon`'s
-            // `cachedIconIfAvailable` counterpart used for the app case
-            // above) — an async fetch here would resolve after the
-            // snapshot's already been captured and the temp collection view
-            // torn down.
-            let records: [ApplicationRecord] = folder?.pages.flatMap { $0 }.compactMap { item in
-                guard case .app(let id) = item else { return nil }
-                return model.record(for: id)
-            } ?? []
-            let icons = records.prefix(9).compactMap { iconCache.cachedIconIfAvailable(for: $0) }
-            cell.configureAsFolder(name: name, isSelected: false, iconSize: iconSize, visualScale: visualScale, icons: icons, requestKey: "folder:\(folderID.value)")
-        }
-        return cell
     }
 }
 
