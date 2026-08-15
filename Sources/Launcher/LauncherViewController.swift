@@ -336,6 +336,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // doc comment for why this exists (a lesson from a prior version
         // of this feature that could get stuck).
         gridViewController.resetDragStateIfNeeded()
+        // Same guarantee for item drags. Without this, a drag left active by a
+        // trigger that hid the launcher mid-gesture stayed active, and only the
+        // 15s fallback timer would eventually clear it.
+        gridViewController.cancelItemDragIfNeeded()
     }
 
     /// Debug-only entry point (`LAUNCHPAD_DEBUG_SEARCH_QUERY`, wired in

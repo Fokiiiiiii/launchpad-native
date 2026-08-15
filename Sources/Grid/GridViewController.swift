@@ -1814,6 +1814,24 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         /// bounds and a hover-progress sweep. `nil` whenever the pointer
         /// isn't currently over another app's center zone.
         var folderZoneIndicatorView: NSView?
+        /// Where the dragged item currently sits *on the page being shown*, or
+        /// `nil` once a mid-drag page turn has carried the drag onto a page the
+        /// item isn't part of.
+        ///
+        /// `sourceOriginalIndex` is a `let` describing the item's index on its
+        /// **origin** page, which is what `endItemDrag` needs for the model
+        /// mutation. Everything that reasons about the *currently displayed*
+        /// page — which cell to exclude from the reorder preview, which cells
+        /// can be folder targets, how many slots exist — was reading that same
+        /// value, so after `commitPageTurnDuringDrag` it pointed at an
+        /// unrelated app on the new page: the preview excluded the wrong cell
+        /// (shifting every following slot by one), that app could not be made
+        /// into a folder, and the slot count was short by one so the item could
+        /// not be dropped at the end. `commitPageTurnDuringDrag` already resets
+        /// `pendingRawSlot`/`candidateSlot`/`edgeDirection`/folder-candidate
+        /// state for the new page for exactly this class of reason; this is the
+        /// remaining piece of that same reset.
+        var sourceIndexOnCurrentPage: Int?
         let generation: Int
 
         init(sourcePage: Int, sourceOriginalIndex: Int, draggedItem: LayoutItem, originalFrame: NSRect, grabOffset: NSPoint, generation: Int) {
@@ -1824,6 +1842,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             self.grabOffset = grabOffset
             self.candidateSlot = sourceOriginalIndex
             self.pendingRawSlot = sourceOriginalIndex
+            self.sourceIndexOnCurrentPage = sourceOriginalIndex
             self.generation = generation
         }
 
@@ -1985,7 +2004,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// arrangement — reachable from a background click (mirrors the
     /// page-drag machinery's own safety net) and available for a future
     /// Escape-key wire-up.
-    private func cancelItemDragIfNeeded() {
+    ///
+    /// Also called every time the launcher is shown, which is what
+    /// `resetDragStateIfNeeded()` already guarantees for the *page*-drag
+    /// machinery: however a previous session ended, the next open starts
+    /// clean. Item drags had no equivalent entry point.
+    public func cancelItemDragIfNeeded() {
         guard let session = activeItemDrag else { return }
         DiagnosticsLog.grid.notice("cancelItemDragIfNeeded: reverting drag of item \(session.sourceOriginalIndex, privacy: .public)")
         revertItemDrag(session: session)
@@ -2254,9 +2278,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// columns, which folds into the next row's slot range and silently
     /// points at a completely unrelated cell instead of "the last column
     /// of this row."
-    private func insertionSlot(forPoint point: NSPoint) -> Int? {
+    private func insertionSlot(forPoint point: NSPoint, excluding excludedIndex: Int?) -> Int? {
         guard model.pages.indices.contains(currentPage) else { return nil }
-        let remainingCount = max(model.pages[currentPage].count - 1, 0)
+        // One slot is freed up by the dragged item itself only while that item
+        // is actually on this page. After a mid-drag page turn it isn't, so
+        // every slot is occupied and the drop can legitimately land at the end
+        // (`endItemDrag` already accepts `count` as a destination).
+        let pageCount = model.pages[currentPage].count
+        let remainingCount = excludedIndex == nil ? pageCount : max(pageCount - 1, 0)
         let columns = max(model.gridSettings.columns, 1)
         let hSpacing = CGFloat(model.gridSettings.horizontalSpacing)
         let vSpacing = CGFloat(model.gridSettings.verticalSpacing)
@@ -2290,7 +2319,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// the committed cell's center instead works for movement in any
     /// direction.
     private func evaluateReorderCandidate(session: ItemDragSession, point: NSPoint) {
-        guard let rawSlot = insertionSlot(forPoint: point) else { return }
+        guard let rawSlot = insertionSlot(forPoint: point, excluding: session.sourceIndexOnCurrentPage) else { return }
         guard rawSlot != session.candidateSlot else {
             session.reorderTimer?.invalidate()
             return
@@ -2313,7 +2342,16 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // the surrounding structure.
         session.reorderTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragReorderDebounce, repeats: false) { [weak self, weak session] _ in
             Task { @MainActor [weak self, weak session] in
-                guard let self, let session, session.generation == self.itemDragGeneration else { return }
+                // `activeItemDrag === session` matters as much as the
+                // generation check: `itemDragGeneration` only advances in
+                // `beginItemDrag`, so it does not invalidate anything when a
+                // drag *ends*. This closure is one main-actor turn behind the
+                // timer firing, and `invalidateTimers()` in `endItemDrag` can
+                // only stop timers that have not fired yet — so without this,
+                // a timer that fired just before mouseUp still commits into a
+                // finished session. `commitPageTurnDuringDrag` already guards
+                // this way; these three timers did not.
+                guard let self, let session, self.activeItemDrag === session, session.generation == self.itemDragGeneration else { return }
                 self.commitReorderCandidate(session: session, slot: rawSlot)
             }
         }
@@ -2334,7 +2372,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         guard model.pages.indices.contains(currentPage) else { return }
         let items = model.pages[currentPage]
         var naturalPos = 0
-        for originalIndex in items.indices where originalIndex != session.sourceOriginalIndex {
+        for originalIndex in items.indices where originalIndex != session.sourceIndexOnCurrentPage {
             let previewSlot = naturalPos < session.candidateSlot ? naturalPos : naturalPos + 1
             naturalPos += 1
             guard let cell = collectionView.item(at: IndexPath(item: originalIndex, section: 0)) as? GridCellItem,
@@ -2417,7 +2455,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func folderZoneTarget(session: ItemDragSession, point: NSPoint) -> Int? {
         guard case .app = session.draggedItem, model.pages.indices.contains(currentPage) else { return nil }
         let items = model.pages[currentPage]
-        for index in items.indices where index != session.sourceOriginalIndex {
+        for index in items.indices where index != session.sourceIndexOnCurrentPage {
             guard let frame = layout.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { continue }
             let inset = min(frame.width, frame.height) * Self.itemDragFolderZoneInset
             let centerZone = frame.insetBy(dx: inset, dy: inset)
@@ -2444,7 +2482,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         beginFloatingViewFolderPull(session: session, engaged: true)
         session.folderTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragFolderHoverDelay, repeats: false) { [weak self, weak session] _ in
             Task { @MainActor [weak self, weak session] in
-                guard let self, let session, session.generation == self.itemDragGeneration else { return }
+                // See `evaluateReorderCandidate`'s guard for why the session
+                // identity check is required in addition to the generation.
+                // Without it this could scale a cell to 1.06 on behalf of a
+                // finished drag, with nothing left to clear the highlight.
+                guard let self, let session, self.activeItemDrag === session, session.generation == self.itemDragGeneration else { return }
                 self.commitFolderCandidate(session: session, index: zoneTarget)
             }
         }
@@ -2491,9 +2533,20 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // Keeps `evaluateReorderCandidate`'s "same as last pending raw slot"
         // guard from swallowing a real re-evaluation once the pointer
         // leaves the folder zone again.
-        session.pendingRawSlot = session.sourceOriginalIndex
-        guard session.candidateSlot != session.sourceOriginalIndex else { return }
-        commitReorderCandidate(session: session, slot: session.sourceOriginalIndex)
+        // "Identity" means the dragged item's own slot on the page in view. On
+        // a page it isn't part of there is no such slot, so the closest thing
+        // to leaving the layout untouched is the end of the page.
+        let identitySlot: Int
+        if let indexOnCurrentPage = session.sourceIndexOnCurrentPage {
+            identitySlot = indexOnCurrentPage
+        } else if model.pages.indices.contains(currentPage) {
+            identitySlot = model.pages[currentPage].count
+        } else {
+            identitySlot = 0
+        }
+        session.pendingRawSlot = identitySlot
+        guard session.candidateSlot != identitySlot else { return }
+        commitReorderCandidate(session: session, slot: identitySlot)
     }
 
     private func clearFolderCandidateHighlight(session: ItemDragSession) {
@@ -2656,8 +2709,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let committedDirection = direction
         session.edgeTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragEdgeHoverDelay, repeats: false) { [weak self, weak session] _ in
             Task { @MainActor [weak self, weak session] in
+                // See `evaluateReorderCandidate`'s guard for why session
+                // identity is checked alongside the generation.
                 guard let self,
                       let session,
+                      self.activeItemDrag === session,
                       session.generation == self.itemDragGeneration,
                       session.edgeDirection == committedDirection
                 else { return }
@@ -2838,6 +2894,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 session.pendingRawSlot = -1
                 session.candidateSlot = self.model.pages.indices.contains(targetPage) ? self.model.pages[targetPage].count : 0
                 session.edgeDirection = 0
+                // The dragged item lives on its origin page, not this one, so
+                // nothing on the new page should be excluded from the reorder
+                // preview or from folder targeting. See the property's own doc
+                // comment for the three concrete misbehaviours this prevents.
+                session.sourceIndexOnCurrentPage = nil
                 // Real, confirmed latent bug (found while wiring up the
                 // folder zone indicator, not user-reported): this function
                 // already resets pendingRawSlot/candidateSlot/edgeDirection
