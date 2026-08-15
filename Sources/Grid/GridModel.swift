@@ -52,6 +52,13 @@ public final class GridModel {
             reflowPagesToCurrentCapacity()
             requiresSave = true
         }
+        // Same repair, one level down: a folder can hold pages packed past
+        // `folderGridSize` (legacy import puts everything on one page) or with
+        // a hole punched in a middle page by a drag-out. Heal once and persist,
+        // so later launches do not redo it.
+        if normalizeFolderPages() {
+            requiresSave = true
+        }
 
         if requiresSave {
             await save()
@@ -549,7 +556,12 @@ public final class GridModel {
 
         switch targetItem {
         case .app:
-            let folder = Folder(name: defaultFolderName, pages: [[targetItem, draggedItem]])
+            // Built through the same capacity path as every other insertion
+            // rather than assigning a page literal, so there is one rule for
+            // how many items a folder page may hold.
+            var folder = Folder(name: defaultFolderName, pages: [[]])
+            appendToFolder(&folder, item: targetItem)
+            appendToFolder(&folder, item: draggedItem)
             folders[folder.id] = folder
             pages[destinationPage][destinationIndex] = .folder(folder.id)
             pages[sourcePage].remove(at: sourceIndex)
@@ -571,11 +583,60 @@ public final class GridModel {
         }
     }
 
+    /// Repacks a folder's pages into chunks of exactly `capacity`, preserving
+    /// the order items appear in. The folder equivalent of
+    /// `reflowPagesToCurrentCapacity`, kept pure so the packing itself can be
+    /// tested without a model.
+    ///
+    /// A folder whose pages are already correctly packed comes back unchanged,
+    /// including an empty folder (`[[]]`), so callers can apply this
+    /// unconditionally.
+    nonisolated static func folderPagesRepacked(_ pages: [[LayoutItem]], capacity: Int) -> [[LayoutItem]] {
+        let capacity = max(capacity, 1)
+        let flattened = pages.flatMap { $0 }
+        guard !flattened.isEmpty else { return [[]] }
+        var repacked: [[LayoutItem]] = []
+        var index = flattened.startIndex
+        while index < flattened.endIndex {
+            let end = min(index + capacity, flattened.endIndex)
+            repacked.append(Array(flattened[index..<end]))
+            index = end
+        }
+        return repacked
+    }
+
+    /// Brings every folder's pages back in line with `folderGridSize`.
+    ///
+    /// `appendToFolder` above is the only place that has ever enforced that
+    /// capacity, and two paths get around it: `createOrJoinFolder` builds a
+    /// two-item folder directly, and `LegacyLaunchpadImporter` puts *every*
+    /// imported item on one page regardless of count. `removeFromFolder`
+    /// separately leaves a hole in a middle page rather than compacting.
+    ///
+    /// None of that was visible while the opened folder flattened all of its
+    /// pages into one scrolling list — it only matters now that a page is
+    /// something the user actually sees and swipes between. Returns whether
+    /// anything moved, so a caller can decide whether a save is warranted.
+    @discardableResult
+    public func normalizeFolderPages() -> Bool {
+        var changed = false
+        for (id, folder) in folders {
+            let repacked = Self.folderPagesRepacked(folder.pages, capacity: gridSettings.folderGridSize)
+            guard repacked != folder.pages else { continue }
+            folders[id]?.pages = repacked
+            changed = true
+        }
+        return changed
+    }
+
     public func removeFromFolder(_ folderID: FolderID, folderPage: Int, folderIndex: Int, toPage: Int) {
         guard var folder = folders[folderID],
               folder.pages.indices.contains(folderPage),
               folder.pages[folderPage].indices.contains(folderIndex) else { return }
         let item = folder.pages[folderPage].remove(at: folderIndex)
+        // Compact rather than leaving a hole in a middle page — a gap the user
+        // can now see and swipe past.
+        folder.pages = Self.folderPagesRepacked(folder.pages, capacity: gridSettings.folderGridSize)
         folders[folderID] = folder
 
         while pages.count <= toPage { pages.append([]) }

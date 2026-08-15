@@ -651,3 +651,99 @@ private func makeModel(directory: URL) -> GridModel {
 
     #expect(model.pages.map(\.count) == [10, 8], "capacity-unchanged settings update must not repack pages")
 }
+
+// MARK: - Folder page packing
+
+private func appItem(_ id: String) -> LayoutItem {
+    .app(StableAppIdentifier(value: id))
+}
+
+private func bundleIDs(_ pages: [[LayoutItem]]) -> [[String]] {
+    pages.map { page in
+        page.compactMap { item -> String? in
+            guard case .app(let id) = item else { return nil }
+            return id.value
+        }
+    }
+}
+
+/// The legacy importer puts every item of an imported folder on one page
+/// regardless of count, which was invisible while the opened folder flattened
+/// all of its pages into one list — but a page is now something the user swipes
+/// between, so an over-full page has to be split.
+@Test func repackingSplitsAnOverfullPageWithoutReorderingAnything() {
+    let overfull = [(1...20).map { appItem("a\($0)") }]
+    let repacked = GridModel.folderPagesRepacked(overfull, capacity: 9)
+    #expect(repacked.map(\.count) == [9, 9, 2])
+    #expect(bundleIDs(repacked).flatMap { $0 } == (1...20).map { "a\($0)" })
+}
+
+/// Dragging an item out of a middle page used to leave a hole there while later
+/// pages stayed full — a gap the user can now see.
+@Test func repackingClosesAHoleLeftInAMiddlePage() {
+    let holed = [
+        (1...9).map { appItem("a\($0)") },
+        [appItem("b1"), appItem("b2")],          // hole: page is short…
+        (1...9).map { appItem("c\($0)") }        // …while a later page is full
+    ]
+    let repacked = GridModel.folderPagesRepacked(holed, capacity: 9)
+    #expect(repacked.map(\.count) == [9, 9, 2])
+    #expect(bundleIDs(repacked)[1].first == "b1")
+    #expect(bundleIDs(repacked)[2] == ["c8", "c9"])
+}
+
+/// Correctly-packed folders — every real folder in a normal layout — must come
+/// back untouched, so this can be applied unconditionally on load.
+@Test func repackingLeavesAlreadyCorrectPagesAlone() {
+    let exactlyFull = [(1...9).map { appItem("a\($0)") }]
+    #expect(GridModel.folderPagesRepacked(exactlyFull, capacity: 9) == exactlyFull)
+
+    let partial = [[appItem("a"), appItem("b")]]
+    #expect(GridModel.folderPagesRepacked(partial, capacity: 9) == partial)
+
+    let empty: [[LayoutItem]] = [[]]
+    #expect(GridModel.folderPagesRepacked(empty, capacity: 9) == empty)
+}
+
+@Test func repackingSurvivesADegenerateCapacity() {
+    let items = [[appItem("a"), appItem("b")]]
+    #expect(GridModel.folderPagesRepacked(items, capacity: 0).map(\.count) == [1, 1])
+}
+
+/// The end-to-end path: a folder loaded with an over-full page is healed, and
+/// the model reports that it changed so the caller knows to persist it.
+@Test @MainActor func loadingAFolderWithAnOverfullPageRepacksIt() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = LayoutStore(directory: dir)
+    var document = LayoutDocument.empty
+    let folder = Folder(name: "Imported", pages: [(1...14).map { appItem("a\($0)") }])
+    document.folders = [folder.id: folder]
+    document.pages = [[.folder(folder.id)]]
+    try await store.save(document)
+
+    let model = GridModel(layoutStore: store)
+    await model.loadDocument()
+
+    #expect(model.folders[folder.id]?.pages.map(\.count) == [9, 5])
+    // Idempotent: a second pass has nothing left to do.
+    #expect(model.normalizeFolderPages() == false)
+}
+
+/// Dropping one app onto another builds a folder through the same capacity path
+/// as every other insertion, rather than assigning a page literal.
+@Test @MainActor func aNewlyCreatedFolderIsPackedByTheSameRule() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b")])
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+
+    guard case .folder(let folderID) = model.pages[0][0] else {
+        Issue.record("expected a folder")
+        return
+    }
+    #expect(model.folders[folderID]?.pages.count == 1)
+    #expect(model.folders[folderID]?.pages[0].count == 2)
+}
