@@ -561,7 +561,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         layer?.removeAnimation(forKey: "pageSlideOut")
         layer?.removeAnimation(forKey: "pageSlideIn")
         let exitTarget = -direction * offset
-        let exitSpring = Self.springAnimation(
+        let exitSpring = GridSpring.animation(
             keyPath: "transform.translation.x",
             from: currentOffset,
             to: exitTarget,
@@ -600,7 +600,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 self.collectionView.layer?.setValue(direction * offset, forKeyPath: "transform.translation.x")
                 CATransaction.commit()
 
-                let entrySpring = Self.springAnimation(
+                let entrySpring = GridSpring.animation(
                     keyPath: "transform.translation.x",
                     from: direction * offset,
                     to: 0,
@@ -614,35 +614,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.launcher.info("page transition: reloadData took \(ms, privacy: .public)ms")
-    }
-
-    /// Local copy of `LauncherWindowController`'s damping-ratio/response ->
-    /// `CASpringAnimation` conversion (see apple-design's spring guidance):
-    /// `Grid` sits *below* `Launcher` in the dependency graph (`Launcher`
-    /// depends on `Grid`, not the reverse), so that helper can't be reused
-    /// from here — duplicating this small formula locally is simpler than
-    /// introducing a cross-module dependency inversion or a new shared
-    /// target just for ~10 lines of math.
-    private static func springAnimation(
-        keyPath: String,
-        from: CGFloat,
-        to: CGFloat,
-        damping dampingRatio: CGFloat,
-        response: CGFloat,
-        initialVelocity: CGFloat = 0
-    ) -> CASpringAnimation {
-        let animation = CASpringAnimation(keyPath: keyPath)
-        let angularFrequency = 2 * .pi / response
-        let stiffness = angularFrequency * angularFrequency
-        animation.mass = 1
-        animation.stiffness = stiffness
-        animation.damping = 2 * dampingRatio * sqrt(stiffness)
-        animation.initialVelocity = initialVelocity
-        animation.fromValue = from
-        animation.toValue = to
-        animation.duration = animation.settlingDuration
-        animation.isRemovedOnCompletion = true
-        return animation
     }
 
     private func jumpToAdjacentPage(delta: Int) {
@@ -769,7 +740,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             effective = deltaX
         } else {
             let edgePullLimit: CGFloat = 12
-            let resisted = Self.rubberBand(abs(deltaX), dimension: edgePullLimit)
+            let resisted = GridSpring.rubberBand(abs(deltaX), dimension: edgePullLimit)
             effective = min(resisted, edgePullLimit) * (deltaX < 0 ? -1 : 1)
         }
 
@@ -834,7 +805,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let boundedVelocity = min(max(velocity, -1600), 1600)
         let relativeVelocity = abs(distanceRemaining) > 1 ? boundedVelocity / distanceRemaining : 0
 
-        let spring = Self.springAnimation(
+        let spring = GridSpring.animation(
             keyPath: "transform.translation.x",
             from: deltaX,
             to: targetTranslation,
@@ -1016,13 +987,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             visualScale: currentEffectiveIconScale,
             size: size
         )
-    }
-
-    /// Apple's standard rubber-band resistance formula (see apple-design's
-    /// guidance): resistance increases with overshoot instead of a hard
-    /// stop, so dragging past an end still moves but doesn't go far.
-    private static func rubberBand(_ overshoot: CGFloat, dimension: CGFloat, constant: CGFloat = 0.55) -> CGFloat {
-        (overshoot * dimension * constant) / (dimension + constant * abs(overshoot))
     }
 
     /// Debug-only — this session has no Accessibility/GUI-scripting
@@ -1766,7 +1730,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         guard let layer = imageView.layer else { return }
         if !reduceMotion {
             layer.setValue(1.06, forKeyPath: "transform.scale")
-            layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.0, to: 1.06, damping: 0.82, response: 0.20), forKey: "lift")
+            layer.add(GridSpring.animation(keyPath: "transform.scale", from: 1.0, to: 1.06, damping: 0.82, response: 0.20), forKey: "lift")
         }
     }
 
@@ -1996,8 +1960,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let now = CACurrentMediaTime()
         let key = ObjectIdentifier(layer)
         let previous = lastAnimatedValueByLayer[key]
-        let velocityX = Self.estimateVelocity(from: previous?.x, at: previous?.xTime, to: currentX, at: now)
-        let velocityY = Self.estimateVelocity(from: previous?.y, at: previous?.yTime, to: currentY, at: now)
+        let velocityX = GridSpring.estimateVelocity(from: previous?.x, at: previous?.xTime, to: currentX, at: now)
+        let velocityY = GridSpring.estimateVelocity(from: previous?.y, at: previous?.yTime, to: currentY, at: now)
         lastAnimatedValueByLayer[key] = (currentX, now, currentY, now)
 
         layer.setValue(dx, forKeyPath: "transform.translation.x")
@@ -2009,13 +1973,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // by a near-zero denominator.
         let relativeVX = abs(dx - currentX) > 0.5 ? velocityX / (dx - currentX) : 0
         let relativeVY = abs(dy - currentY) > 0.5 ? velocityY / (dy - currentY) : 0
-        layer.add(Self.springAnimation(keyPath: "transform.translation.x", from: currentX, to: dx, damping: damping, response: response, initialVelocity: relativeVX), forKey: "reorderX")
-        layer.add(Self.springAnimation(keyPath: "transform.translation.y", from: currentY, to: dy, damping: damping, response: response, initialVelocity: relativeVY), forKey: "reorderY")
-    }
-
-    private static func estimateVelocity(from previousValue: CGFloat?, at previousTime: CFTimeInterval?, to currentValue: CGFloat, at currentTime: CFTimeInterval) -> CGFloat {
-        guard let previousValue, let previousTime, currentTime - previousTime > 0.001, currentTime - previousTime < 1.0 else { return 0 }
-        return (currentValue - previousValue) / CGFloat(currentTime - previousTime)
+        layer.add(GridSpring.animation(keyPath: "transform.translation.x", from: currentX, to: dx, damping: damping, response: response, initialVelocity: relativeVX), forKey: "reorderX")
+        layer.add(GridSpring.animation(keyPath: "transform.translation.y", from: currentY, to: dy, damping: damping, response: response, initialVelocity: relativeVY), forKey: "reorderY")
     }
 
     private func resetItemTransform(_ view: NSView) {
@@ -2085,7 +2044,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         clearFolderZoneIndicator(session: session)
         DiagnosticsLog.grid.notice("commitFolderCandidate: index \(index, privacy: .public)")
         guard let cell = collectionView.item(at: IndexPath(item: index, section: 0)) as? GridCellItem, let layer = cell.view.layer else { return }
-        layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.0, to: 1.06, damping: 0.82, response: 0.2), forKey: "folderCandidate")
+        layer.add(GridSpring.animation(keyPath: "transform.scale", from: 1.0, to: 1.06, damping: 0.82, response: 0.2), forKey: "folderCandidate")
         // Keypath assignment, not a raw `layer.transform = ...` assignment
         // — this file's consistent convention (see `updateItemDrag`'s doc
         // comment) is translation via `transform.translation.x/y` and
@@ -2160,7 +2119,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         guard abs(currentScale - targetScale) > 0.001 else { return }
         layer.setValue(targetScale, forKeyPath: "transform.scale")
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        layer.add(Self.springAnimation(keyPath: "transform.scale", from: currentScale, to: targetScale, damping: 0.82, response: 0.2), forKey: "folderPull")
+        layer.add(GridSpring.animation(keyPath: "transform.scale", from: currentScale, to: targetScale, damping: 0.82, response: 0.2), forKey: "folderPull")
     }
 
     /// Real, confirmed report ("フォルダ制作のUiがひどすぎる長方形だし
@@ -2237,7 +2196,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         CATransaction.setDisableActions(true)
         indicator.layer?.opacity = 1
         CATransaction.commit()
-        indicator.layer?.add(Self.springAnimation(keyPath: "opacity", from: 0, to: 1, damping: 1.0, response: 0.12), forKey: "zoneFadeIn")
+        indicator.layer?.add(GridSpring.animation(keyPath: "opacity", from: 0, to: 1, damping: 1.0, response: 0.12), forKey: "zoneFadeIn")
 
         guard !reduceMotion else { return }
         let sweep = CABasicAnimation(keyPath: "strokeEnd")
@@ -2261,7 +2220,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let currentOpacity = indicator.layer?.presentation()?.opacity ?? 1
         CATransaction.begin()
         CATransaction.setCompletionBlock { indicator.removeFromSuperview() }
-        indicator.layer?.add(Self.springAnimation(keyPath: "opacity", from: CGFloat(currentOpacity), to: 0, damping: 1.0, response: 0.1), forKey: "zoneFadeOut")
+        indicator.layer?.add(GridSpring.animation(keyPath: "opacity", from: CGFloat(currentOpacity), to: 0, damping: 1.0, response: 0.1), forKey: "zoneFadeOut")
         indicator.layer?.opacity = 0
         CATransaction.commit()
     }
@@ -2356,7 +2315,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // uses at its own edges — overshoot-proportional resistance
         // instead of the old linear `proximity * 30` ramp that kept
         // growing the harder the pointer pushed.
-        let dampedOffset = Self.rubberBand(penetration, dimension: ItemDrag.itemDragEdgePeekResistanceDimension)
+        let dampedOffset = GridSpring.rubberBand(penetration, dimension: ItemDrag.itemDragEdgePeekResistanceDimension)
         let previewOffset = -dampedOffset * CGFloat(direction)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -2382,7 +2341,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func clearEdgePeek(session: ItemDrag.ItemDragSession) {
         guard let peekImageView = session.edgePeekImageView else { return }
         let lastOffset = session.lastPeekOffset ?? 0
-        collectionView.layer?.add(Self.springAnimation(keyPath: "transform.translation.x", from: lastOffset, to: 0, damping: 0.98, response: 0.20), forKey: "edgePeekRevert")
+        collectionView.layer?.add(GridSpring.animation(keyPath: "transform.translation.x", from: lastOffset, to: 0, damping: 0.98, response: 0.20), forKey: "edgePeekRevert")
         collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
         peekImageView.removeFromSuperview()
         session.edgePeekImageView = nil
@@ -2414,7 +2373,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let width = max(collectionView.bounds.width, 1)
         let offset: CGFloat = direction > 0 ? -width : width
         let presentationX = (collectionView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? 0
-        let rawVelocity = Self.estimateVelocity(from: session.lastPeekOffset, at: session.lastPeekTime, to: presentationX, at: CACurrentMediaTime())
+        let rawVelocity = GridSpring.estimateVelocity(from: session.lastPeekOffset, at: session.lastPeekTime, to: presentationX, at: CACurrentMediaTime())
         let boundedVelocity = min(max(rawVelocity, -1600), 1600)
         let relativeVelocity = abs(offset - presentationX) > 1 ? boundedVelocity / (offset - presentationX) : 0
         let peekImageView = session.edgePeekImageView
@@ -2423,7 +2382,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         session.lastPeekTime = nil
 
         collectionView.wantsLayer = true
-        let spring = Self.springAnimation(keyPath: "transform.translation.x", from: presentationX, to: offset, damping: 0.98, response: 0.30, initialVelocity: relativeVelocity)
+        let spring = GridSpring.animation(keyPath: "transform.translation.x", from: presentationX, to: offset, damping: 0.98, response: 0.30, initialVelocity: relativeVelocity)
         collectionView.layer?.add(spring, forKey: "itemDragPageTurnOut")
         collectionView.layer?.setValue(offset, forKeyPath: "transform.translation.x")
         // The peek image (if one was already showing) rides out at the same
@@ -2438,7 +2397,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             let peekOffsetConstant: CGFloat = direction > 0 ? width : -width
             let peekCurrentX = (peekImageView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? (presentationX + peekOffsetConstant)
             let peekTarget = offset + peekOffsetConstant
-            let peekSpring = Self.springAnimation(keyPath: "transform.translation.x", from: peekCurrentX, to: peekTarget, damping: 0.98, response: 0.30, initialVelocity: relativeVelocity)
+            let peekSpring = GridSpring.animation(keyPath: "transform.translation.x", from: peekCurrentX, to: peekTarget, damping: 0.98, response: 0.30, initialVelocity: relativeVelocity)
             peekImageView.layer?.add(peekSpring, forKey: "itemDragPageTurnOut")
             peekImageView.layer?.setValue(peekTarget, forKeyPath: "transform.translation.x")
         }
@@ -2592,7 +2551,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // to 1.0.
         let currentScale = (layer.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat) ?? 1.06
         layer.setValue(1.0, forKeyPath: "transform.scale")
-        layer.add(Self.springAnimation(keyPath: "transform.scale", from: currentScale, to: 1.0, damping: 1.0, response: 0.18), forKey: "settleScale")
+        layer.add(GridSpring.animation(keyPath: "transform.scale", from: currentScale, to: 1.0, damping: 1.0, response: 0.18), forKey: "settleScale")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             Task { @MainActor in
@@ -2627,7 +2586,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // to 0.92 by a folder hover" reasoning applies to a cancel/revert.
         let currentScale = (layer.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat) ?? 1.06
         layer.setValue(1.0, forKeyPath: "transform.scale")
-        layer.add(Self.springAnimation(keyPath: "transform.scale", from: currentScale, to: 1.0, damping: 1.0, response: 0.2), forKey: "revertScale")
+        layer.add(GridSpring.animation(keyPath: "transform.scale", from: currentScale, to: 1.0, damping: 1.0, response: 0.2), forKey: "revertScale")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
             Task { @MainActor in
