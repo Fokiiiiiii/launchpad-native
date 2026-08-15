@@ -110,16 +110,30 @@ public enum CatalogSnapshotStore {
         sources: [ApplicationSource]
     ) -> [ApplicationRecord] {
         let sourceByID = Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0) })
+        // Resolve each source root once instead of once per record.
+        // `resolvingSymlinksInPath()` issues a filesystem call per path
+        // component, and there are only ever a handful of sources against
+        // hundreds of records — this was the dominant cost of a path check
+        // that runs on the launch path.
+        let resolvedRootByID = sourceByID.mapValues {
+            $0.rootURL.standardizedFileURL.resolvingSymlinksInPath().path
+        }
         return records
             .filter { record in
                 guard let source = sourceByID[record.sourceID],
+                      let resolvedRoot = resolvedRootByID[record.sourceID],
                       record.bundleURL.pathExtension == "app",
-                      isPath(record.bundleURL, inside: source.rootURL),
+                      isPath(record.bundleURL, insideResolvedRoot: resolvedRoot),
                       source.matches(bundleFilename: record.bundleURL.lastPathComponent)
                 else {
                     return false
                 }
 
+                // Deliberately `fileExists` and not a `resourceValues` lookup
+                // for existence: `URL` caches resource values, so a bundle
+                // deleted after the snapshot was taken can still answer from
+                // that cache and survive pruning. `CatalogSnapshotStoreTests`
+                // covers exactly this case.
                 var isDirectory: ObjCBool = false
                 guard FileManager.default.fileExists(
                     atPath: record.bundleURL.path,
@@ -170,8 +184,9 @@ public enum CatalogSnapshotStore {
         return Array(records.sorted { $0.id.value < $1.id.value }.prefix(maximumRecords))
     }
 
-    private static func isPath(_ bundleURL: URL, inside rootURL: URL) -> Bool {
-        let root = rootURL.standardizedFileURL.resolvingSymlinksInPath().path
+    /// - Parameter resolvedRoot: an already symlink-resolved root path, hoisted
+    ///   out of the per-record loop by the caller.
+    private static func isPath(_ bundleURL: URL, insideResolvedRoot root: String) -> Bool {
         let path = bundleURL.standardizedFileURL.resolvingSymlinksInPath().path
         if path == root { return true }
         return root == "/" ? path.hasPrefix("/") : path.hasPrefix(root + "/")

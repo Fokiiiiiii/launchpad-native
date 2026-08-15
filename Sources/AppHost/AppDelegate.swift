@@ -197,6 +197,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Restore the bounded last-known-good catalog before the first
             // frame. This path only reads JSON and cheap filesystem metadata;
             // the expensive Bundle/Security work remains in the background scan.
+            //
+            // Deliberately a plain synchronous call. Moving it to
+            // `await Task.detached { ... }.value` looks like it should help —
+            // the load costs ~60-85ms of a cold start — but it measurably made
+            // things worse (median cold start to first frame 287ms -> 400ms
+            // over three runs each). Awaiting the detached task immediately
+            // means the main actor still cannot proceed past this point, so
+            // nothing is gained in parallelism and the thread hop is pure
+            // added cost. If this is revisited, the win has to come from
+            // giving the main actor real work to do while the load runs, not
+            // from moving the load alone.
             let configuredSources = applicationSources()
             let scanner = ApplicationScanner(sources: configuredSources)
             self.scanner = scanner
