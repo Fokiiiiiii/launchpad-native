@@ -331,7 +331,13 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.reloadData()
         pageControl.numberOfPages = model.pages.count
         pageControl.currentPage = currentPage
-        updatePageControlBottomMargin()
+        // The bottom inset depends only on the Dock, never on the model, and
+        // computing it enumerates every window on the system plus a
+        // LaunchServices lookup. `model.onChange` routes here from 20-odd
+        // mutations (every icon move, folder edit, rename, catalog reconcile),
+        // so recomputing it here made a single drag-and-drop pay that cost.
+        // The paths where the Dock can actually differ — `viewDidAppear`,
+        // `viewDidLayout`, `refreshDockLayout` — still recompute it.
         prefetchAdjacentPageIcons()
     }
 

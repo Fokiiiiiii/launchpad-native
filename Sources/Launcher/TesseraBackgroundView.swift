@@ -221,9 +221,15 @@ final class TesseraBackgroundView: NSView {
         let displayID = (
             requestedScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
         )?.uint32Value ?? 0
-        let source = TesseraWallpaperImageCache.source(for: requestedScreen)
+        // Deliberately does not resolve the wallpaper source here just to log
+        // it. Source resolution enumerates every window on the system via
+        // `CGWindowListCopyWindowInfo` on the main thread, and the request
+        // below immediately resolves it again internally — so this log line
+        // was doubling the cost of every wallpaper request. The resolved
+        // source is still logged, with more detail (kind, window id, cache
+        // hit), by the cache's own "wallpaper descriptor" line.
         DiagnosticsLog.launcher.info(
-            "wallpaper request: mode=\(self.configuration.mode.rawValue, privacy: .public), sourceKind=\(source.kind.rawValue, privacy: .public), displayID=\(displayID, privacy: .public), resolvedURL=\(source.url?.path ?? "<unavailable>", privacy: .private), radius=\(radius, privacy: .public)"
+            "wallpaper request: mode=\(self.configuration.mode.rawValue, privacy: .public), displayID=\(displayID, privacy: .public), radius=\(radius, privacy: .public)"
         )
         wallpaperTask = Task { @MainActor [weak self] in
             let image = await TesseraWallpaperImageCache.blurredWallpaperAsync(
