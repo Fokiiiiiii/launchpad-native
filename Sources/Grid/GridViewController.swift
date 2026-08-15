@@ -2225,16 +2225,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     // MARK: Live reorder preview
 
     private func frameForSlot(_ slot: Int) -> NSRect {
-        let columns = max(model.gridSettings.columns, 1)
-        let hSpacing = CGFloat(model.gridSettings.horizontalSpacing)
-        let vSpacing = CGFloat(model.gridSettings.verticalSpacing)
-        let margin = CGFloat(model.gridSettings.pageMargins)
-        let cellSize = layout.currentCellSize
-        let column = slot % columns
-        let row = slot / columns
-        let x = margin + CGFloat(column) * (cellSize.width + hSpacing)
-        let y = margin + CGFloat(row) * (cellSize.height + vSpacing)
-        return NSRect(x: x, y: y, width: cellSize.width, height: cellSize.height)
+        GridSlotGeometry.frameForSlot(
+            slot,
+            columns: model.gridSettings.columns,
+            cellSize: layout.currentCellSize,
+            horizontalSpacing: CGFloat(model.gridSettings.horizontalSpacing),
+            verticalSpacing: CGFloat(model.gridSettings.verticalSpacing),
+            margin: CGFloat(model.gridSettings.pageMargins)
+        )
     }
 
     /// Real, confirmed report ("アプリを狙った位置に移動させるのがめちゃく
@@ -2262,23 +2260,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // every slot is occupied and the drop can legitimately land at the end
         // (`endItemDrag` already accepts `count` as a destination).
         let pageCount = model.pages[currentPage].count
-        let remainingCount = excludedIndex == nil ? pageCount : max(pageCount - 1, 0)
-        let columns = max(model.gridSettings.columns, 1)
-        let hSpacing = CGFloat(model.gridSettings.horizontalSpacing)
-        let vSpacing = CGFloat(model.gridSettings.verticalSpacing)
-        let margin = CGFloat(model.gridSettings.pageMargins)
-        let cellSize = layout.currentCellSize
-        let colStride = max(cellSize.width + hSpacing, 1)
-        let rowStride = max(cellSize.height + vSpacing, 1)
-
-        let rawColumn = Int(floor((point.x - margin) / colStride))
-        let clampedColumn = min(max(rawColumn, 0), columns - 1)
-        let rawRow = max(Int(floor((point.y - margin) / rowStride)), 0)
-        let slot = rawRow * columns + clampedColumn
-        // Past the last real slot (pointer over trailing empty cells) rounds
-        // down to "append at the end" — the row overshoot alone is absorbed
-        // by this final clamp.
-        return min(max(slot, 0), remainingCount)
+        return GridSlotGeometry.insertionSlot(
+            forPoint: point,
+            columns: model.gridSettings.columns,
+            cellSize: layout.currentCellSize,
+            horizontalSpacing: CGFloat(model.gridSettings.horizontalSpacing),
+            verticalSpacing: CGFloat(model.gridSettings.verticalSpacing),
+            margin: CGFloat(model.gridSettings.pageMargins),
+            occupiedSlots: excludedIndex == nil ? pageCount : max(pageCount - 1, 0)
+        )
     }
 
     /// Round 12 §8a, revised: real hysteresis around the *committed* slot,
@@ -2301,11 +2291,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             session.reorderTimer?.invalidate()
             return
         }
-        let committedFrame = frameForSlot(session.candidateSlot)
-        let dx = point.x - committedFrame.midX
-        let dy = point.y - committedFrame.midY
-        let radius = min(committedFrame.width, committedFrame.height) * Self.itemDragHysteresisFraction
-        guard dx * dx + dy * dy > radius * radius else {
+        guard GridSlotGeometry.exceedsHysteresis(
+            point: point,
+            committedFrame: frameForSlot(session.candidateSlot),
+            fraction: Self.itemDragHysteresisFraction
+        ) else {
             session.reorderTimer?.invalidate()
             return
         }
@@ -2350,7 +2340,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let items = model.pages[currentPage]
         var naturalPos = 0
         for originalIndex in items.indices where originalIndex != session.sourceIndexOnCurrentPage {
-            let previewSlot = naturalPos < session.candidateSlot ? naturalPos : naturalPos + 1
+            let previewSlot = GridSlotGeometry.previewSlot(naturalPosition: naturalPos, candidateSlot: session.candidateSlot)
             naturalPos += 1
             guard let cell = collectionView.item(at: IndexPath(item: originalIndex, section: 0)) as? GridCellItem,
                   let originalFrame = layout.layoutAttributesForItem(at: IndexPath(item: originalIndex, section: 0))?.frame,
@@ -2434,8 +2424,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let items = model.pages[currentPage]
         for index in items.indices where index != session.sourceIndexOnCurrentPage {
             guard let frame = layout.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { continue }
-            let inset = min(frame.width, frame.height) * Self.itemDragFolderZoneInset
-            let centerZone = frame.insetBy(dx: inset, dy: inset)
+            let centerZone = GridSlotGeometry.folderZone(in: frame, inset: Self.itemDragFolderZoneInset)
             if centerZone.contains(point) { return index }
         }
         return nil
