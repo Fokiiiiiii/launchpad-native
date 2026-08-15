@@ -1110,7 +1110,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // Longer than both the reorder debounce and folder dwell delay, so
         // whichever candidate applies has already committed by the time
         // mouseUp fires — matching a real, deliberate (not flicked) drag.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.itemDragFolderHoverDelay + 0.15) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + ItemDrag.itemDragFolderHoverDelay + 0.15) { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseUp, at: targetPoint, in: self.collectionView))
@@ -1162,7 +1162,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDragged, at: point, in: collectionView))
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.itemDragFolderHoverDelay + 0.15) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + ItemDrag.itemDragFolderHoverDelay + 0.15) { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseUp, at: secondEnd, in: self.collectionView))
@@ -1627,105 +1627,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     // machinery), and giving `FolderContentsViewController`'s own grid the
     // same rich system (it keeps its prior, simpler reorder behavior).
 
-    /// `@unchecked Sendable`: `Timer.scheduledTimer`'s completion closure is
-    /// technically a non-isolated context by Swift 6's rules, but in
-    /// practice it always fires on the main run loop (the same actor this
-    /// entire view controller is isolated to) — there is no real
-    /// cross-thread access here, just the compiler unable to see that a
-    /// `Timer` scheduled from `@MainActor` code stays on that same thread.
-    private final class ItemDragSession: @unchecked Sendable {
-        let sourcePage: Int
-        let sourceOriginalIndex: Int
-        let draggedItem: LayoutItem
-        let originalFrame: NSRect
-        /// The floating view's frame, in the top-level host coordinates, set exactly
-        /// once at creation and never reassigned — see `updateItemDrag`'s
-        /// doc comment for why: all *movement* after that happens purely
-        /// via `transform.translation.x/y`, matching every other continuous
-        /// drag in this codebase (page-drag, reorder preview). Needed here
-        /// as the fixed baseline those translation deltas are computed from.
-        var floatingViewOriginalFrameInHost: NSRect = .zero
-        /// Offset from the cell's origin to where the user actually grabbed
-        /// it — respected while following the cursor so the icon doesn't
-        /// jump to be centered under the pointer (apple-design's direct-
-        /// manipulation guidance).
-        let grabOffset: NSPoint
-        var floatingView: NSView?
-        weak var floatingViewHost: NSView?
-        var candidateSlot: Int
-        var pendingRawSlot: Int
-        var folderCandidateOriginalIndex: Int?
-        var pendingRawFolderCandidateIndex: Int?
-        var edgeDirection: Int = 0
-        /// Last raw drag point (collectionView-local), refreshed on every
-        /// `updateItemDrag` call — reused by `commitPageTurnDuringDrag` to
-        /// re-evaluate candidates on the new page without needing to derive
-        /// a point back out of the floating view's (now `.frame`-immutable)
-        /// position.
-        var lastPoint: NSPoint = .zero
-        var reorderTimer: Timer?
-        var folderTimer: Timer?
-        var edgeTimer: Timer?
-        /// Round 12 §8b: the incoming-page preview shown while the pointer
-        /// dwells in the edge zone, before the dwell timer actually commits
-        /// a page turn. `nil` whenever the pointer isn't currently in an
-        /// edge zone.
-        var edgePeekImageView: NSImageView?
-        /// Last offset/timestamp applied to the peek — reused by §8c to
-        /// approximate a release velocity when the page-turn commit spring
-        /// re-targets a peek that's still easing.
-        var lastPeekOffset: CGFloat?
-        var lastPeekTime: CFTimeInterval?
-        /// Real, confirmed report ("グループ化しようとするとアプリが逃げる
-        /// ...わかりやすくできない？"): a standalone overlay (same pattern
-        /// as `floatingView`/`edgePeekImageView` — never a sublayer added to
-        /// a reusable `GridCellItem`, since `prepareForReuse` only resets
-        /// that cell's own transform/opacity/animations, not arbitrary
-        /// sublayers someone else added) that shows the folder drop zone's
-        /// bounds and a hover-progress sweep. `nil` whenever the pointer
-        /// isn't currently over another app's center zone.
-        var folderZoneIndicatorView: NSView?
-        /// Where the dragged item currently sits *on the page being shown*, or
-        /// `nil` once a mid-drag page turn has carried the drag onto a page the
-        /// item isn't part of.
-        ///
-        /// `sourceOriginalIndex` is a `let` describing the item's index on its
-        /// **origin** page, which is what `endItemDrag` needs for the model
-        /// mutation. Everything that reasons about the *currently displayed*
-        /// page — which cell to exclude from the reorder preview, which cells
-        /// can be folder targets, how many slots exist — was reading that same
-        /// value, so after `commitPageTurnDuringDrag` it pointed at an
-        /// unrelated app on the new page: the preview excluded the wrong cell
-        /// (shifting every following slot by one), that app could not be made
-        /// into a folder, and the slot count was short by one so the item could
-        /// not be dropped at the end. `commitPageTurnDuringDrag` already resets
-        /// `pendingRawSlot`/`candidateSlot`/`edgeDirection`/folder-candidate
-        /// state for the new page for exactly this class of reason; this is the
-        /// remaining piece of that same reset.
-        var sourceIndexOnCurrentPage: Int?
-        let generation: Int
-
-        init(sourcePage: Int, sourceOriginalIndex: Int, draggedItem: LayoutItem, originalFrame: NSRect, grabOffset: NSPoint, generation: Int) {
-            self.sourcePage = sourcePage
-            self.sourceOriginalIndex = sourceOriginalIndex
-            self.draggedItem = draggedItem
-            self.originalFrame = originalFrame
-            self.grabOffset = grabOffset
-            self.candidateSlot = sourceOriginalIndex
-            self.pendingRawSlot = sourceOriginalIndex
-            self.sourceIndexOnCurrentPage = sourceOriginalIndex
-            self.generation = generation
-        }
-
-        func invalidateTimers() {
-            reorderTimer?.invalidate()
-            folderTimer?.invalidate()
-            edgeTimer?.invalidate()
-        }
-    }
-
     private var pendingItemPress: (indexPath: IndexPath, startPoint: NSPoint)?
-    private var activeItemDrag: ItemDragSession?
+    private var activeItemDrag: ItemDrag.ItemDragSession?
     /// A mouse click tracks `collectionView.selectionIndexPaths` (needed for
     /// drag/launch/context-menu targeting) but must NOT draw the visible
     /// highlight ring — a real user found the box+glow that appeared around
@@ -1742,65 +1645,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// stale velocity estimate. Cleared in `endItemDrag`/`revertItemDrag`.
     private var lastAnimatedValueByLayer: [ObjectIdentifier: (x: CGFloat, xTime: CFTimeInterval, y: CGFloat, yTime: CFTimeInterval)] = [:]
 
-    private static let itemDragThresholdDistance: CGFloat = 6
-    private static let itemDragEdgeZoneWidth: CGFloat = 70
-    private static let itemDragEdgeHoverDelay: TimeInterval = 0.45
-    /// Real, confirmed report ("フォルダ判定をもう少し遅く"): 0.5s let a
-    /// brief pass-over during reordering register as folder intent too
-    /// easily. Raised to 0.7s — still well under a full second (doesn't
-    /// read as unresponsive) but requires more deliberate dwell before
-    /// committing. The hover-progress ring's own sweep duration and the
-    /// debug-hook wait both read this constant directly, so both track the
-    /// new value automatically.
-    private static let itemDragFolderHoverDelay: TimeInterval = 0.7
-    /// iOS's own folder-creation highlight reads as "a little more than the
-    /// icon," not a separate shape — noticeably but not dramatically larger
-    /// than the icon it wraps. 1.18x keeps the padding visible without the
-    /// indicator ballooning into neighboring cells at tight column counts.
-    private static let itemDragFolderZoneIndicatorScale: CGFloat = 1.18
-    /// Deliberately rounder than `GridCellItem`'s own app-icon squircle
-    /// ratio (0.236, `applyIconSize`) — this is a plain rounded-square
-    /// backdrop, not an icon mask, and a plumper curve reads as
-    /// "background" rather than "blank icon."
-    private static let itemDragFolderZoneIndicatorCornerRatio: CGFloat = 0.28
-    /// Real, confirmed report ("上からやってもなんの反応もない"): now that
-    /// the 2D hysteresis radius below is the sole anti-chatter gate (see its
-    /// doc comment), this additional time delay only added pure lag on top
-    /// — dropped to 0. The `Timer` mechanism itself is unchanged so a future
-    /// tuning pass can reintroduce a nonzero value without restructuring
-    /// anything.
-    private static let itemDragReorderDebounce: TimeInterval = 0.0
-    private static let itemDragFolderZoneInset: CGFloat = 0.2 // ~60% center region
-    /// Round 12 §8a: the pointer must move this fraction of a cell's own
-    /// short side past the committed slot's center before the candidate slot
-    /// is allowed to change at all — a real hysteresis band (spec 7.3)
-    /// around the current selection, replacing the old "any raw nearest-slot
-    /// change restarts the debounce timer" behavior, which could still
-    /// flicker if the pointer sat right on a cell boundary. Real, confirmed
-    /// report ("狙った位置にアプリを置いてもそこにあるアプリが動かない"):
-    /// judging this from `point.x` alone made straight vertical drags onto
-    /// a different row never satisfy the crossing condition — this is now a
-    /// straight-line distance from the committed cell's center, so movement
-    /// in any direction (including pure vertical) can cross it. Raised
-    /// slightly from 0.15 to 0.18 alongside dropping the debounce above to
-    /// 0 — with hysteresis now the *only* anti-chatter layer (instead of
-    /// splitting the job with a time delay), a touch more radius keeps
-    /// boundary flicker damped without feeling sluggish.
-    private static let itemDragHysteresisFraction: CGFloat = 0.18
-    /// Real, confirmed report ("ページ端についてその先へ無理や進もうとし
-    /// た時に起きるアニメーションが過剰すぎる"): the old linear
-    /// `proximity * 30` formula meant the preview kept growing the harder
-    /// the pointer pushed toward the edge, with no natural ceiling short of
-    /// the zone's own zero/one clamp. `updateEdgePeek` now runs the
-    /// penetration distance through the existing `rubberBand` helper
-    /// (already used for the trackpad page-swipe's own edge resistance)
-    /// instead — overshoot-proportional resistance rather than a hard
-    /// linear ramp. This constant is the rubber band's `dimension`
-    /// term (how quickly it saturates), not a maximum offset: measured
-    /// output for `itemDragEdgeZoneWidth`(70)-sized penetration is ≈14.8pt,
-    /// and ≈5.8pt at 14pt of penetration — both comfortably below the old
-    /// linear formula's up-to-30pt sweep.
-    private static let itemDragEdgePeekResistanceDimension: CGFloat = 24
 
     private func handleItemMouseDown(indexPath: IndexPath, event: NSEvent) {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(indexPath.item) else { return }
@@ -1856,7 +1700,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
         guard let pending = pendingItemPress else { return }
         let distance = hypot(point.x - pending.startPoint.x, point.y - pending.startPoint.y)
-        guard distance >= Self.itemDragThresholdDistance else { return }
+        guard distance >= ItemDrag.itemDragThresholdDistance else { return }
         beginItemDrag(indexPath: pending.indexPath, pressPoint: pending.startPoint, currentPoint: point)
     }
 
@@ -1905,7 +1749,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let item = model.pages[currentPage][indexPath.item]
         itemDragGeneration += 1
         let grabOffset = NSPoint(x: pressPoint.x - attributes.frame.minX, y: pressPoint.y - attributes.frame.minY)
-        let session = ItemDragSession(
+        let session = ItemDrag.ItemDragSession(
             sourcePage: currentPage,
             sourceOriginalIndex: indexPath.item,
             draggedItem: item,
@@ -1921,26 +1765,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         armItemDragSafetyNets(generation: session.generation)
     }
 
-    /// Real, confirmed bug found via a genuine (not simulated) trackpad
-    /// drag on this exact codebase: `mouseDown` -> `mouseDragged` ->
-    /// `beginItemDrag` all fired correctly, but `mouseUp` never arrived —
-    /// AppKit's per-window mouse-tracking continuity (the mechanism
-    /// `GridCollectionView`'s override relies on) isn't guaranteed if the
-    /// pointer leaves the window's bounds, key status changes, or a handful
-    /// of other real-world edge cases a synthetic in-bounds test never hits.
-    /// Without a way out, `activeItemDrag` stayed non-nil forever — the
-    /// floating icon stuck on screen, and every subsequent
-    /// `handleItemMouseDown` treating the grid as still mid-drag,
-    /// effectively freezing all grid interaction ("操作が効かない"). Two
-    /// independent nets, matching the page-drag machinery's own established
-    /// pattern:
-    ///  1. A fixed, generous fallback timer (far longer than any real
-    ///     drag) that force-reverts no matter what.
-    ///  2. A *global* mouse-up monitor — catches a real mouseUp AppKit
-    ///     delivered somewhere else entirely (a different view/window)
-    ///     instead of back to `GridCollectionView`, which the per-window
-    ///     tracking continuity alone can miss.
-    private static let itemDragSafetyNetTimeout: TimeInterval = 15.0
     private var itemDragGlobalMouseUpMonitor: EventMonitorToken?
 
     /// Removes the global mouse-up fallback as soon as an item drag settles.
@@ -1955,7 +1779,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     private func armItemDragSafetyNets(generation: Int) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.itemDragSafetyNetTimeout) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + ItemDrag.itemDragSafetyNetTimeout) { [weak self] in
             Task { @MainActor in
                 guard let self, let session = self.activeItemDrag, session.generation == generation else { return }
                 DiagnosticsLog.grid.notice("armItemDragSafetyNets: fallback timeout fired, force-reverting")
@@ -1986,7 +1810,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         return image
     }
 
-    private func createFloatingDragView(session: ItemDragSession) {
+    private func createFloatingDragView(session: ItemDrag.ItemDragSession) {
         guard let cell = collectionView.item(at: IndexPath(item: session.sourceOriginalIndex, section: 0)) as? GridCellItem else { return }
         let host = view.window?.contentView ?? view
         let image = snapshotImage(of: cell.view)
@@ -2060,7 +1884,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// touching `.frame` after initial placement and driving all movement
     /// through the `transform.translation.x/y` keypaths instead, which
     /// compose independently of `transform.scale` — this now does the same.
-    private func updateItemDrag(session: ItemDragSession, point: NSPoint) {
+    private func updateItemDrag(session: ItemDrag.ItemDragSession, point: NSPoint) {
         session.lastPoint = point
         guard let floatingView = session.floatingView, let layer = floatingView.layer else { return }
         // Real, confirmed bug found via genuine CGEvent-driven drag testing
@@ -2179,7 +2003,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// the pointer moved vertically. Judging by straight-line distance from
     /// the committed cell's center instead works for movement in any
     /// direction.
-    private func evaluateReorderCandidate(session: ItemDragSession, point: NSPoint) {
+    private func evaluateReorderCandidate(session: ItemDrag.ItemDragSession, point: NSPoint) {
         guard let rawSlot = insertionSlot(forPoint: point, excluding: session.sourceIndexOnCurrentPage) else { return }
         guard rawSlot != session.candidateSlot else {
             session.reorderTimer?.invalidate()
@@ -2188,7 +2012,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         guard GridSlotGeometry.exceedsHysteresis(
             point: point,
             committedFrame: frameForSlot(session.candidateSlot),
-            fraction: Self.itemDragHysteresisFraction
+            fraction: ItemDrag.itemDragHysteresisFraction
         ) else {
             session.reorderTimer?.invalidate()
             return
@@ -2201,7 +2025,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // `session.reorderTimer`'s existence) is kept as-is so a future
         // tuning pass can reintroduce a nonzero debounce without touching
         // the surrounding structure.
-        session.reorderTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragReorderDebounce, repeats: false) { [weak self, weak session] _ in
+        session.reorderTimer = Timer.scheduledTimer(withTimeInterval: ItemDrag.itemDragReorderDebounce, repeats: false) { [weak self, weak session] _ in
             Task { @MainActor [weak self, weak session] in
                 // `activeItemDrag === session` matters as much as the
                 // generation check: `itemDragGeneration` only advances in
@@ -2218,7 +2042,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    private func commitReorderCandidate(session: ItemDragSession, slot: Int) {
+    private func commitReorderCandidate(session: ItemDrag.ItemDragSession, slot: Int) {
         guard slot != session.candidateSlot else { return }
         session.candidateSlot = slot
         animateReorderPreview(session: session)
@@ -2229,7 +2053,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// arrangement changes here (via each live cell view's own layer
     /// transform); `model.pages` itself is untouched until the drop
     /// actually commits in `endItemDrag`.
-    private func animateReorderPreview(session: ItemDragSession) {
+    private func animateReorderPreview(session: ItemDrag.ItemDragSession) {
         guard model.pages.indices.contains(currentPage) else { return }
         let items = model.pages[currentPage]
         var naturalPos = 0
@@ -2313,18 +2137,18 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// `evaluateFolderCandidate` so `updateItemDrag` can also consult it
     /// *before* evaluating the reorder candidate — see that method's doc
     /// comment for why the ordering matters.
-    private func folderZoneTarget(session: ItemDragSession, point: NSPoint) -> Int? {
+    private func folderZoneTarget(session: ItemDrag.ItemDragSession, point: NSPoint) -> Int? {
         guard case .app = session.draggedItem, model.pages.indices.contains(currentPage) else { return nil }
         let items = model.pages[currentPage]
         for index in items.indices where index != session.sourceIndexOnCurrentPage {
             guard let frame = layout.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { continue }
-            let centerZone = GridSlotGeometry.folderZone(in: frame, inset: Self.itemDragFolderZoneInset)
+            let centerZone = GridSlotGeometry.folderZone(in: frame, inset: ItemDrag.itemDragFolderZoneInset)
             if centerZone.contains(point) { return index }
         }
         return nil
     }
 
-    private func evaluateFolderCandidate(session: ItemDragSession, point: NSPoint, zoneTarget: Int?) {
+    private func evaluateFolderCandidate(session: ItemDrag.ItemDragSession, point: NSPoint, zoneTarget: Int?) {
         guard zoneTarget != session.pendingRawFolderCandidateIndex else { return }
         session.pendingRawFolderCandidateIndex = zoneTarget
         session.folderTimer?.invalidate()
@@ -2340,7 +2164,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // `commitFolderCandidate` fires 0.5s later.
         showFolderZoneIndicator(session: session, targetIndex: zoneTarget)
         beginFloatingViewFolderPull(session: session, engaged: true)
-        session.folderTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragFolderHoverDelay, repeats: false) { [weak self, weak session] _ in
+        session.folderTimer = Timer.scheduledTimer(withTimeInterval: ItemDrag.itemDragFolderHoverDelay, repeats: false) { [weak self, weak session] _ in
             Task { @MainActor [weak self, weak session] in
                 // See `evaluateReorderCandidate`'s guard for why the session
                 // identity check is required in addition to the generation.
@@ -2352,7 +2176,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    private func commitFolderCandidate(session: ItemDragSession, index: Int) {
+    private func commitFolderCandidate(session: ItemDrag.ItemDragSession, index: Int) {
         guard session.folderCandidateOriginalIndex != index else { return }
         clearFolderCandidateHighlight(session: session)
         session.folderCandidateOriginalIndex = index
@@ -2372,7 +2196,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         layer.setValue(1.06, forKeyPath: "transform.scale")
     }
 
-    private func clearFolderCandidate(session: ItemDragSession) {
+    private func clearFolderCandidate(session: ItemDrag.ItemDragSession) {
         session.pendingRawFolderCandidateIndex = nil
         session.folderTimer?.invalidate()
         clearFolderCandidateHighlight(session: session)
@@ -2388,7 +2212,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// displacement) so the target app being hovered over never gets
     /// nudged aside by a reorder candidate change while the user is trying
     /// to hold the pointer over it.
-    private func suppressReorderForFolderZone(session: ItemDragSession) {
+    private func suppressReorderForFolderZone(session: ItemDrag.ItemDragSession) {
         session.reorderTimer?.invalidate()
         // Keeps `evaluateReorderCandidate`'s "same as last pending raw slot"
         // guard from swallowing a real re-evaluation once the pointer
@@ -2409,7 +2233,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         commitReorderCandidate(session: session, slot: identitySlot)
     }
 
-    private func clearFolderCandidateHighlight(session: ItemDragSession) {
+    private func clearFolderCandidateHighlight(session: ItemDrag.ItemDragSession) {
         guard let index = session.folderCandidateOriginalIndex else { return }
         session.folderCandidateOriginalIndex = nil
         guard let cell = collectionView.item(at: IndexPath(item: index, section: 0)) as? GridCellItem else { return }
@@ -2428,7 +2252,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// `animateLayerTranslation` already uses) so this reads smoothly even
     /// if the initial 1.0→1.06 lift spring from `createFloatingDragView`
     /// hasn't finished yet.
-    private func beginFloatingViewFolderPull(session: ItemDragSession, engaged: Bool) {
+    private func beginFloatingViewFolderPull(session: ItemDrag.ItemDragSession, engaged: Bool) {
         guard let layer = session.floatingView?.layer else { return }
         let liftScale: CGFloat = 1.06
         let pullScale: CGFloat = 0.92
@@ -2452,7 +2276,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// the full cell's center 60%) is intentionally left wider than what's
     /// drawn here — iOS does the same: the hit region is generous, the
     /// visual feedback is tight to the icon.
-    private func showFolderZoneIndicator(session: ItemDragSession, targetIndex: Int) {
+    private func showFolderZoneIndicator(session: ItemDrag.ItemDragSession, targetIndex: Int) {
         clearFolderZoneIndicator(session: session, animated: false)
         guard let cell = collectionView.item(at: IndexPath(item: targetIndex, section: 0)) as? GridCellItem else { return }
         let host = session.floatingViewHost ?? view
@@ -2462,7 +2286,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let iconFrameInHost = cell.view.convert(cell.iconFrame, to: host)
         guard iconFrameInHost.width > 0, iconFrameInHost.height > 0 else { return }
 
-        let indicatorSize = iconFrameInHost.width * Self.itemDragFolderZoneIndicatorScale
+        let indicatorSize = iconFrameInHost.width * ItemDrag.itemDragFolderZoneIndicatorScale
         let zoneRectInHost = NSRect(
             x: iconFrameInHost.midX - indicatorSize / 2,
             y: iconFrameInHost.midY - indicatorSize / 2,
@@ -2474,7 +2298,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         indicator.wantsLayer = true
         indicator.clipsToBounds = false
         indicator.layer?.masksToBounds = false
-        let cornerRadius = indicatorSize * Self.itemDragFolderZoneIndicatorCornerRatio
+        let cornerRadius = indicatorSize * ItemDrag.itemDragFolderZoneIndicatorCornerRatio
         indicator.layer?.cornerRadius = cornerRadius
         indicator.layer?.cornerCurve = .continuous
         // A soft filled backdrop, not a bordered box — iOS's own folder
@@ -2520,7 +2344,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let sweep = CABasicAnimation(keyPath: "strokeEnd")
         sweep.fromValue = 0
         sweep.toValue = 1
-        sweep.duration = Self.itemDragFolderHoverDelay
+        sweep.duration = ItemDrag.itemDragFolderHoverDelay
         sweep.timingFunction = CAMediaTimingFunction(name: .linear)
         sweep.isRemovedOnCompletion = false
         sweep.fillMode = .forwards
@@ -2528,7 +2352,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         progressRing.add(sweep, forKey: "folderHoverProgress")
     }
 
-    private func clearFolderZoneIndicator(session: ItemDragSession, animated: Bool = true) {
+    private func clearFolderZoneIndicator(session: ItemDrag.ItemDragSession, animated: Bool = true) {
         guard let indicator = session.folderZoneIndicatorView else { return }
         session.folderZoneIndicatorView = nil
         guard animated else {
@@ -2553,12 +2377,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// indicator move, matching "掴んだアイコンまでページと一緒に流しては
     /// いけない". First/last page gets a small resistance nudge instead
     /// (spec 10), reusing the page-drag machinery's own `rubberBand` helper.
-    private func evaluateEdgeCandidate(session: ItemDragSession, point: NSPoint) {
+    private func evaluateEdgeCandidate(session: ItemDrag.ItemDragSession, point: NSPoint) {
         let width = max(collectionView.bounds.width, 1)
         var direction = 0
-        if point.x < Self.itemDragEdgeZoneWidth, currentPage > 0 {
+        if point.x < ItemDrag.itemDragEdgeZoneWidth, currentPage > 0 {
             direction = -1
-        } else if point.x > width - Self.itemDragEdgeZoneWidth, currentPage < model.pages.count - 1 {
+        } else if point.x > width - ItemDrag.itemDragEdgeZoneWidth, currentPage < model.pages.count - 1 {
             direction = 1
         }
 
@@ -2567,7 +2391,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         session.edgeTimer?.invalidate()
         guard direction != 0 else { return }
         let committedDirection = direction
-        session.edgeTimer = Timer.scheduledTimer(withTimeInterval: Self.itemDragEdgeHoverDelay, repeats: false) { [weak self, weak session] _ in
+        session.edgeTimer = Timer.scheduledTimer(withTimeInterval: ItemDrag.itemDragEdgeHoverDelay, repeats: false) { [weak self, weak session] _ in
             Task { @MainActor [weak self, weak session] in
                 // See `evaluateReorderCandidate`'s guard for why session
                 // identity is checked alongside the generation.
@@ -2593,9 +2417,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// transparent bitmap from a collection view that was never actually
     /// hosted in a real window) — rather than inventing a second snapshot
     /// mechanism for this one.
-    private func updateEdgePeek(session: ItemDragSession, point: NSPoint) {
+    private func updateEdgePeek(session: ItemDrag.ItemDragSession, point: NSPoint) {
         let width = max(collectionView.bounds.width, 1)
-        let zone = Self.itemDragEdgeZoneWidth
+        let zone = ItemDrag.itemDragEdgeZoneWidth
         // `penetration`: raw distance (0...zone) the pointer has pushed past
         // the edge zone's own outer boundary — not yet normalized to 0...1.
         // Fed through `rubberBand` below instead of a linear proportion (see
@@ -2633,7 +2457,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // uses at its own edges — overshoot-proportional resistance
         // instead of the old linear `proximity * 30` ramp that kept
         // growing the harder the pointer pushed.
-        let dampedOffset = Self.rubberBand(penetration, dimension: Self.itemDragEdgePeekResistanceDimension)
+        let dampedOffset = Self.rubberBand(penetration, dimension: ItemDrag.itemDragEdgePeekResistanceDimension)
         let previewOffset = -dampedOffset * CGFloat(direction)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -2656,7 +2480,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// without an accompanying commit, so it needs its own settle animation
     /// (the page-turn commit path in `commitPageTurnDuringDrag` handles its
     /// own transition instead of going through this).
-    private func clearEdgePeek(session: ItemDragSession) {
+    private func clearEdgePeek(session: ItemDrag.ItemDragSession) {
         guard let peekImageView = session.edgePeekImageView else { return }
         let lastOffset = session.lastPeekOffset ?? 0
         collectionView.layer?.add(Self.springAnimation(keyPath: "transform.translation.x", from: lastOffset, to: 0, damping: 0.98, response: 0.20), forKey: "edgePeekRevert")
@@ -2670,7 +2494,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     /// (the page-turn commit path in `commitPageTurnDuringDrag` handles its
 
-    private func commitPageTurnDuringDrag(session: ItemDragSession, direction: Int) {
+    private func commitPageTurnDuringDrag(session: ItemDrag.ItemDragSession, direction: Int) {
         let targetPage = currentPage + direction
         guard model.pages.indices.contains(targetPage) else { return }
         DiagnosticsLog.grid.notice("commitPageTurnDuringDrag: page \(self.currentPage, privacy: .public) -> \(targetPage, privacy: .public)")
@@ -2772,7 +2596,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     // MARK: Drop / settle / cancel
 
-    private func endItemDrag(session: ItemDragSession) {
+    private func endItemDrag(session: ItemDrag.ItemDragSession) {
         disarmItemDragSafetyNet()
         session.invalidateTimers()
         activeItemDrag = nil
@@ -2823,7 +2647,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// the floating view's never-reassigned `.frame`, not by touching
     /// `.frame` itself (see that method's doc comment for why mixing the
     /// two was a real, confirmed bug).
-    private func settleFloatingView(session: ItemDragSession) {
+    private func settleFloatingView(session: ItemDrag.ItemDragSession) {
         guard let floatingView = session.floatingView, let layer = floatingView.layer else {
             collectionView.reloadData()
             return
@@ -2862,7 +2686,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// Spec 13.2/13.3: invalid drop or cancel — spring back to the original
     /// cell (same transform-only approach as `settleFloatingView`), undo
     /// any reorder preview, no model mutation.
-    private func revertItemDrag(session: ItemDragSession) {
+    private func revertItemDrag(session: ItemDrag.ItemDragSession) {
         disarmItemDragSafetyNet()
         session.invalidateTimers()
         activeItemDrag = nil
