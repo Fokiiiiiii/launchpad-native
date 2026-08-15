@@ -13,6 +13,27 @@ import Persistence
 /// changed in response to specific reports.
 @MainActor
 enum ItemDrag {
+    /// Which slot the dragged item occupies on `page`, or `nil` if it is not
+    /// on that page at all.
+    ///
+    /// A drag can carry the pointer across page turns while the item itself
+    /// stays on the page it was picked up from. Everything that reasons about
+    /// the page currently in view — which cell to leave out of the reorder
+    /// preview, which cells may become folder targets, how many slots a drop
+    /// can choose between — needs this rather than the item's origin index.
+    ///
+    /// Both directions matter. Reported bug ("次のページまで持っていって
+    /// 戻すと元の位置に同じアプリが出てきて増殖する"): returning to the
+    /// origin page must restore the exclusion, or the item's own cell is laid
+    /// out and drawn again beneath the floating icon still under the cursor.
+    nonisolated static func sourceIndex(
+        onPage page: Int,
+        sourcePage: Int,
+        sourceOriginalIndex: Int
+    ) -> Int? {
+        page == sourcePage ? sourceOriginalIndex : nil
+    }
+
     /// `@unchecked Sendable`: `Timer.scheduledTimer`'s completion closure is
     /// technically a non-isolated context by Swift 6's rules, but in
     /// practice it always fires on the main run loop (the same actor this

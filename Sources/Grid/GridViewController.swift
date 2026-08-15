@@ -2571,11 +2571,33 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 session.pendingRawSlot = -1
                 session.candidateSlot = self.model.pages.indices.contains(targetPage) ? self.model.pages[targetPage].count : 0
                 session.edgeDirection = 0
-                // The dragged item lives on its origin page, not this one, so
-                // nothing on the new page should be excluded from the reorder
-                // preview or from folder targeting. See the property's own doc
-                // comment for the three concrete misbehaviours this prevents.
-                session.sourceIndexOnCurrentPage = nil
+                // Which slot — if any — the dragged item occupies on the page
+                // now in view. On any other page it occupies none, so nothing
+                // there should be excluded from the reorder preview or from
+                // folder targeting. Returning to its *origin* page has to
+                // restore the exclusion: a user-reported bug ("次のページまで
+                // 持っていって戻すと元の位置に同じアプリが出てきて増殖する")
+                // came from clearing this unconditionally — back on the origin
+                // page the item was no longer excluded, so its own cell was
+                // laid out and drawn again underneath the floating icon the
+                // user was still holding, reading as a duplicate.
+                session.sourceIndexOnCurrentPage = ItemDrag.sourceIndex(
+                    onPage: targetPage,
+                    sourcePage: session.sourcePage,
+                    sourceOriginalIndex: session.sourceOriginalIndex
+                )
+                // `reloadData` above rebuilds every cell, and `prepareForReuse`
+                // resets the layer opacity `beginItemDrag` used to hide the
+                // dragged item's own cell. Back on the origin page that cell
+                // exists again and would draw at full opacity underneath the
+                // floating icon, so re-apply the same hiding here. Layer
+                // opacity, never `isHidden` — see `beginItemDrag` for the
+                // event-delivery regression that caused.
+                if let indexOnCurrentPage = session.sourceIndexOnCurrentPage {
+                    self.collectionView
+                        .item(at: IndexPath(item: indexOnCurrentPage, section: 0))?
+                        .view.layer?.opacity = 0
+                }
                 // Real, confirmed latent bug (found while wiring up the
                 // folder zone indicator, not user-reported): this function
                 // already resets pendingRawSlot/candidateSlot/edgeDirection

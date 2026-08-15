@@ -190,3 +190,33 @@ private final class FixedCountDataSource: NSObject, NSCollectionViewDataSource {
     // A corner of the cell must not count as a folder drop.
     #expect(!zone.contains(CGPoint(x: frame.minX + 1, y: frame.minY + 1)))
 }
+
+// MARK: dragged item's slot across page turns
+
+/// Reported bug: dragging an app to the next page and back made a duplicate of
+/// it appear at its original position. Carrying the drag off its origin page
+/// correctly stops excluding that slot, but coming *back* has to start
+/// excluding it again — otherwise the item's own cell is drawn underneath the
+/// floating icon the user is still holding.
+@Test func draggedItemIsExcludedAgainWhenTheDragReturnsToItsOriginPage() {
+    let sourcePage = 1
+    let sourceIndex = 5
+
+    // Away from the origin page: nothing to exclude.
+    #expect(ItemDrag.sourceIndex(onPage: 0, sourcePage: sourcePage, sourceOriginalIndex: sourceIndex) == nil)
+    #expect(ItemDrag.sourceIndex(onPage: 2, sourcePage: sourcePage, sourceOriginalIndex: sourceIndex) == nil)
+
+    // Back on the origin page: the item occupies its original slot again.
+    #expect(ItemDrag.sourceIndex(onPage: sourcePage, sourcePage: sourcePage, sourceOriginalIndex: sourceIndex) == sourceIndex)
+}
+
+/// The whole round trip, in the order a real drag performs it.
+@Test func aPageTurnRoundTripEndsWithTheSameExclusionItStartedWith() {
+    let sourcePage = 0
+    let sourceIndex = 3
+    let visited = [sourcePage, 1, 2, 1, sourcePage]
+    let exclusions = visited.map {
+        ItemDrag.sourceIndex(onPage: $0, sourcePage: sourcePage, sourceOriginalIndex: sourceIndex)
+    }
+    #expect(exclusions == [sourceIndex, nil, nil, nil, sourceIndex])
+}
