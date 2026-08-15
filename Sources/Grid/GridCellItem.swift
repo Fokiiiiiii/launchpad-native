@@ -135,6 +135,31 @@ final class GridCellItem: NSCollectionViewItem {
         applyVisualTransforms()
     }
 
+    /// Re-applies the icon geometry to a cell that is already configured.
+    ///
+    /// `configureAsApp`/`configureAsFolder` bake in whatever size was current
+    /// when the cell was built, and nothing revisits that until the cell is
+    /// rebuilt. A cell built before the grid's own layout settled therefore
+    /// keeps the pre-settle size until the next `reloadData()` — on a first
+    /// launch that reload is the full catalog scan finishing a second or two
+    /// later, so the icons visibly shrink long after the window is on screen.
+    /// This lets the controller correct live cells in place instead.
+    ///
+    /// Reports whether anything actually changed, so the caller can skip the
+    /// extra layout pass when every cell was already the right size.
+    @discardableResult
+    func refreshIconSize(_ size: Double, visualScale: Double) -> Bool {
+        let previous = displayedIconSizeValue
+        applyIconSize(size, visualScale: visualScale)
+        guard abs(displayedIconSizeValue - previous) > 0.5 else { return false }
+        if let hosting = folderHostingView, !hosting.isHidden {
+            // The folder mosaic is SwiftUI and takes its size as a value, not
+            // from the Auto Layout constraints `applyIconSize` just updated.
+            hosting.rootView = FolderIconView(icons: hosting.rootView.icons, size: displayedIconSizeValue)
+        }
+        return true
+    }
+
     /// Applies the effective size to the icon constraint itself. The previous
     /// layer-only scale changed the picture but left the label attached to the
     /// old frame, so changing the setting appeared to leave text in place.

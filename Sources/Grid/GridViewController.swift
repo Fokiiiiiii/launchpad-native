@@ -264,6 +264,43 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // correct for warm opens, display moves, and a Dock revealed over an
         // auto-hidden configuration.
         updatePageControlBottomMargin()
+        // That call can change the bottom inset, which changes the cell size,
+        // which changes the icon size every visible cell was built with.
+        refreshVisibleIconSizes()
+    }
+
+    /// Pushes the settled icon geometry onto cells that were built before it
+    /// was known.
+    ///
+    /// `itemForRepresentedObjectAt` reads `currentIconSize` once, when the cell
+    /// is created, and nothing revisits that afterwards — a cell keeps its
+    /// creation-time size until `reloadData()` builds a replacement. The first
+    /// layout pass runs before `updatePageControlBottomMargin` has measured the
+    /// Dock, so those first cells are sized against a taller cell than the grid
+    /// ends up with.
+    ///
+    /// Reported bug ("初回起動時にアプリが一瞬だけ大きくなってから元のサイズに
+    /// 戻る"): on a cold start the reload that would have fixed them is the full
+    /// catalog scan finishing a second or two later, so the icons sat visibly
+    /// oversized on screen until then and then snapped down. Warm opens never
+    /// showed it because their cells already existed at the settled size.
+    private func refreshVisibleIconSizes() {
+        let cellSize = layout.currentCellSize
+        guard cellSize.width > 0, cellSize.height > 0 else { return }
+        let iconSize = currentIconSize
+        let visualScale = currentEffectiveIconScale
+        var changed = false
+        for case let cell as GridCellItem in collectionView.visibleItems() {
+            if cell.refreshIconSize(iconSize, visualScale: visualScale) {
+                changed = true
+            }
+        }
+        // Only when something actually moved: resolving the new constraints now
+        // — rather than leaving `needsLayout` for the next pass — is what keeps
+        // the correction from being visible. `refreshIconSize` reports no change
+        // once the cells match, so this settles in one step instead of looping.
+        guard changed else { return }
+        collectionView.layoutSubtreeIfNeeded()
     }
 
     /// The launcher deliberately owns the full target screen so that its
