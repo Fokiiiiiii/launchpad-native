@@ -98,8 +98,4 @@ final class PagedGridLayout: NSCollectionViewLayout {
     }
 
     /// The visible-rect origin for jumping directly to page `index`, used by
-    /// both the page-dot control and cross-page keyboard navigation.
-    func originForPage(_ index: Int) -> NSPoint {
-        NSPoint(x: CGFloat(index) * pageSize.width, y: 0)
-    }
 }

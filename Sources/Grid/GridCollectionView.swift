@@ -148,12 +148,17 @@ final class GridCollectionView: NSCollectionView {
     /// the initiating mouseDown, for the duration of that press — standard
     /// NSResponder tracking behavior, no extra setup needed here.
     override func mouseDragged(with event: NSEvent) {
-        DiagnosticsLog.grid.notice("GridCollectionView.mouseDragged fired")
+        // `.debug`, not `.notice`: this fires 60-120 times a second for the
+        // whole duration of a drag, and `.notice` is persisted to the on-disk
+        // unified log store — a fixed per-event cost on the most
+        // latency-sensitive path in the app. `log stream --level debug` still
+        // shows these when diagnosing drag behaviour.
+        DiagnosticsLog.grid.debug("GridCollectionView.mouseDragged fired")
         onItemMouseDragged?(event)
     }
 
     override func mouseUp(with event: NSEvent) {
-        DiagnosticsLog.grid.notice("GridCollectionView.mouseUp fired")
+        DiagnosticsLog.grid.debug("GridCollectionView.mouseUp fired")
         onItemMouseUp?(event)
     }
 

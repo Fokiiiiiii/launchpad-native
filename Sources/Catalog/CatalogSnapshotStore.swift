@@ -88,7 +88,7 @@ public enum CatalogSnapshotStore {
         let directory = snapshotURL.deletingLastPathComponent()
         try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
         let temporaryURL = directory.appendingPathComponent(
-            ".(snapshotURL.lastPathComponent).(UUID().uuidString).tmp"
+            ".\(snapshotURL.lastPathComponent).\(UUID().uuidString).tmp"
         )
         do {
             try data.write(to: temporaryURL, options: .atomic)

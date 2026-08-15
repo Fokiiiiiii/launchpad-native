@@ -96,29 +96,6 @@ public final class IconCache: @unchecked Sendable {
     }
 
     /// Internal test hook for proving the explicit memory/in-flight/write
-    /// bounds without exposing cache internals to the application target.
-    struct DebugState: Sendable {
-        let memoryCount: Int
-        let inFlightKeyCount: Int
-        let pendingWriteCount: Int
-    }
-
-    func debugState() -> DebugState {
-        memoryLock.lock()
-        let memoryCount = memory.count
-        memoryLock.unlock()
-        requestLock.lock()
-        let inFlightKeyCount = inFlight.count
-        requestLock.unlock()
-        writeStateLock.lock()
-        let pendingWriteCount = self.pendingWriteCount
-        writeStateLock.unlock()
-        return DebugState(
-            memoryCount: memoryCount,
-            inFlightKeyCount: inFlightKeyCount,
-            pendingWriteCount: pendingWriteCount
-        )
-    }
 
     func cacheFileURL(forKey key: String) -> URL {
         cacheDirectory.appendingPathComponent("\(key).png")

@@ -16,6 +16,11 @@ final class PageControlView: NSView {
 
     var numberOfPages: Int = 1 {
         didSet {
+            // `GridViewController.reload()` reassigns this on every model
+            // change, and `rebuildDots()` tears down and recreates every dot
+            // button with fresh constraints — so without this guard, moving a
+            // single icon rebuilt the whole control for an unchanged count.
+            guard numberOfPages != oldValue else { return }
             rebuildDots()
             updateChevronEnabledState()
         }
@@ -29,6 +34,9 @@ final class PageControlView: NSView {
     }
 
     private var dotButtons: [NSButton] = []
+    /// Test hook: dots are rebuilt from a private setter, so a test asserting
+    /// "a single-page grid still shows one dot" has no other way to observe it.
+    var dotButtonCountForTesting: Int { dotButtons.count }
     private let dotStack = NSStackView()
     private let previousButton = NSButton()
     private let nextButton = NSButton()
@@ -75,6 +83,14 @@ final class PageControlView: NSView {
             nextButton.widthAnchor.constraint(equalToConstant: 32),
             nextButton.heightAnchor.constraint(equalToConstant: 32)
         ])
+
+        // Build the initial dot for the default `numberOfPages` of 1. Swift
+        // does not run `didSet` for a property's initial value, and that
+        // setter is the only other thing that builds dots — so a single-page
+        // grid, which assigns the same value 1, would otherwise leave the
+        // control permanently empty.
+        rebuildDots()
+        updateChevronEnabledState()
     }
 
     @available(*, unavailable)

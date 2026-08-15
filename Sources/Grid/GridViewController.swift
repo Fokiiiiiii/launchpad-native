@@ -975,9 +975,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// implementation here) never gets that: `cacheDisplay` still reports
     /// success (returns a non-nil bitmap) but every pixel comes back fully
     /// transparent. Confirmed empirically via `debugSimulatePageDrag` +
-    /// `log stream`: the pixel-sampling diagnostic in
-    /// `logSnapshotContentCheck` read "0/64 sampled points non-transparent"
-    /// before this fix — this is what the user's report ("next page's
+    /// `log stream`: a since-removed pixel-sampling diagnostic read
+    /// "0/64 sampled points non-transparent" before this fix — this is what the user's report ("next page's
     /// content isn't visible during the drag") was actually seeing; the
     /// snapshot mechanism itself was working (non-nil, correctly
     /// positioned/transformed), it just had nothing drawn in it. Parking
@@ -1070,45 +1069,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         guard let bitmap = tempCollectionView.bitmapImageRepForCachingDisplay(in: tempCollectionView.bounds) else { return nil }
         tempCollectionView.cacheDisplay(in: tempCollectionView.bounds, to: bitmap)
-        Self.logSnapshotContentCheck(bitmap, page: page)
         let image = NSImage(size: size)
         image.addRepresentation(bitmap)
         return image
-    }
-
-    /// Temporary diagnostic (see the user report: "next page's content isn't
-    /// visible during the drag" — the neighbor snapshot mechanism itself was
-    /// already confirmed via log evidence to run without error/nil, but
-    /// that only proves an `NSImage` was produced, not that it has visible
-    /// pixels). `cacheDisplay(in:to:)` is documented to work by re-driving
-    /// each view's `-drawRect:`-style display path — a hierarchy that's
-    /// never been inserted into a real `NSWindow` (as `tempCollectionView`
-    /// here never is) is a known way for that to silently produce a blank
-    /// or fully-transparent bitmap despite reporting success. Sampling a
-    /// handful of points and logging the fraction that are non-transparent
-    /// tells us, from a real run via `debugSimulatePageDrag`, whether this
-    /// is actually what's happening — without needing Accessibility
-    /// permission or the user's own hands-on retest.
-    private static func logSnapshotContentCheck(_ bitmap: NSBitmapImageRep, page: Int) {
-        let width = bitmap.pixelsWide
-        let height = bitmap.pixelsHigh
-        guard width > 0, height > 0 else {
-            DiagnosticsLog.grid.notice("renderPageSnapshot: page \(page, privacy: .public) bitmap has zero size (\(width, privacy: .public)x\(height, privacy: .public))")
-            return
-        }
-        var sampled = 0
-        var nonTransparent = 0
-        let steps = 8
-        for xi in 0..<steps {
-            for yi in 0..<steps {
-                let x = min(width - 1, xi * width / steps)
-                let y = min(height - 1, yi * height / steps)
-                guard let color = bitmap.colorAt(x: x, y: y) else { continue }
-                sampled += 1
-                if color.alphaComponent > 0.01 { nonTransparent += 1 }
-            }
-        }
-        DiagnosticsLog.grid.notice("renderPageSnapshot: page \(page, privacy: .public) size=\(width, privacy: .public)x\(height, privacy: .public), \(nonTransparent, privacy: .public)/\(sampled, privacy: .public) sampled points non-transparent")
     }
 
     /// Apple's standard rubber-band resistance formula (see apple-design's
@@ -2800,6 +2763,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// edge zone before the dwell timer fires doesn't read as an abrupt cut
     /// — this is deliberately the *only* place a bare peek offset is reset
     /// without an accompanying commit, so it needs its own settle animation
+    /// Springs the peek back out (not an instant snap) so backing out of the
+    /// edge zone before the dwell timer fires doesn't read as an abrupt cut
+    /// — this is deliberately the *only* place a bare peek offset is reset
+    /// without an accompanying commit, so it needs its own settle animation
     /// (the page-turn commit path in `commitPageTurnDuringDrag` handles its
     /// own transition instead of going through this).
     private func clearEdgePeek(session: ItemDragSession) {
@@ -2813,9 +2780,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         session.lastPeekTime = nil
     }
 
-    private static func clamp01(_ value: CGFloat) -> CGFloat {
-        min(max(value, 0), 1)
-    }
+
+    /// (the page-turn commit path in `commitPageTurnDuringDrag` handles its
 
     private func commitPageTurnDuringDrag(session: ItemDragSession, direction: Int) {
         let targetPage = currentPage + direction
