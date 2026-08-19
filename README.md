@@ -2128,9 +2128,14 @@ model and pure-logic tests do not prove those AppKit interaction boundaries.
 ## Opened folders, moved to the system's own model (2026-08-16)
 
 An opened folder was a centered rounded card over a fully dimmed screen, with
-its contents flattened into one vertical scroll. It is now what the system's
-own Launchpad does: a screen-wide band that grows out of the folder icon,
-paging sideways.
+its contents flattened into one vertical scroll. It now grows out of the folder
+icon and pages sideways, the way the system's own Launchpad does.
+
+It is *not* screen-wide, though that was tried first as the closer match to the
+system: at this app's icon sizes a band spanning the screen reads as mostly
+empty around a folder holding a couple of apps. The panel is sized to what it
+holds at the icon size the grid is currently drawn at — three columns at 161pt
+icons come out 696pt wide, two columns 479pt — bounded by the screen.
 
 **Sizing was wrong by measurement, not by taste.** The card's height added a
 flat `88 + 70` that corresponded to nothing in the layout — about 39pt of dead

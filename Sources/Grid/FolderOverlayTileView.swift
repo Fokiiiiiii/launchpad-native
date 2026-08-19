@@ -236,12 +236,8 @@ struct FolderOverlayGridContent: View {
                 FolderOverlayTileView(tile: tile, iconSize: iconSize, isDragging: tile.id == model.draggingID)
             }
         }
-        // Sized to its columns and centered, rather than stretched: the band
-        // spans the screen, but a folder holding three apps must not spread
-        // them across all of it.
-        .frame(width: CGFloat(max(columns, 1)) * (iconSize + 56))
+        .padding(.horizontal, 22)
         .padding(.vertical, 34)
-        .frame(maxWidth: .infinity)
         .onDrop(of: [.text], delegate: FolderGridOuterDropDelegate(onDragCancelled: onDragCancelled))
     }
 }

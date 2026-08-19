@@ -45,6 +45,17 @@ import Testing
     #expect(FolderContentsViewController.panelWidth(availableWidth: 1_488, columns: 3, iconSize: 96) == 500)
 }
 
+/// The panel is sized to what it holds at the icon size the grid is currently
+/// drawn at — making the icons bigger has to make the folder behind them
+/// bigger too, rather than leaving them crowded in a fixed box.
+@Test @MainActor func panelWidthGrowsWithTheIconSize() {
+    let small = FolderContentsViewController.panelWidth(availableWidth: 1_488, columns: 3, iconSize: 96)
+    let large = FolderContentsViewController.panelWidth(availableWidth: 1_488, columns: 3, iconSize: 160)
+    #expect(large > small)
+    // Three columns of (icon + label allowance), plus the grid's own insets.
+    #expect(abs(large - (3 * (160 + 56) + 44)) < 0.001)
+}
+
 @Test @MainActor func panelWidthNeverExceedsTheSpaceAvailable() {
     #expect(FolderContentsViewController.panelWidth(availableWidth: 600, columns: 7, iconSize: 96) == 600)
 }

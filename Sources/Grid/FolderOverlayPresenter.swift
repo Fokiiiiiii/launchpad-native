@@ -42,8 +42,9 @@ final class FolderOverlayPresenter {
         let anchorIconFrame: NSRect?
     }
 
-    /// Side margin left around the band. The system's own folder panel does
-    /// not quite touch the screen edges either.
+    /// Smallest margin left between the panel and the screen edges. The panel
+    /// is normally far narrower than this allows — it is sized to its contents
+    /// — but a folder wide enough to reach the edges stops here.
     private static let bandSideInset: CGFloat = 96
     /// Gap between the folder icon and the top of the band, leaving room for
     /// the notch that spans it.
@@ -90,10 +91,16 @@ final class FolderOverlayPresenter {
             itemCount: itemCount,
             configuredColumns: configuredColumns
         )
-        // A band spans the screen the way the system's own Launchpad does,
-        // rather than shrink-wrapping the grid. The tiles inside stay centered,
-        // so a folder holding two apps does not spread them to the edges.
-        let panelWidth = max(hostView.bounds.width - 2 * Self.bandSideInset, 320)
+        // Sized to what it holds, at the icon size the grid is currently drawn
+        // at — not to the screen. A screen-wide band (tried first, following
+        // the system's own shape) reads as mostly empty around a folder with a
+        // couple of apps in it, and the icon size the user picked is exactly
+        // what should decide how much room those apps need.
+        let panelWidth = FolderContentsViewController.panelWidth(
+            availableWidth: hostView.bounds.width - 2 * Self.bandSideInset,
+            columns: folderColumns,
+            iconSize: CGFloat(metrics.iconSize)
+        )
 
         let folderVC = FolderContentsViewController(
             model: model,
