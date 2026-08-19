@@ -177,7 +177,7 @@ private func makePanel(model: GridModel, folderID: FolderID, columns: Int = 3) -
 
 @MainActor
 private func swipe(_ panel: FolderContentsViewController, dx: Double) {
-    guard let root = panel.view as? NSView else { return }
+    let root = panel.view
     for (deltaX, phase) in [(0.0, CGScrollPhase.began), (dx, .changed), (0.0, .ended)] {
         guard let cg = CGEvent(
             scrollWheelEvent2Source: nil,
