@@ -172,3 +172,66 @@ private func makePanel(model: GridModel, folderID: FolderID, columns: Int = 3) -
     #expect(model.folders[folderID]?.name == "Utilities")
     #expect(panel.titleForTesting == "Utilities")
 }
+
+// MARK: - Swiping between folder pages
+
+@MainActor
+private func swipe(_ panel: FolderContentsViewController, dx: Double) {
+    guard let root = panel.view as? NSView else { return }
+    for (deltaX, phase) in [(0.0, CGScrollPhase.began), (dx, .changed), (0.0, .ended)] {
+        guard let cg = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 2,
+            wheel1: 0,
+            wheel2: Int32(deltaX),
+            wheel3: 0
+        ) else { continue }
+        cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis2, value: deltaX)
+        cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase.rawValue))
+        if let event = NSEvent(cgEvent: cg) {
+            root.scrollWheel(with: event)
+        }
+    }
+}
+
+/// The folder pages by the same gesture as the grid behind it.
+@Test @MainActor func swipingPagesTheFolder() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let (model, folderID) = await modelWithFolder(itemCount: 14, directory: dir)
+    let panel = makePanel(model: model, folderID: folderID)
+
+    // Leftward travel means "next page", matching the grid's own direction.
+    swipe(panel, dx: -60)
+    #expect(panel.currentPageForTesting == 1)
+
+    swipe(panel, dx: 60)
+    #expect(panel.currentPageForTesting == 0)
+}
+
+/// Below the commit distance it must stay put — otherwise resting fingers page
+/// the folder out from under the user.
+@Test @MainActor func aSwipeShorterThanTheCommitDistanceDoesNotPage() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let (model, folderID) = await modelWithFolder(itemCount: 14, directory: dir)
+    let panel = makePanel(model: model, folderID: folderID)
+
+    // Past the 10pt engage gate but short of the 20pt commit distance.
+    swipe(panel, dx: -14)
+    #expect(panel.currentPageForTesting == 0)
+}
+
+/// A one-page folder has nowhere to go, and must not move regardless.
+@Test @MainActor func swipingASinglePageFolderDoesNothing() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let (model, folderID) = await modelWithFolder(itemCount: 5, directory: dir)
+    let panel = makePanel(model: model, folderID: folderID)
+
+    swipe(panel, dx: -80)
+    #expect(panel.currentPageForTesting == 0)
+    #expect(panel.visibleTileCountForTesting == 5)
+}

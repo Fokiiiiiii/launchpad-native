@@ -45,6 +45,18 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     private var pageControlHeight: NSLayoutConstraint?
     /// Which of `Folder.pages` is on screen.
     private var currentFolderPage = 0
+    /// The same gesture the grid behind this pages with — see
+    /// `SwipePageRecognizer`. Only the discrete and settled forms are wired up:
+    /// the folder does not track the finger continuously the way the grid does,
+    /// because that path is where this project's page paging has broken on real
+    /// hardware before, and it is worth landing separately.
+    private let swipeRecognizer = SwipePageRecognizer()
+    /// How far a swipe must travel before it counts as a page change, matching
+    /// the grid's own `pageDragCommitDistance`.
+    private static let swipeCommitDistance: CGFloat = 20
+    /// …or how fast, for a flick that never travels that far. Same value the
+    /// grid uses.
+    private static let swipeFlickVelocity: CGFloat = 400
     private let gridModel = FolderOverlayGridModel()
     /// The main grid's own current icon size (`GridViewController.currentIconSize`)
     /// — a real design reference the user supplied directly asked for
@@ -178,13 +190,26 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         self.onLaunch = onLaunch
         self.onItemDraggedOut = onItemDraggedOut
         super.init(nibName: nil, bundle: nil)
+        swipeRecognizer.callbacks.onDiscretePage = { [weak self] delta in
+            self?.goToAdjacentPage(delta)
+        }
+        swipeRecognizer.callbacks.onEnded = { [weak self] delta, velocity in
+            guard let self else { return }
+            // A swipe leftward (negative delta) means "show me the next page",
+            // matching the grid's own direction.
+            let travelled = abs(delta) >= Self.swipeCommitDistance
+            let flicked = abs(velocity) >= Self.swipeFlickVelocity
+            guard travelled || flicked else { return }
+            self.goToAdjacentPage(delta < 0 ? 1 : -1)
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unavailable") }
 
     override func loadView() {
-        let root = NSView()
+        let root = FolderPanelRootView()
+        root.onScroll = { [weak self] event in self?.swipeRecognizer.handle(event) }
         // `root`'s own outer frame is deliberately plain/frame-based (this
         // is the default — `translatesAutoresizingMaskIntoConstraints`
         // stays `true`), never Auto Layout, and the caller
@@ -665,5 +690,17 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
             NSEvent.removeMonitor(monitor)
         }
         folderDragGlobalMouseUpMonitor = nil
+    }
+}
+
+/// The panel's own root. Exists only so a scroll gesture that lands anywhere on
+/// the band reaches the page recognizer: the tiles are SwiftUI inside an
+/// `NSHostingView`, which has no scrollable content of its own and passes the
+/// event up.
+private final class FolderPanelRootView: NSView {
+    var onScroll: ((NSEvent) -> Void)?
+
+    override func scrollWheel(with event: NSEvent) {
+        onScroll?(event)
     }
 }
