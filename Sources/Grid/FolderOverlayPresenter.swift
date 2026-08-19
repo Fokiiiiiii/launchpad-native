@@ -3,24 +3,26 @@ import Catalog
 import Diagnostics
 import Persistence
 
-/// Presents an opened folder as a full-screen dimmed take-over.
+/// Presents an opened folder as a screen-wide band over a dimmed grid.
 ///
-/// Split out of `GridViewController` because none of it touches the grid's
-/// own state: it owns a backdrop, a blur, a tint and a
+/// Split out of `GridViewController` because none of it touches the grid's own
+/// state: it owns a backdrop, a tint, a notch and a
 /// `FolderContentsViewController`, and the grid only ever asks it to open or
 /// close. Everything the panel needs from the grid — where to host it, how big
-/// its icons are, what to do on launch or drag-out — arrives as parameters, so
-/// the two can be read independently.
+/// its icons are, which icon it came from, what to do on launch or drag-out —
+/// arrives as parameters, so the two can be read independently.
 ///
-/// The presentation is a full-screen dimmed take-over, matching the
-/// user-supplied design reference's own `FolderOverlay` exactly (explicit
-/// request: "フォルダ名の中身は全画面で表示されるzipのやつにして") — a small
-/// anchored `NSPopover` (this project's prior, safer choice) was rejected as
-/// not matching. `FolderContentsViewController` and all of its already-proven
-/// AppKit interaction code (click-to-launch, right-click context menu,
-/// drag-out-to-remove) stay completely unchanged — only the *presentation
-/// container* differs, which is what kept a purely visual change from
-/// re-risking interaction logic fixed several times in this project's history.
+/// The shape follows the system's own Launchpad: a band spanning the screen
+/// that grows out of the folder icon, rather than a card centered over a fully
+/// dimmed screen (this app's previous form, itself replacing an even earlier
+/// anchored `NSPopover`). `bandPlacement` decides where it actually lands, and
+/// whether pointing a notch at the icon is honest there.
+///
+/// `FolderContentsViewController` and its already-proven AppKit interaction
+/// code (click-to-launch, right-click context menu, drag-out-to-remove) are not
+/// involved in any of this — only the presentation container is, which is what
+/// has repeatedly kept visual changes here from re-risking interaction logic
+/// fixed several times in this project's history.
 @MainActor
 final class FolderOverlayPresenter {
     /// What the panel needs to know about the grid it was opened from, so its
