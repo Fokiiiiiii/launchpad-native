@@ -112,11 +112,18 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     /// display: on a 1050pt-tall screen it clipped a second row that had ample
     /// room to fit, and on a short screen it would have overflowed instead.
     ///
-    /// Sized so the three rows a folder is laid out around (see
-    /// `displayedColumnCount`) actually fit at the icon sizes this grid uses —
-    /// at 0.62 the third row was still cut in half, which is the same clipping
-    /// in a new place rather than a fix.
-    private static let maximumHeightFraction: CGFloat = 0.80
+    /// The panel is kept to this share of the screen. Rather than clipping
+    /// what does not fit — or letting the panel grow until it fills the screen,
+    /// which is what a folder at this grid's icon sizes did ("なんかデカすぎる
+    /// 気がする": three rows of 161pt icons came to 76% of the display) — the
+    /// icons are drawn smaller so the rows fit. See `folderIconSize`.
+    private static let maximumHeightFraction: CGFloat = 0.62
+    /// What `itemHeight` adds to an icon for its label and the gap above it.
+    private static let tileLabelAllowanceVertical: CGFloat = 40
+    /// Title area plus the panel's own bottom inset, close enough to size
+    /// against before the title field exists. `updatePreferredContentSize`
+    /// measures the real title once there is one.
+    private static let approximateChromeHeight: CGFloat = 77
     private static let pageControlHeight: CGFloat = 28
     /// How far a page slides as it leaves/enters, matching the main grid's own
     /// `pageSlideOffset`.
@@ -140,6 +147,27 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         guard count > Self.preferredRowCount else { return count }
         let columns = Int(ceil(Double(count) / Double(Self.preferredRowCount)))
         return min(columns, max(configuredColumns, 1))
+    }
+
+    /// The size to draw an opened folder's icons at.
+    ///
+    /// Follows the grid's own icon size — the folder should look like the grid
+    /// it came out of — but not past what lets its rows fit in the space the
+    /// panel is allowed. This grid's icons can be set large enough that three
+    /// rows of them would be most of the display, which is a folder that reads
+    /// as oversized however correctly it is laid out.
+    ///
+    /// Shrinking only ever kicks in when it has to: a grid with smaller icons
+    /// gets its own size back untouched.
+    static func folderIconSize(gridIconSize: Double, rows: Int, availableHeight: CGFloat) -> Double {
+        let rowCount = CGFloat(max(rows, 1))
+        let budget = availableHeight * Self.maximumHeightFraction
+            - (rowCount - 1) * Self.cellSpacing
+            - 2 * Self.gridVerticalPadding
+            - Self.approximateChromeHeight
+        let perRow = budget / rowCount
+        let fits = perRow - Self.tileLabelAllowanceVertical
+        return min(gridIconSize, Double(max(fits, 48)))
     }
 
     static func maximumPanelHeight(availableHeight: CGFloat) -> CGFloat {

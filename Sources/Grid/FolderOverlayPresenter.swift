@@ -96,17 +96,27 @@ final class FolderOverlayPresenter {
         // the system's own shape) reads as mostly empty around a folder with a
         // couple of apps in it, and the icon size the user picked is exactly
         // what should decide how much room those apps need.
+        //
+        // …up to a point: at this grid's larger icon sizes the rows would take
+        // most of the display, so `folderIconSize` steps them down until they
+        // fit the space the panel is allowed.
+        let rows = max(Int(ceil(Double(itemCount) / Double(folderColumns))), 1)
+        let iconSize = FolderContentsViewController.folderIconSize(
+            gridIconSize: metrics.iconSize,
+            rows: rows,
+            availableHeight: hostView.bounds.height
+        )
         let panelWidth = FolderContentsViewController.panelWidth(
             availableWidth: hostView.bounds.width - 2 * Self.bandSideInset,
             columns: folderColumns,
-            iconSize: CGFloat(metrics.iconSize)
+            iconSize: CGFloat(iconSize)
         )
 
         let folderVC = FolderContentsViewController(
             model: model,
             folderID: folderID,
             iconCache: iconCache,
-            iconSize: metrics.iconSize,
+            iconSize: iconSize,
             columns: folderColumns,
             panelWidth: panelWidth,
             maximumHeight: FolderContentsViewController.maximumPanelHeight(

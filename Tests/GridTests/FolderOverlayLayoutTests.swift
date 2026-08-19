@@ -60,6 +60,42 @@ import Testing
     #expect(FolderContentsViewController.panelWidth(availableWidth: 600, columns: 7, iconSize: 96) == 600)
 }
 
+// MARK: folder icon size
+
+/// A grid with modest icons gets its own size back — the folder should look
+/// like the grid it came out of, and there is nothing to fix.
+@Test @MainActor func aFolderKeepsTheGridsIconSizeWhenItFits() {
+    #expect(FolderContentsViewController.folderIconSize(gridIconSize: 96, rows: 3, availableHeight: 1_050) == 96)
+    #expect(FolderContentsViewController.folderIconSize(gridIconSize: 72, rows: 3, availableHeight: 1_050) == 72)
+}
+
+/// …but this grid's icons can be set large enough that three rows of them would
+/// be most of the display, which reads as an oversized folder however correctly
+/// it is laid out ("なんかデカすぎる気がする").
+@Test @MainActor func oversizedGridIconsAreSteppedDownToFit() {
+    let stepped = FolderContentsViewController.folderIconSize(gridIconSize: 161.45, rows: 3, availableHeight: 1_050)
+    #expect(stepped < 161.45)
+    // The rows it produces have to actually fit the share of the screen the
+    // panel is allowed.
+    let rows = 3.0
+    let height = rows * (stepped + 40) + (rows - 1) * 26 + 68 + 77
+    #expect(height <= 1_050 * 0.62 + 0.001)
+}
+
+/// Fewer rows need less room, so the same grid icon size survives at one row
+/// while being stepped down at three.
+@Test @MainActor func fewerRowsKeepMoreOfTheGridsIconSize() {
+    let oneRow = FolderContentsViewController.folderIconSize(gridIconSize: 161.45, rows: 1, availableHeight: 1_050)
+    let threeRows = FolderContentsViewController.folderIconSize(gridIconSize: 161.45, rows: 3, availableHeight: 1_050)
+    #expect(oneRow == 161.45)
+    #expect(threeRows < oneRow)
+}
+
+/// A short display must not shrink icons away to nothing.
+@Test @MainActor func iconsNeverShrinkBelowAFloor() {
+    #expect(FolderContentsViewController.folderIconSize(gridIconSize: 161.45, rows: 3, availableHeight: 300) == 48)
+}
+
 // MARK: panel height
 
 /// The cap is a share of the screen rather than a fixed number: the flat 480pt
