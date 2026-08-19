@@ -28,7 +28,9 @@ final class GridCollectionView: NSCollectionView {
     /// page change (see the discrete-wheel branch in `scrollWheel` below) —
     /// that hardware has no continuous position data, so there's nothing to
     /// drive a finger-tracked drag with; it just jumps.
-    var onSwipePage: ((Int) -> Void)?
+    var onSwipePage: ((Int) -> Void)? {
+        didSet { swipeRecognizer.callbacks.onDiscretePage = onSwipePage }
+    }
     /// Trackpad 2-finger horizontal swipe, tracked continuously once
     /// engaged (past `minimumEngageDistance`). `onSwipeChanged` fires with
     /// the *cumulative* delta since the gesture began (not a per-frame
@@ -36,71 +38,29 @@ final class GridCollectionView: NSCollectionView {
     /// fingers. `onSwipeEnded` additionally passes a simple velocity
     /// estimate (points per second, from the last few samples) for
     /// apple-design-style velocity handoff into a settle animation.
-    var onSwipeBegan: (() -> Void)?
-    var onSwipeChanged: ((CGFloat) -> Void)?
-    var onSwipeEnded: ((CGFloat, CGFloat) -> Void)?
+    var onSwipeBegan: (() -> Void)? {
+        didSet { swipeRecognizer.callbacks.onBegan = onSwipeBegan }
+    }
+    var onSwipeChanged: ((CGFloat) -> Void)? {
+        didSet { swipeRecognizer.callbacks.onChanged = onSwipeChanged }
+    }
+    var onSwipeEnded: ((CGFloat, CGFloat) -> Void)? {
+        didSet { swipeRecognizer.callbacks.onEnded = onSwipeEnded }
+    }
     /// Fires when a click lands within a cell's bounding box but outside its
     /// actual icon+label content — see `GridCellItem.contentHitTestFrame`.
     /// Treated the same as clicking the launcher's empty background: dismiss.
     var onBackgroundClick: (() -> Void)?
 
-    /// Which axis a 2-finger swipe engaged on — horizontal was the only
-    /// supported axis originally; vertical was added so up/down swipes page
-    /// too (a real user ask: the grid has no vertical scroll content of its
-    /// own to preserve, so this axis was free to repurpose).
-    ///
-    /// History: a first version picked "whichever axis's cumulative
-    /// magnitude is currently larger" as the engage candidate, re-evaluated
-    /// every sample. That was a real regression for the *existing*,
-    /// long-working horizontal gesture: real fingers landing on a trackpad
-    /// almost always produce a brief vertical blip before a horizontal
-    /// swipe's sweep takes over, and if that blip alone crossed
-    /// `minimumEngageDistance` in Y before X caught up, the axis locked as
-    /// vertical for the *entire* gesture — the subsequent, clearly
-    /// intentional horizontal motion kept accumulating into
-    /// `swipeAccumulatedDeltaX` but was never read again, since the locked
-    /// axis was already vertical. Confirmed via user report ("horizontal
-    /// swipe stopped paging"). Fixed by giving horizontal unconditional
-    /// priority — it engages the instant its own cumulative distance
-    /// clears the threshold, exactly like before vertical support existed,
-    /// with zero dependency on the concurrent Y value. Vertical only
-    /// engages when it clearly dominates (more than double X's magnitude)
-    /// *and* horizontal hasn't already claimed the gesture — a conservative
-    /// bar specifically so it can't misfire on the same kind of incidental
-    /// blip in the other direction.
-    private enum SwipeAxis { case horizontal, vertical }
+    /// The gesture itself lives in `SwipePageRecognizer` so an opened folder
+    /// can page by the same one. A page fits entirely in the viewport, so this
+    /// view has nothing of its own to scroll — the override exists purely to
+    /// feed the recognizer.
+    private let swipeRecognizer = SwipePageRecognizer()
 
-    private var swipeAccumulatedDeltaX: CGFloat = 0
-    private var swipeAccumulatedDeltaY: CGFloat = 0
-    private var swipeAxis: SwipeAxis?
-    private var swipeEngaged = false
-    private var swipeCompletedForGesture = false
-    private var recentSamples: [(delta: CGFloat, time: CFTimeInterval)] = []
-    /// A single confirmed-horizontal `.changed` sample used to fire
-    /// `onSwipeBegan` unconditionally last time — ambient trackpad jitter
-    /// (resting fingers) could cross that bar trivially. Requiring the
-    /// *cumulative* delta to clear this distance first is what actually
-    /// distinguishes "the user is swiping" from incidental motion.
-    ///
-    /// Lowered from `15` to `10`: the user found 15pt of required finger
-    /// travel before a swipe engaged noticeably less responsive than it
-    /// should feel — a real, reported complaint distinct from
-    /// `discreteWheelCooldown` below (that's a separate anti-double-trigger
-    /// debounce for discrete hardware wheel ticks, not a distance gate, and
-    /// is unrelated to this fix). `10` is chosen to feel snappier while
-    /// still sitting comfortably above the incidental resting-finger jitter
-    /// this gate exists to reject (see doc comment above).
-    private let minimumEngageDistance: CGFloat = 10
-
-    /// A plain scroll-wheel mouse (non-Apple, or any mouse without a
-    /// touch-sensitive surface) sends discrete wheel ticks with no
-    /// `NSEvent.Phase` at all — previously swallowed by the trackpad-only
-    /// guard below, so such mice couldn't page the grid at all. These ticks
-    /// carry no phase to key a `.began`/`.changed`/`.ended` state machine
-    /// off of, so a wall-clock cooldown replaces the phase-driven
-    /// `swipeEngaged` latch used for trackpad gestures.
-    private var lastDiscreteWheelPageChange: CFTimeInterval = 0
-    private let discreteWheelCooldown: CFTimeInterval = 0.35
+    override func scrollWheel(with event: NSEvent) {
+        swipeRecognizer.handle(event)
+    }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
@@ -162,93 +122,5 @@ final class GridCollectionView: NSCollectionView {
         onItemMouseUp?(event)
     }
 
-    /// A page fits entirely in the viewport (no horizontal scroll content),
-    /// so this view has nothing to actually scroll — `scrollWheel` is
-    /// overridden purely to recognize the swipe gesture and translate it
-    /// into a page change, not to move any content.
-    override func scrollWheel(with event: NSEvent) {
-        let hasPhase = event.phase != [] || event.momentumPhase != []
-        if !hasPhase && !event.hasPreciseScrollingDeltas {
-            // Plain wheel ticks have no phase and no precise deltas.
-            let delta = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.scrollingDeltaY
-            guard delta != 0 else { return }
-            let now = CACurrentMediaTime()
-            guard now - lastDiscreteWheelPageChange > discreteWheelCooldown else { return }
-            lastDiscreteWheelPageChange = now
-            onSwipePage?(delta < 0 ? 1 : -1)
-            return
-        }
 
-        // Trackpad drivers may put the useful samples in momentumPhase or
-        // leave both phase fields empty. Normalize all of those forms into
-        // the same continuous state machine instead of dropping the frames.
-        if event.phase.contains(.mayBegin) || event.phase.contains(.began) {
-            swipeAccumulatedDeltaX = 0
-            swipeAccumulatedDeltaY = 0
-            swipeAxis = nil
-            swipeEngaged = false
-            swipeCompletedForGesture = false
-            recentSamples.removeAll()
-            DiagnosticsLog.grid.notice("scrollWheel: began/mayBegin")
-        }
-
-        let momentumOnly = event.phase == [] && event.momentumPhase != []
-        let isChanged = event.phase.contains(.changed)
-            || (momentumOnly && event.momentumPhase.contains(.changed) && !swipeCompletedForGesture)
-            || (!hasPhase && event.hasPreciseScrollingDeltas && !swipeCompletedForGesture)
-        if isChanged {
-            swipeAccumulatedDeltaX += event.scrollingDeltaX
-            swipeAccumulatedDeltaY += event.scrollingDeltaY
-            if !swipeEngaged {
-                // Horizontal gets priority. Vertical only engages when it
-                // clearly dominates, so a landing blip cannot steal a
-                // horizontal page gesture.
-                if abs(swipeAccumulatedDeltaX) >= minimumEngageDistance {
-                    swipeAxis = .horizontal
-                    swipeEngaged = true
-                    onSwipeBegan?()
-                    DiagnosticsLog.grid.notice("scrollWheel: engaged horizontal at cumulative dx=\(self.swipeAccumulatedDeltaX, privacy: .public)")
-                } else if abs(swipeAccumulatedDeltaY) >= minimumEngageDistance
-                    && abs(swipeAccumulatedDeltaY) > abs(swipeAccumulatedDeltaX) * 2 {
-                    swipeAxis = .vertical
-                    swipeEngaged = true
-                    onSwipeBegan?()
-                    DiagnosticsLog.grid.notice("scrollWheel: engaged vertical at cumulative dy=\(self.swipeAccumulatedDeltaY, privacy: .public)")
-                }
-            }
-            if let axis = swipeAxis {
-                let effectiveDelta = axis == .horizontal ? swipeAccumulatedDeltaX : swipeAccumulatedDeltaY
-                let now = CACurrentMediaTime()
-                recentSamples.append((effectiveDelta, now))
-                if recentSamples.count > 6 {
-                    recentSamples.removeFirst(recentSamples.count - 6)
-                }
-                onSwipeChanged?(effectiveDelta)
-            }
-        }
-
-        let isEnded = event.phase.contains(.ended) || event.phase.contains(.cancelled)
-            || (momentumOnly && (event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled)))
-        guard isEnded, !swipeCompletedForGesture else { return }
-
-        DiagnosticsLog.grid.notice("scrollWheel: ended/cancelled, engaged=\(self.swipeEngaged, privacy: .public), dx=\(self.swipeAccumulatedDeltaX, privacy: .public), dy=\(self.swipeAccumulatedDeltaY, privacy: .public)")
-        if swipeEngaged, let axis = swipeAxis {
-            let effectiveDelta = axis == .horizontal ? swipeAccumulatedDeltaX : swipeAccumulatedDeltaY
-            onSwipeEnded?(effectiveDelta, Self.estimateVelocity(recentSamples))
-        }
-        swipeAccumulatedDeltaX = 0
-        swipeAccumulatedDeltaY = 0
-        swipeAxis = nil
-        swipeEngaged = false
-        swipeCompletedForGesture = true
-        recentSamples.removeAll()
-    }
-
-    /// Points-per-second estimate from the oldest and newest of the last
-    /// few `.changed` samples — enough for apple-design-style velocity
-    /// handoff into the settle spring without needing every frame.
-    private static func estimateVelocity(_ samples: [(delta: CGFloat, time: CFTimeInterval)]) -> CGFloat {
-        guard let first = samples.first, let last = samples.last, last.time > first.time else { return 0 }
-        return (last.delta - first.delta) / CGFloat(last.time - first.time)
-    }
 }
