@@ -2125,6 +2125,50 @@ has not been granted. Real trackpad momentum/gesture feel, Reduce Transparency
 live toggling, and search-after-typing layout still require a hands-on pass;
 model and pure-logic tests do not prove those AppKit interaction boundaries.
 
+## Opened folders, moved to the system's own model (2026-08-16)
+
+An opened folder was a centered rounded card over a fully dimmed screen, with
+its contents flattened into one vertical scroll. It is now what the system's
+own Launchpad does: a screen-wide band that grows out of the folder icon,
+paging sideways.
+
+**Sizing was wrong by measurement, not by taste.** The card's height added a
+flat `88 + 70` that corresponded to nothing in the layout — about 39pt of dead
+space under a single row, and about 94pt short for two, so a second row was
+clipped through its labels. The cap was a fixed 480pt regardless of display, so
+a 1050pt-tall screen clipped a row that had room to spare. Height is now the sum
+of real distances in the layout, and the column count follows the item count
+against three rows (nine items are 3×3, six are 2×3; three or fewer stay on one
+row).
+
+**Folder pages already existed in the data and were being hidden.**
+`GridSettings.folderGridSize` (9) has always packed folders into pages, but only
+`appendToFolder` ever enforced it — the legacy importer puts every item on one
+page regardless of count, `createOrJoinFolder` built a two-item page directly,
+and `removeFromFolder` left holes. None of it showed while the UI flattened
+every page into one list. `GridModel.normalizeFolderPages()` repairs this once
+on load, the same way top-level pages are already reflowed.
+
+**The band points at its icon only when that is honest.** It sits directly below
+the folder icon with a notch on the icon's center X. But this grid's icons can
+be large enough that a three-row folder is 76% of the screen tall (measured: 801
+of 1050pt); forcing that under its icon pins it to the top with the icon buried
+inside it. When the band cannot fit below its icon it centers and draws no
+notch, because a notch pointing at something the band itself covers is worse
+than none.
+
+Page dots reuse `PageControlView` unchanged — it holds no reference to the grid
+and hides its own chevrons at one page. Arrow keys page the folder. The folder
+name is editable in place; `NSTextField(labelWithString:)` builds a cell that is
+neither editable nor selectable, which would have sent the click past the field
+to the backdrop and closed the folder — the same trap this project hit once in
+the search field.
+
+Not done: trackpad swipe-to-page inside a folder. The main grid's swipe state
+machine lives in `GridCollectionView.scrollWheel` and touches no collection-view
+API, so it can be lifted into a shared type — but that area has broken on real
+hardware three times, so it is deliberately a separate step.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
