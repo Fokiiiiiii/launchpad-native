@@ -396,12 +396,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         if !wasVisible {
             rootContentView?.layer?.removeAllAnimations()
             window.alphaValue = 0
-            if let layer = rootContentView?.layer {
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                layer.transform = CATransform3DMakeScale(0.90, 0.90, 1)
-                CATransaction.commit()
-            }
         }
 
         // Activate the app *before* asking the launcher window to become key — doing
@@ -476,46 +470,15 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         })
     }
 
-    /// Fade + a longer "settle" scale, closer to iOS/iPadOS's own app-open
-    /// motion than a quick UI micro-transition — the user asked for opening
-    /// to read more like iPhone/iPad, which is why the scale spring runs over
-    /// a leisurely 0.45s rather than snapping.
-    ///
-    /// The damping ratio, however, is back at 1.0 (critically damped, no
-    /// overshoot). It was loosened to 0.82 as part of that same "more like
-    /// iPhone" pass, but 0.82 overshoots to 101.11% of final size before
-    /// settling, and that was reported as a real annoyance: "初回起動時に
-    /// アプリが一瞬だけ大きくなってから元のサイズに戻る". The overshoot is
-    /// the entire mechanism behind that. This also puts the animation back in
-    /// line with apple-design's rule of reserving bounce for motion that
-    /// carried real gesture momentum — opening the launcher from a hot corner
-    /// or a keypress carries none.
-    ///
-    /// The alpha fade used to run over the *same* 0.45s as the scale
-    /// spring — meaning for the first ~100-150ms after a trigger fires, the
-    /// window was still nearly transparent, which read as "nothing
-    /// happened yet" (confirmed via a real user report that opening felt
-    /// laggy after a pinch gesture, even though gesture recognition itself
-    /// is near-instant — traced via code review of
-    /// `MultitouchGestureTrigger`/`PinchGestureRecognizer`, which hop to the
-    /// main actor and call `show()` synchronously with no delay of their
-    /// own). apple-design's response/behavior split applies directly here:
-    /// the *fade* is the "did anything happen" signal and needs to resolve
-    /// almost immediately, while the *scale*'s longer, slightly bouncy
-    /// settle is "behavior" that can keep running after the window already
-    /// reads as present.
+    /// Uses a short opacity transition only. A root scale animation changes
+    /// every icon and label while the first layout is settling, which made a
+    /// correct grid look like it grew and then shrank. Geometry must remain
+    /// authoritative; animation is limited to visibility.
     private func animateIn(window: NSWindow) {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
-        }
-        if let layer = rootContentView?.layer {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            layer.transform = CATransform3DIdentity
-            CATransaction.commit()
-            layer.add(Self.springAnimation(keyPath: "transform.scale", from: 0.90, to: 1.0, damping: 1.0, response: 0.45), forKey: "scaleIn")
         }
     }
 
