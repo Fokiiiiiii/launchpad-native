@@ -112,12 +112,12 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     /// display: on a 1050pt-tall screen it clipped a second row that had ample
     /// room to fit, and on a short screen it would have overflowed instead.
     ///
-    /// The panel is kept to this share of the screen. Rather than clipping
-    /// what does not fit — or letting the panel grow until it fills the screen,
-    /// which is what a folder at this grid's icon sizes did ("なんかデカすぎる
-    /// 気がする": three rows of 161pt icons came to 76% of the display) — the
-    /// icons are drawn smaller so the rows fit. See `folderIconSize`.
-    private static let maximumHeightFraction: CGFloat = 0.62
+    /// The panel is kept to this share of the screen. Rather than clipping what
+    /// does not fit, the icons are drawn smaller so the rows fit — see
+    /// `folderIconSize`. Following the grid's own column count keeps the common
+    /// cases well under this, so the scaling is a backstop for deep folders
+    /// rather than something that normally engages.
+    private static let maximumHeightFraction: CGFloat = 0.75
     /// What `itemHeight` adds to an icon for its label and the gap above it.
     private static let tileLabelAllowanceVertical: CGFloat = 40
     /// Title area plus the panel's own bottom inset, close enough to size
@@ -131,34 +131,26 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     /// The shape a folder is laid out around — see `displayedColumnCount`.
     private static let preferredRowCount = 3
 
-    /// Three rows is what a folder is laid out around ("基本縦3段を基準にして
-    /// 例えば3かけ3とかただ2かけ3とかはそのままでいい"), so the column count
-    /// follows from the item count rather than from the main grid's own.
+    /// The same column count the grid itself uses, so a folder reads as a
+    /// window onto the same layout rather than a differently-shaped one.
     ///
-    /// Nine items become 3×3 and six become 2×3, instead of one long row of six
-    /// with three stragglers underneath — which is what using the grid's column
-    /// count produced, and why an opened folder stretched most of the way
-    /// across the screen no matter how little was in it. Up to three items stay
-    /// on one row; past three, columns grow while the height stays put. The
-    /// main grid's column count still caps the result, so a very full folder
-    /// gains a fourth row and scrolls rather than growing wider forever.
+    /// An earlier pass laid folders out around three rows instead, to stop nine
+    /// items becoming a row of six with three stragglers. That produced a
+    /// squarer folder but a much taller one — at this grid's icon sizes, tall
+    /// enough to take most of the display. Following the grid's own columns
+    /// keeps the same nine items to two rows, which is both shorter and what
+    /// the reference launcher this was compared against does (18 items there
+    /// lay out 7 + 7 + 4, not 6 × 3).
     static func displayedColumnCount(itemCount: Int, configuredColumns: Int) -> Int {
-        let count = max(itemCount, 1)
-        guard count > Self.preferredRowCount else { return count }
-        let columns = Int(ceil(Double(count) / Double(Self.preferredRowCount)))
-        return min(columns, max(configuredColumns, 1))
+        min(max(itemCount, 1), max(configuredColumns, 1))
     }
 
     /// The size to draw an opened folder's icons at.
     ///
-    /// Follows the grid's own icon size — the folder should look like the grid
-    /// it came out of — but not past what lets its rows fit in the space the
-    /// panel is allowed. This grid's icons can be set large enough that three
-    /// rows of them would be most of the display, which is a folder that reads
-    /// as oversized however correctly it is laid out.
-    ///
-    /// Shrinking only ever kicks in when it has to: a grid with smaller icons
-    /// gets its own size back untouched.
+    /// Normally the grid's own size — the folder should look like the grid it
+    /// came out of, which is what the reference launcher does. The cap only
+    /// engages for a folder deep enough that its rows would otherwise take over
+    /// the display; at the common one or two rows nothing is scaled at all.
     static func folderIconSize(gridIconSize: Double, rows: Int, availableHeight: CGFloat) -> Double {
         let rowCount = CGFloat(max(rows, 1))
         let budget = availableHeight * Self.maximumHeightFraction
@@ -326,7 +318,19 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         // was removed in an earlier pass under the mistaken belief it was
         // the "black background" a prior report meant; see
         // `GlassBackgroundHelper.makeFolderCardBackground`'s doc comment.
-        let background = GlassBackgroundHelper.makeFolderCardBackground(cornerRadius: 34)
+        // Tint stays low on purpose. `NSGlassEffectView` does not simply lay a
+        // wash behind its siblings — raising this to 0.16 visibly hazed the
+        // folder's own icons, which sit *above* it in the view order. The panel
+        // reads as a light surface because what is behind it is hidden while it
+        // is open, not because the glass itself is opaque.
+        let background = GlassBackgroundHelper.makeFolderCardBackground(
+            cornerRadius: 26,
+            tint: NSColor.white.withAlphaComponent(0.08),
+            borderAlpha: 0.16,
+            shadowOpacity: 0.35,
+            shadowRadius: 30,
+            shadowOffset: CGSize(width: 0, height: -12)
+        )
         background.translatesAutoresizingMaskIntoConstraints = false
 
         root.addSubview(background)

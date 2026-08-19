@@ -236,6 +236,10 @@ struct FolderOverlayGridContent: View {
                 FolderOverlayTileView(tile: tile, iconSize: iconSize, isDragging: tile.id == model.draggingID)
             }
         }
+        // Left-aligned, not centered: the panel is a fixed width, so a folder
+        // holding two apps starts them at the same place a full one does
+        // instead of floating them in the middle of an otherwise empty row.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 22)
         .padding(.vertical, 34)
         .onDrop(of: [.text], delegate: FolderGridOuterDropDelegate(onDragCancelled: onDragCancelled))

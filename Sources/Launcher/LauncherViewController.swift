@@ -340,6 +340,9 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // trigger that hid the launcher mid-gesture stayed active, and only the
         // 15s fallback timer would eventually clear it.
         gridViewController.cancelItemDragIfNeeded()
+        // Same reasoning as the drag reset above: a folder left open when the
+        // launcher was dismissed must not leave the grid hidden next time.
+        gridViewController.setGridContentHidden(false)
     }
 
     /// Debug-only entry point (`LAUNCHPAD_DEBUG_SEARCH_QUERY`, wired in
