@@ -499,7 +499,7 @@ public struct SettingsView: View {
         case .large: L10n.iconScalePresetLarge
         case .standard: L10n.iconScalePresetStandard
         case .compact: L10n.iconScalePresetCompact
-        case .custom: L10n.gridPresetCustom
+        case .custom: L10n.iconScalePresetCustom
         }
     }
 

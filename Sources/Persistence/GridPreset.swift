@@ -1,118 +1,6 @@
 import Foundation
 
-/// Legacy layout density values retained for compatibility with documents and
-/// callers from the first preset implementation. The current Settings surface
-/// exposes columns and rows directly and uses `GridIconScalePreset` for icon
-/// sizing; these geometry presets are no longer presented as the primary UI.
-public enum GridPreset: String, CaseIterable, Hashable, Sendable, Identifiable {
-    case spacious
-    case balanced
-    case compact
-    case custom
-
-    public var id: String { rawValue }
-
-    public static var selectableCases: [GridPreset] {
-        [.spacious, .balanced, .compact]
-    }
-
-    public var columns: Int {
-        switch self {
-        case .spacious: return 6
-        case .balanced: return 7
-        case .compact: return 8
-        case .custom: return 0
-        }
-    }
-
-    public var rows: Int {
-        switch self {
-        case .spacious: return 4
-        case .balanced, .compact: return 5
-        case .custom: return 0
-        }
-    }
-
-    /// Horizontal cell gap in points.
-    public var horizontalSpacing: Double {
-        switch self {
-        case .spacious: return 28
-        case .balanced: return 24
-        case .compact: return 20
-        case .custom: return 0
-        }
-    }
-
-    /// Vertical cell gap in points. Compact deliberately keeps a little more
-    /// vertical breathing room so labels never collide with enlarged icons.
-    public var verticalSpacing: Double {
-        switch self {
-        case .spacious: return 28
-        case .balanced: return 24
-        case .compact: return 20
-        case .custom: return 0
-        }
-    }
-
-    /// Outer page margin in points.
-    public var pageMargins: Double {
-        switch self {
-        case .spacious: return 42
-        case .balanced, .compact: return 40
-        case .custom: return 0
-        }
-    }
-
-    /// Additional icon multiplier consumed by GridViewController.
-    public var iconScale: Double {
-        switch self {
-        case .spacious: return 1.20
-        case .balanced: return 1.16
-        case .compact: return 1.10
-        case .custom: return 1.00
-        }
-    }
-
-    public func applying(to current: GridSettings) -> GridSettings {
-        guard self != .custom else { return current }
-        var updated = current
-        updated.columns = columns
-        updated.rows = rows
-        updated.horizontalSpacing = horizontalSpacing
-        updated.verticalSpacing = verticalSpacing
-        updated.pageMargins = pageMargins
-        updated.iconScale = iconScale
-        return updated
-    }
-
-    public static func matching(_ settings: GridSettings) -> GridPreset {
-        selectableCases.first { preset in
-            let geometryMatches =
-                preset.columns == settings.columns
-                && preset.rows == settings.rows
-                && abs(preset.horizontalSpacing - settings.horizontalSpacing) < 0.01
-                && abs(preset.verticalSpacing - settings.verticalSpacing) < 0.01
-                && abs(preset.pageMargins - settings.pageMargins) < 0.01
-            guard geometryMatches else { return false }
-
-            // Documents written before iconScale was introduced decode the
-            // legacy fallback (1.05). Balanced geometry must remain selectable
-            // instead of being shown as Custom solely because that key was
-            // absent; an explicitly different scale still remains Custom.
-            let matchesScale = abs(preset.iconScale - settings.iconScale) < 0.01
-            let isLegacyBalanced = preset == .balanced && abs(settings.iconScale - 1.05) < 0.01
-            return matchesScale || isLegacyBalanced
-        } ?? .custom
-    }
-}
-
 /// Icon-size choices are intentionally independent from the grid geometry.
-///
-/// `GridPreset` remains available for decoding/compatibility with the first
-/// density implementation, but new settings UI should use this enum: changing
-/// columns or rows never selects a layout preset or changes the geometry on its
-/// own. `smart` resolves against the current grid capacity (and, when known,
-/// the available cell size).
 public enum GridIconScalePreset: String, CaseIterable, Hashable, Sendable, Identifiable {
     case smart
     case large
@@ -164,7 +52,7 @@ public enum GridIconScalePreset: String, CaseIterable, Hashable, Sendable, Ident
     }
 
     /// Applies only icon scale; columns, rows, spacing, and margins are kept
-    /// exactly as supplied. This is the key separation from `GridPreset`.
+    /// exactly as supplied. This keeps icon sizing independent from geometry.
     public func applying(to current: GridSettings, availableCellSize: CGSize? = nil) -> GridSettings {
         guard let scale = scale(
             columns: current.columns,

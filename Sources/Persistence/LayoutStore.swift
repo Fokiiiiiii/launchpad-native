@@ -40,7 +40,7 @@ public actor LayoutStore {
     public func load() -> LayoutDocument {
         switch Self.decode(at: primaryURL) {
         case .success(let doc):
-            return LayoutSchemaMigrator.migrate(doc)
+            return doc
         case .failure(let error):
             if FileManager.default.fileExists(atPath: primaryURL.path) {
                 DiagnosticsLog.persistence.error("layout.json exists but failed to decode: \(error.localizedDescription, privacy: .public); falling back to last-known-good backup")
@@ -49,7 +49,7 @@ public actor LayoutStore {
 
         switch Self.decode(at: backupURL) {
         case .success(let backup):
-            return LayoutSchemaMigrator.migrate(backup)
+            return backup
         case .failure(let error):
             if FileManager.default.fileExists(atPath: backupURL.path) {
                 DiagnosticsLog.persistence.error("layout.lastknowngood.json exists but failed to decode: \(error.localizedDescription, privacy: .public); returning empty layout")
@@ -121,18 +121,5 @@ public actor LayoutStore {
         } catch {
             return .failure(error)
         }
-    }
-}
-
-/// Placeholder migration chain. Only schema version 1 exists today; this
-/// exists so adding version 2 later is a new `case` here, not a rewrite of
-/// `LayoutStore`.
-enum LayoutSchemaMigrator {
-    static func migrate(_ document: LayoutDocument) -> LayoutDocument {
-        var document = document
-        if document.schemaVersion < LayoutDocument.currentSchemaVersion {
-            document.schemaVersion = LayoutDocument.currentSchemaVersion
-        }
-        return document
     }
 }

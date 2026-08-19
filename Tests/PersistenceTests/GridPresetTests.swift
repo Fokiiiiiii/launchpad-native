@@ -2,42 +2,6 @@ import Foundation
 import Testing
 @testable import Persistence
 
-@Test func presetsExposeSupportedCapacities() {
-    #expect(GridPreset.spacious.columns == 6)
-    #expect(GridPreset.spacious.rows == 4)
-    #expect(GridPreset.balanced.columns == 7)
-    #expect(GridPreset.balanced.rows == 5)
-    #expect(GridPreset.compact.columns == 8)
-    #expect(GridPreset.compact.rows == 5)
-}
-
-@Test func applyingPresetUpdatesGeometryAndIconScale() {
-    let base = GridSettings.default
-    let updated = GridPreset.balanced.applying(to: base)
-
-    #expect(updated.columns == 7)
-    #expect(updated.rows == 5)
-    #expect(updated.horizontalSpacing == GridPreset.balanced.horizontalSpacing)
-    #expect(updated.verticalSpacing == GridPreset.balanced.verticalSpacing)
-    #expect(updated.pageMargins == GridPreset.balanced.pageMargins)
-    #expect(updated.iconScale == GridPreset.balanced.iconScale)
-    #expect(GridPreset.matching(updated) == .balanced)
-}
-
-@Test func manualGeometryIsReportedAsCustom() {
-    let base = GridSettings.default
-    var custom = GridPreset.balanced.applying(to: base)
-    custom.columns = 9
-
-    #expect(GridPreset.matching(custom) == .custom)
-}
-
-@Test func presetValuesKeepIconsLargerThanLegacyBaseline() {
-    #expect(GridPreset.spacious.iconScale > 1)
-    #expect(GridPreset.balanced.iconScale > 1)
-    #expect(GridPreset.compact.iconScale > 1)
-}
-
 @Test func iconScalePresetLeavesGeometryUntouched() {
     let base = GridSettings.default
     let updated = GridIconScalePreset.large.applying(to: base)

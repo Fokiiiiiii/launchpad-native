@@ -1,7 +1,4 @@
-"settings.tab.grid" = "グリッド";
 "settings.tab.triggers" = "起動方法";
-"settings.tab.sources" = "ソース";
-"settings.tab.hidden" = "非表示のアプリ";
 "settings.tab.about" = "概要";
 "settings.tab.general" = "一般";
 "settings.tab.screen" = "画面";
@@ -13,9 +10,7 @@
 "settings.about.designcredit" = "macOS向け · Liquid Glass";
 "settings.grid.columns" = "列数: %d";
 "settings.grid.rows" = "行数: %d";
-"settings.grid.layout" = "レイアウト";
 "settings.grid.layout.paged" = "ページ形式";
-"settings.grid.layout.verticalscroll" = "縦スクロール";
 "launcher.quickmenu.accessibility" = "表示オプション";
 "launcher.quickmenu.opensettings" = "設定を開く…";
 "panel.close.accessibility" = "閉じる";
@@ -26,12 +21,7 @@
 "settings.grid.sortby.dateadded" = "追加日順";
 "settings.grid.sortby.lastused" = "最終使用日順";
 "settings.grid.display" = "表示";
-"settings.grid.preset.header" = "グリッド密度";
-"settings.grid.preset.spacious" = "ゆったり";
-"settings.grid.preset.balanced" = "バランス";
-"settings.grid.preset.compact" = "コンパクト";
-"settings.grid.preset.custom" = "カスタム";
-"settings.grid.preset.hint" = "列数と行数は独立して設定できます。アイコンサイズのプリセットはサイズだけを変更します。";
+"settings.grid.iconscale.custom" = "カスタム";
 "settings.grid.layout.header" = "グリッドレイアウト";
 "settings.grid.iconscale.header" = "アイコンサイズ";
 "settings.grid.iconscale.smart" = "スマート推奨";
@@ -39,13 +29,10 @@
 "settings.grid.iconscale.standard" = "標準";
 "settings.grid.iconscale.compact" = "コンパクト";
 "settings.grid.iconscale.manual" = "手動サイズ";
-"settings.grid.icongrid" = "アイコングリッド";
-"settings.grid.layout.paged.hint" = "ページ表示が有効です。";
 "settings.grid.reorganize.hint" = "空きスペースを詰めてアプリを前方へ移動します。";
 "settings.grid.iconscale.hint" = "スマート推奨は現在のグリッドに合わせてアイコンサイズを決めます。手動変更はカスタムになります。実効上限はセル間隔に合わせて自動調整されます。";
 "settings.grid.reorganize" = "整理する";
 "settings.grid.hidedock" = "Dockを隠す";
-"settings.appicon.header" = "アプリアイコン";
 "settings.appicon.limitednotice" = "実行中アプリのDock／Appスイッチャーとメニューバーアイコンだけが変わります。LSUIElementの常駐アプリなので通常はDockアイコンがなく、変更は再起動すると元に戻ります。";
 "settings.appicon.style.classic" = "クラシック";
 "settings.appicon.style.monochrome" = "モノクロ";
@@ -107,7 +94,6 @@
 "grid.pagecontrol.pagenumber" = "ページ %d";
 "launcher.search.placeholder" = "アプリケーションを検索";
 "launcher.search.accessibility" = "アプリを検索";
-"launcher.settingsbutton.accessibility" = "設定";
 "settings.hotkey.clicktorecord" = "クリックして記録";
 "settings.hotkey.presscombo" = "キーの組み合わせを押してください…";
 "settings.hotkey.unknownkey" = "キー %d";
@@ -131,7 +117,6 @@
 "settings.apps.showmenubarapplications" = "メニューバーアプリを表示";
 "settings.apps.showhiddeninsearch" = "検索結果に非表示のアプリを含める";
 "settings.screen.background" = "背景";
-"settings.screen.background.mode" = "種類";
 "settings.screen.background.wallpaper" = "壁紙";
 "settings.screen.background.glass" = "グラス";
 "settings.screen.background.material" = "グラス素材感";

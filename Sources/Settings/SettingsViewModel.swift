@@ -102,7 +102,6 @@ public final class SettingsViewModel: ObservableObject {
         didSet {
             guard columns != oldValue else { return }
             guard !isRefreshing else { return }
-            guard !isApplyingGridPreset else { return }
             applyGridDimensions()
             persist()
         }
@@ -111,14 +110,10 @@ public final class SettingsViewModel: ObservableObject {
         didSet {
             guard rows != oldValue else { return }
             guard !isRefreshing else { return }
-            guard !isApplyingGridPreset else { return }
             applyGridDimensions()
             persist()
         }
     }
-    @Published public private(set) var gridPreset: GridPreset = .custom
-    private var isApplyingGridPreset = false
-
     /// Persisted icon multiplier, intentionally independent from columns and
     /// rows. Manual edits are represented as `.custom`; selecting a preset
     /// changes this value only and never changes grid capacity.
@@ -126,7 +121,7 @@ public final class SettingsViewModel: ObservableObject {
         didSet {
             guard iconScale != oldValue else { return }
             guard !isRefreshing else { return }
-            guard !isApplyingGridPreset, !isApplyingIconScalePreset else { return }
+            guard !isApplyingIconScalePreset else { return }
             var grid = model.gridSettings
             grid.iconScale = iconScale
             model.updateGridSettings(grid)
@@ -377,7 +372,6 @@ public final class SettingsViewModel: ObservableObject {
         let grid = model.gridSettings
         columns = grid.columns
         rows = grid.rows
-        gridPreset = GridPreset.matching(grid)
         iconScale = grid.iconScale
         iconScalePreset = GridIconScalePreset.matching(grid)
         layoutMode = model.layoutMode == .verticalScroll ? .paged : model.layoutMode
@@ -436,29 +430,7 @@ public final class SettingsViewModel: ObservableObject {
         }
 
         model.updateGridSettings(grid)
-        gridPreset = GridPreset.matching(grid)
         iconScalePreset = selectedIconScalePreset
-    }
-
-    /// Repacks every page tightly under the *current* grid settings — a
-    /// manual one-shot action (unlike Sort By/Hide Dock, there's no
-    /// toggled state to keep in sync with, so this isn't a `@Published`
-    /// property).
-    /// Applies one of the supported densities in a single model update so
-    /// pages reflow once and the icon geometry changes atomically with the
-    /// columns/rows values.
-    public func applyGridPreset(_ preset: GridPreset) {
-        guard preset != .custom else { return }
-        let grid = preset.applying(to: model.gridSettings)
-        isApplyingGridPreset = true
-        columns = grid.columns
-        rows = grid.rows
-        iconScale = grid.iconScale
-        isApplyingGridPreset = false
-        model.updateGridSettings(grid)
-        gridPreset = preset
-        iconScalePreset = GridIconScalePreset.matching(grid)
-        persist()
     }
 
     /// Applies an icon-size choice while keeping the current grid geometry and
@@ -663,12 +635,9 @@ public final class SettingsViewModel: ObservableObject {
         defer { isRefreshing = false }
 
         let grid = model.gridSettings
-        isApplyingGridPreset = true
         columns = grid.columns
         rows = grid.rows
         iconScale = grid.iconScale
-        isApplyingGridPreset = false
-        gridPreset = GridPreset.matching(grid)
         iconScalePreset = GridIconScalePreset.matching(grid)
 
         layoutMode = model.layoutMode == .verticalScroll ? .paged : model.layoutMode

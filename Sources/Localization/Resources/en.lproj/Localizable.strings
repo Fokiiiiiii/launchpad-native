@@ -1,7 +1,4 @@
-"settings.tab.grid" = "Grid";
 "settings.tab.triggers" = "Triggers";
-"settings.tab.sources" = "Sources";
-"settings.tab.hidden" = "Hidden Apps";
 "settings.tab.about" = "About";
 "settings.tab.general" = "General";
 "settings.tab.screen" = "Screen";
@@ -13,9 +10,7 @@
 "settings.about.designcredit" = "Designed for macOS · Liquid Glass";
 "settings.grid.columns" = "Columns: %d";
 "settings.grid.rows" = "Rows: %d";
-"settings.grid.layout" = "Layout";
 "settings.grid.layout.paged" = "Paged";
-"settings.grid.layout.verticalscroll" = "Vertical Scroll";
 "launcher.quickmenu.accessibility" = "View options";
 "launcher.quickmenu.opensettings" = "Open Settings…";
 "panel.close.accessibility" = "Close";
@@ -26,12 +21,7 @@
 "settings.grid.sortby.dateadded" = "Date Added";
 "settings.grid.sortby.lastused" = "Last Used";
 "settings.grid.display" = "Display";
-"settings.grid.preset.header" = "Grid density";
-"settings.grid.preset.spacious" = "Spacious";
-"settings.grid.preset.balanced" = "Balanced";
-"settings.grid.preset.compact" = "Compact";
-"settings.grid.preset.custom" = "Custom";
-"settings.grid.preset.hint" = "Columns and rows are independent; icon-size presets change only the icon scale.";
+"settings.grid.iconscale.custom" = "Custom";
 "settings.grid.layout.header" = "Grid layout";
 "settings.grid.iconscale.header" = "Icon size";
 "settings.grid.iconscale.smart" = "Smart";
@@ -39,13 +29,10 @@
 "settings.grid.iconscale.standard" = "Standard";
 "settings.grid.iconscale.compact" = "Compact";
 "settings.grid.iconscale.manual" = "Manual size";
-"settings.grid.icongrid" = "Icon grid";
-"settings.grid.layout.paged.hint" = "Paged browsing is enabled for this build.";
 "settings.grid.reorganize.hint" = "Moves apps forward to fill empty spaces.";
 "settings.grid.iconscale.hint" = "Smart recommends an icon size for the current grid. Manual changes use Custom. The effective limit adapts to the cell spacing.";
 "settings.grid.reorganize" = "Reorganize";
 "settings.grid.hidedock" = "Hide Dock";
-"settings.appicon.header" = "App Icon";
 "settings.appicon.limitednotice" = "This changes the running app's Dock/App Switcher and menu-bar icon only. The default LSUIElement build has no Dock icon, and the change resets when the app relaunches.";
 "settings.appicon.style.classic" = "Classic";
 "settings.appicon.style.monochrome" = "Monochrome";
@@ -107,7 +94,6 @@
 "grid.pagecontrol.pagenumber" = "Page %d";
 "launcher.search.placeholder" = "Search applications";
 "launcher.search.accessibility" = "Search applications";
-"launcher.settingsbutton.accessibility" = "Settings";
 "settings.hotkey.clicktorecord" = "Click to record";
 "settings.hotkey.presscombo" = "Press a key combo…";
 "settings.hotkey.unknownkey" = "Key %d";
@@ -131,7 +117,6 @@
 "settings.apps.showmenubarapplications" = "Show Menu Bar Applications";
 "settings.apps.showhiddeninsearch" = "Show Hidden Apps in Search";
 "settings.screen.background" = "Background";
-"settings.screen.background.mode" = "Type";
 "settings.screen.background.wallpaper" = "Wallpaper";
 "settings.screen.background.glass" = "Glass";
 "settings.screen.background.material" = "Glass Material";

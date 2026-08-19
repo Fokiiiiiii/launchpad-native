@@ -580,15 +580,15 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // The background is a plain sibling subview behind the real
         // content — not a container for it — so normal AppKit hit-testing
         // applies to every button/cell (`LauncherBackgroundView.hitTest`
-        // also hard-disables itself, same discipline `GlassBackgroundView
-        // .swift`'s doc comment establishes for why: a purely decorative
+        // also hard-disables itself, same discipline the shared glass-surface
+        // implementation establishes for why: a purely decorative
         // background must never be a hit-test target).
         let root = NSView(frame: NSRect(origin: .zero, size: screen.frame.size))
         // Backs the open/close scale animation — animated on `root`'s own
         // layer, a level above `background`/`content.view`, so scaling
         // never fights with either of their own layer usage.
         root.wantsLayer = true
-        // `LauncherBackgroundView`, not `GlassBackgroundFactory` — a real,
+        // `LauncherBackgroundView`, not the shared card material — a real,
         // confirmed regression ("アプリの周りにある謎の枠を消してくれ")
         // traced back to stretching `NSGlassEffectView`'s own Liquid Glass
         // material (which self-draws a specular/edge highlight as part of

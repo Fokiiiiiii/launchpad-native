@@ -39,6 +39,7 @@ public actor ApplicationScanner {
         for record in records {
             merged[record.id] = record
         }
+        guard merged != snapshot.recordsByID else { return }
         snapshot = Snapshot(recordsByID: merged)
         DiagnosticsLog.catalog.info(
             "Catalog snapshot accepted: \(merged.count, privacy: .public) records"
@@ -58,11 +59,14 @@ public actor ApplicationScanner {
                 merged[record.id] = record
             }
         }
+        let changed = merged != snapshot.recordsByID
         snapshot = Snapshot(recordsByID: merged)
         DiagnosticsLog.catalog.info(
             "Full scan complete: \(merged.count, privacy: .public) applications across \(self.sources.count, privacy: .public) sources"
         )
-        broadcast()
+        if changed {
+            broadcast()
+        }
         return snapshot
     }
 
@@ -162,6 +166,7 @@ public actor ApplicationScanner {
                 merged[record.id] = record
             }
         }
+        guard merged != snapshot.recordsByID else { return }
         snapshot = Snapshot(recordsByID: merged)
         DiagnosticsLog.catalog.info(
             "Incremental rescan of \(affectedSources.count, privacy: .public) source(s) after filesystem change"

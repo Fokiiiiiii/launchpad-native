@@ -4,10 +4,6 @@ import DesignSystem
 /// Grid-local facade over the shared Liquid Glass design system.
 @MainActor
 public enum GlassBackgroundHelper {
-    static func makeBackground(cornerRadius: CGFloat, dark: Bool = false) -> NSView {
-        GlassSurfaceFactory.makeBackground(cornerRadius: cornerRadius, dark: dark)
-    }
-
     public static func makeFolderCardBackground(
         cornerRadius: CGFloat,
         tint: NSColor = NSColor.white.withAlphaComponent(0.07),

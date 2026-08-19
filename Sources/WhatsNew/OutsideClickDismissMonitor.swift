@@ -5,9 +5,8 @@ import Diagnostics
 /// — dismisses this floating panel when the user clicks anywhere outside its
 /// own window, without ever affecting the launcher window rendering
 /// underneath. See that type's own doc comment for the full reasoning
-/// (`NSEvent.addLocalMonitorForEvents` vs. `addGlobalMonitorForEvents`), and
-/// `WhatsNewGlassBackground.swift`'s doc comment for why this module keeps
-/// its own small copies instead of depending on `Settings`.
+/// (`NSEvent.addLocalMonitorForEvents` vs. `addGlobalMonitorForEvents`), while
+/// keeping this target independent from `Settings`.
 @MainActor
 final class OutsideClickDismissMonitor {
     private var monitor: Any?

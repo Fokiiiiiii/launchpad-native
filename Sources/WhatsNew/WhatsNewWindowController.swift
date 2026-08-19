@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import DesignSystem
 import Diagnostics
 import SwiftUI
 
@@ -39,7 +40,13 @@ public final class WhatsNewWindowController: NSObject, NSWindowDelegate {
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
 
         let root = NSView()
-        let background = WhatsNewGlassBackground.make(cornerRadius: 22)
+        let background = GlassSurfaceFactory.makeCardBackground(
+            cornerRadius: 22,
+            borderAlpha: 0.13,
+            shadowOpacity: 0.60,
+            shadowRadius: 55,
+            shadowOffset: CGSize(width: 0, height: -27)
+        )
         background.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(background)
         root.addSubview(hosting.view)

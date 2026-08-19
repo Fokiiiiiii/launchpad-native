@@ -50,7 +50,8 @@ private final class EventMonitorToken: @unchecked Sendable {
 /// that call site's doc comment. Kept anyway as cheap, correct defense in
 /// depth: a purely decorative/passthrough overlay still shouldn't be
 /// hit-testable, on the same principle as `NonInteractiveGlassEffectView`
-/// in `GlassBackgroundView.swift`, even though it wasn't this bug's cause.
+    /// in the shared glass-surface implementation, even though it wasn't this
+    /// bug's cause.
 private final class NonInteractiveImageView: NSImageView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

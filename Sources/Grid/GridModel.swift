@@ -784,12 +784,6 @@ public final class GridModel {
         onChange?()
     }
 
-    public func setCustomSourceEnabled(id: String, enabled: Bool) {
-        guard let index = document.customSources.firstIndex(where: { $0.id == id }) else { return }
-        document.customSources[index].enabled = enabled
-        onChange?()
-    }
-
     // MARK: - Legacy import
 
     /// Applies a one-time Classic Launchpad import, but only when this

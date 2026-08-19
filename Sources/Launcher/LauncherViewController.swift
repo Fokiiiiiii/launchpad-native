@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import DesignSystem
 import Diagnostics
 import Grid
 import Localization
@@ -68,15 +69,15 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // own search field is a distinct material, not bare text on the
         // ambient background) — `searchBarGlass` is a purely decorative
         // sibling behind `searchIcon`/`searchField`, never their container,
-        // for the same hit-testing reason `GlassBackgroundView`'s doc
-        // comment explains for the full-screen background. Real, confirmed
+        // for the same hit-testing reason used by the shared glass-surface
+        // implementation. Real, confirmed
         // report ("検索バーのデザインが堅い"): the reference's own SwiftUI
         // source (`TSLayout.searchCorner` = 10) and its HTML mockup
         // disagree here (20pt/half-height in the HTML) — 10pt on a 36pt-tall
         // bar reads as a barely-rounded rectangle, not a soft capsule. Full
         // stadium shape (half the bar's own height) matches what the user
         // actually saw and asked for.
-        let searchBarGlass = GlassBackgroundFactory.makeBackground(cornerRadius: 18)
+        let searchBarGlass = GlassSurfaceFactory.makeBackground(cornerRadius: 18)
         searchBarGlass.translatesAutoresizingMaskIntoConstraints = false
 
         searchIcon.translatesAutoresizingMaskIntoConstraints = false

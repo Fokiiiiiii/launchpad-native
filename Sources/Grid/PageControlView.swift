@@ -1,4 +1,5 @@
 import AppKit
+import DesignSystem
 import Localization
 
 /// Page-dot indicator plus explicit prev/next chevron buttons. The dots
@@ -54,9 +55,8 @@ final class PageControlView: NSView {
         // A small glass pill behind the chevrons/dots (Photos' floating page
         // control is the reference) — a decorative sibling, added first so it
         // sits behind the buttons, never their container (same hit-testing
-        // reasoning as `Launcher.GlassBackgroundFactory`, which this can't
-        // import directly).
-        let glassPill = GlassBackgroundHelper.makeBackground(cornerRadius: 18)
+        // same non-interactive-surface rule as the launcher's search pill).
+        let glassPill = GlassSurfaceFactory.makeBackground(cornerRadius: 18)
         glassPill.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(glassPill)

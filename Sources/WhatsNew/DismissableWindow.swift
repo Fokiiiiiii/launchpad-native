@@ -2,9 +2,8 @@ import AppKit
 
 /// `WhatsNew`-module-local duplicate of `Settings.DismissableWindow` — same
 /// Escape-to-close behavior, mirroring `Sources/Launcher/LauncherWindow.swift`'s
-/// own `cancelOperation` override. See `WhatsNewGlassBackground.swift`'s doc
-/// comment for why this module keeps its own small copies instead of
-/// depending on `Settings`.
+/// own `cancelOperation` override. The panel surface is provided by the
+/// shared DesignSystem target.
 final class DismissableWindow: NSWindow {
     var onCancel: (() -> Void)?
 

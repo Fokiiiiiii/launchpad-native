@@ -17,10 +17,7 @@ public enum L10n {
 
     // MARK: Settings — tabs
 
-    public static var tabGrid: String { string("settings.tab.grid", "Grid") }
     public static var tabTriggers: String { string("settings.tab.triggers", "Triggers") }
-    public static var tabSources: String { string("settings.tab.sources", "Sources") }
-    public static var tabHidden: String { string("settings.tab.hidden", "Hidden Apps") }
     public static var tabAbout: String { string("settings.tab.about", "About") }
     public static var tabGeneral: String { string("settings.tab.general", "General") }
     public static var tabScreen: String { string("settings.tab.screen", "Screen") }
@@ -44,20 +41,14 @@ public enum L10n {
     public static func rowsLabel(_ n: Int) -> String {
         String(format: string("settings.grid.rows", "Rows: %d"), n)
     }
-    public static var layoutPickerLabel: String { string("settings.grid.layout", "Layout") }
     public static var layoutModePaged: String { string("settings.grid.layout.paged", "Paged") }
-    public static var layoutModeVerticalScroll: String { string("settings.grid.layout.verticalscroll", "Vertical Scroll") }
     public static var sortByLabel: String { string("settings.grid.sortby", "Sort By") }
     /// Neutral section header for the group containing Sort By, Reorganize,
     /// and Hide Dock — previously reused `sortByLabel` for this header too,
     /// which read oddly once Reorganize/Hide Dock (unrelated to sorting)
     /// shared the same section.
     public static var displaySectionHeader: String { string("settings.grid.display", "Display") }
-    public static var gridPresetSectionHeader: String { string("settings.grid.preset.header", "Grid density") }
-    public static var gridPresetSpacious: String { string("settings.grid.preset.spacious", "Spacious") }
-    public static var gridPresetBalanced: String { string("settings.grid.preset.balanced", "Balanced") }
-    public static var gridPresetCompact: String { string("settings.grid.preset.compact", "Compact") }
-    public static var gridPresetCustom: String { string("settings.grid.preset.custom", "Custom") }
+    public static var iconScalePresetCustom: String { string("settings.grid.iconscale.custom", "Custom") }
     public static var gridLayoutSectionHeader: String { string("settings.grid.layout.header", "Grid layout") }
     public static var iconScaleSectionHeader: String { string("settings.grid.iconscale.header", "Icon size") }
     public static var iconScalePresetSmart: String { string("settings.grid.iconscale.smart", "Smart") }
@@ -65,13 +56,6 @@ public enum L10n {
     public static var iconScalePresetStandard: String { string("settings.grid.iconscale.standard", "Standard") }
     public static var iconScalePresetCompact: String { string("settings.grid.iconscale.compact", "Compact") }
     public static var iconScaleManualLabel: String { string("settings.grid.iconscale.manual", "Manual size") }
-    public static var gridPresetHint: String {
-        string("settings.grid.preset.hint", "Columns and rows are independent; icon-size presets change only the icon scale.")
-    }
-    public static var iconGridLabel: String { string("settings.grid.icongrid", "Icon grid") }
-    public static var layoutModePagedHint: String {
-        string("settings.grid.layout.paged.hint", "Paged browsing is enabled for this build.")
-    }
     public static var reorganizeHint: String {
         string("settings.grid.reorganize.hint", "Moves apps forward to fill empty spaces.")
     }
@@ -87,7 +71,6 @@ public enum L10n {
 
     // MARK: Settings — App Icon picker
 
-    public static var appIconSectionHeader: String { string("settings.appicon.header", "App Icon") }
     public static var appIconLimitedEffectNotice: String {
         string(
             "settings.appicon.limitednotice",
@@ -223,7 +206,6 @@ public enum L10n {
 
     public static var searchPlaceholder: String { string("launcher.search.placeholder", "Search applications") }
     public static var searchAccessibilityLabel: String { string("launcher.search.accessibility", "Search applications") }
-    public static var settingsButtonAccessibilityLabel: String { string("launcher.settingsbutton.accessibility", "Settings") }
 
     // MARK: What's New
 
@@ -247,7 +229,6 @@ public enum L10n {
     public static var showMenuBarApplicationsToggleLabel: String { string("settings.apps.showmenubarapplications", "Show Menu Bar Applications") }
     public static var showHiddenAppsInSearchToggleLabel: String { string("settings.apps.showhiddeninsearch", "Show Hidden Apps in Search") }
     public static var backgroundSectionHeader: String { string("settings.screen.background", "Background") }
-    public static var backgroundModeLabel: String { string("settings.screen.background.mode", "Type") }
     public static var backgroundModeWallpaper: String { string("settings.screen.background.wallpaper", "Wallpaper") }
     public static var backgroundModeGlass: String { string("settings.screen.background.glass", "Glass") }
     public static var glassMaterialLabel: String { string("settings.screen.background.material", "Glass Material") }
