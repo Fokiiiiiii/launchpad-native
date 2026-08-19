@@ -144,3 +144,31 @@ private func makePanel(model: GridModel, folderID: FolderID, columns: Int = 3) -
     try await Task.sleep(for: .milliseconds(500))
     #expect(panel.visibleTileCountForTesting == 9)
 }
+
+// MARK: - Renaming in place
+
+@Test @MainActor func editingTheTitleRenamesTheFolder() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let (model, folderID) = await modelWithFolder(itemCount: 4, directory: dir)
+    let panel = makePanel(model: model, folderID: folderID)
+
+    panel.titleForTesting = "  Games  "
+    panel.commitTitleEdit()
+    #expect(model.folders[folderID]?.name == "Games")
+}
+
+/// Clearing the field is not a rename — a folder with no name at all would be
+/// unidentifiable on the grid, so the old one comes back.
+@Test @MainActor func clearingTheTitleRestoresTheExistingName() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let (model, folderID) = await modelWithFolder(itemCount: 4, directory: dir)
+    model.renameFolder(folderID, to: "Utilities")
+    let panel = makePanel(model: model, folderID: folderID)
+
+    panel.titleForTesting = "   "
+    panel.commitTitleEdit()
+    #expect(model.folders[folderID]?.name == "Utilities")
+    #expect(panel.titleForTesting == "Utilities")
+}

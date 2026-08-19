@@ -1034,7 +1034,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             return
         }
         DiagnosticsLog.launcher.info("debugOpenFolder: opening folder #\(ordinal, privacy: .public) at index \(folderIndices[position], privacy: .public)")
-        openFolder(folderID)
+        openFolder(folderID, anchorIndexPath: IndexPath(item: folderIndices[position], section: 0))
     }
 
     /// Debug-only — this session has no Accessibility/GUI-scripting
@@ -1184,7 +1184,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             guard let record = model.record(for: id) else { return }
             onLaunch(record)
         case .folder(let folderID):
-            openFolder(folderID)
+            openFolder(folderID, anchorIndexPath: indexPath)
         }
     }
 
@@ -1201,13 +1201,33 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     ///   `view.window?.contentView` is the window's actual full-bounds root view
     ///   (see `LauncherWindowController.makeWindow`'s own `root`), so anchoring
     ///   there instead covers the whole screen, exactly like the reference.
-    private func openFolder(_ folderID: FolderID) {
+    /// The on-screen rect of the folder icon a panel was opened from, in the
+    /// overlay host's coordinates — what the panel points its notch at.
+    ///
+    /// Uses the same rect-convert path the item drag relies on. It must be
+    /// `convert(_ rect:to:)` and never `convert(_ point:to:)`: only the rect
+    /// form corrects for `collectionView` being flipped while the host is not,
+    /// and mixing the two once put every converted position out by exactly one
+    /// cell's height (see `ItemDragController.updateItemDrag`).
+    ///
+    /// `nil` when the cell is not realized — a folder opened from a debug hook
+    /// or from search has no visible icon to point at, and the panel falls back
+    /// to centering itself.
+    private func anchorIconFrame(at indexPath: IndexPath?, in host: NSView) -> NSRect? {
+        guard let indexPath,
+              let cell = collectionView.item(at: indexPath) as? GridCellItem else { return nil }
+        return cell.view.convert(cell.iconFrame, to: host)
+    }
+
+    private func openFolder(_ folderID: FolderID, anchorIndexPath: IndexPath?) {
+        let host = view.window?.contentView ?? view
         folderOverlay.open(
             folderID,
-            in: view.window?.contentView ?? view,
+            in: host,
             metrics: FolderOverlayPresenter.Metrics(
                 iconSize: currentIconSize * currentEffectiveIconScale,
-                configuredColumns: model.gridSettings.columns
+                configuredColumns: model.gridSettings.columns,
+                anchorIconFrame: anchorIconFrame(at: anchorIndexPath, in: host)
             ),
             onLaunch: { [weak self] record in self?.onLaunch(record) },
             onItemDraggedOut: { [weak self] folderPage, folderIndex in
@@ -1246,7 +1266,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         switch item {
         case .folder(let folderID):
             return ContextMenuBuilder.folderMenu(
-                open: { [weak self] in self?.openFolder(folderID) },
+                open: { [weak self] in self?.openFolder(folderID, anchorIndexPath: indexPath) },
                 rename: { [weak self] in self?.promptRenameFolder(at: indexPath) },
                 ungroup: { [weak self] in
                     guard let self else { return }

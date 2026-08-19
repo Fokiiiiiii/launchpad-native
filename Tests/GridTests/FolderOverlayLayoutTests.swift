@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 @testable import Grid
 
@@ -61,4 +62,72 @@ import Testing
 /// …but a very short display must not collapse the card to nothing.
 @Test @MainActor func maximumPanelHeightHasAFloor() {
     #expect(FolderContentsViewController.maximumPanelHeight(availableHeight: 200) == 320)
+}
+
+// MARK: band placement
+
+private let hostSize = NSSize(width: 1_600, height: 1_000)
+
+/// A band that fits below its folder icon grows out of it, notch and all —
+/// the connection the system's own folder panel makes.
+@Test @MainActor func aBandThatFitsSitsBelowItsIconAndKeepsItsNotch() {
+    // AppKit's y axis runs upward, so "below the icon" is a smaller maxY.
+    let icon = NSRect(x: 700, y: 700, width: 100, height: 100)
+    let placement = FolderOverlayPresenter.bandPlacement(
+        size: NSSize(width: 1_408, height: 400),
+        in: hostSize,
+        anchorIconFrame: icon
+    )
+    #expect(placement.showsNotch)
+    #expect(placement.frame.maxY < icon.minY)
+    // Horizontally centered on screen — only the notch tracks the icon.
+    #expect(abs(placement.frame.midX - hostSize.width / 2) < 0.001)
+}
+
+/// This grid's icons can be large enough that a three-row folder is most of the
+/// screen tall. Forcing that under its icon would pin it to the top with the
+/// icon buried inside it, so it centers — and drops the notch, which would
+/// otherwise point at something the band itself covers.
+@Test @MainActor func aBandTooTallToFitBelowItsIconCentersWithoutANotch() {
+    let icon = NSRect(x: 700, y: 540, width: 160, height: 160)
+    let placement = FolderOverlayPresenter.bandPlacement(
+        size: NSSize(width: 1_488, height: 800),
+        in: hostSize,
+        anchorIconFrame: icon
+    )
+    #expect(placement.showsNotch == false)
+    #expect(abs(placement.frame.midY - hostSize.height / 2) < 0.001)
+}
+
+/// A folder low on the grid leaves no room underneath either.
+@Test @MainActor func aFolderNearTheBottomCentersInstead() {
+    let icon = NSRect(x: 700, y: 120, width: 100, height: 100)
+    let placement = FolderOverlayPresenter.bandPlacement(
+        size: NSSize(width: 1_408, height: 400),
+        in: hostSize,
+        anchorIconFrame: icon
+    )
+    #expect(placement.showsNotch == false)
+    #expect(placement.frame.minY >= 0)
+}
+
+/// Without an anchor — a folder opened from a debug hook, where no cell is
+/// realized — there is nothing to point at.
+@Test @MainActor func theBandCentersWhenThereIsNoAnchor() {
+    let placement = FolderOverlayPresenter.bandPlacement(
+        size: NSSize(width: 1_408, height: 400),
+        in: hostSize,
+        anchorIconFrame: nil
+    )
+    #expect(placement.showsNotch == false)
+    #expect(abs(placement.frame.midY - hostSize.height / 2) < 0.001)
+    #expect(abs(placement.frame.midX - hostSize.width / 2) < 0.001)
+}
+
+/// Whatever the outcome, the band keeps the size it was given.
+@Test @MainActor func placementNeverResizesTheBand() {
+    let size = NSSize(width: 1_408, height: 400)
+    for anchor in [NSRect(x: 700, y: 700, width: 100, height: 100), NSRect(x: 700, y: 120, width: 100, height: 100)] {
+        #expect(FolderOverlayPresenter.bandPlacement(size: size, in: hostSize, anchorIconFrame: anchor).frame.size == size)
+    }
 }

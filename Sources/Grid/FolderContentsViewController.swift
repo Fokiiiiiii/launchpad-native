@@ -26,7 +26,7 @@ import SwiftUI
 /// "寸分違わず同じものにできないの？" (can't you make it exactly,
 /// pixel-for-pixel identical to the reference?) ask, whereas hosting the
 /// reference's actual view code is identical by construction.
-final class FolderContentsViewController: NSViewController {
+final class FolderContentsViewController: NSViewController, NSTextFieldDelegate {
     private let model: GridModel
     private let folderID: FolderID
     private let iconCache: IconCache
@@ -216,6 +216,24 @@ final class FolderContentsViewController: NSViewController {
         // has no explicit weight (defaults to regular).
         titleField.font = .systemFont(ofSize: 21, weight: .regular)
         titleField.alignment = .center
+        // Editable in place, the way the system's own folder title is.
+        //
+        // `NSTextField(labelWithString:)` builds a cell that is neither
+        // editable nor selectable, and this codebase has already lost a day to
+        // exactly that: a field whose cell refuses to track a click falls back
+        // to `super.mouseDown`, the click walks up the responder chain, and
+        // whatever sits behind it acts on it instead — here that would be the
+        // backdrop, so clicking the name would close the folder. Both flags are
+        // set explicitly rather than relying on any convenience initializer.
+        titleField.isEditable = true
+        titleField.isSelectable = true
+        titleField.isBordered = false
+        titleField.drawsBackground = false
+        titleField.focusRingType = .none
+        titleField.delegate = self
+        titleField.usesSingleLineMode = true
+        titleField.cell?.wraps = false
+        titleField.cell?.isScrollable = true
         // Matches the reference's own `.shadow(color: .black.opacity(0.5),
         // radius: 8, y: 2)` on the title text — AppKit's y-offset convention
         // is flipped relative to SwiftUI's (positive = up), so -2 here is
@@ -405,6 +423,10 @@ final class FolderContentsViewController: NSViewController {
     var pageCountForTesting: Int { folderPages.count }
     var visibleTileCountForTesting: Int { gridModel.tiles.count }
     var currentPageForTesting: Int { currentFolderPage }
+    var titleForTesting: String {
+        get { titleField.stringValue }
+        set { titleField.stringValue = newValue }
+    }
 
     /// The folder's own pages, or a single empty page if it has none.
     private var folderPages: [[LayoutItem]] {
@@ -413,7 +435,11 @@ final class FolderContentsViewController: NSViewController {
     }
 
     private func refresh() {
-        titleField.stringValue = model.folders[folderID]?.name ?? "Folder"
+        // Never overwrite what the user is in the middle of typing — an icon
+        // finishing its async load calls straight back into here.
+        if titleField.currentEditor() == nil {
+            titleField.stringValue = model.folders[folderID]?.name ?? "Folder"
+        }
         flattenedItems = []
         if let folder = model.folders[folderID] {
             for (pageIndex, page) in folder.pages.enumerated() {
@@ -583,6 +609,30 @@ final class FolderContentsViewController: NSViewController {
     private func tileID(for item: LayoutItem) -> String? {
         guard case .app(let id) = item, let record = model.record(for: id) else { return nil }
         return record.iconCacheKey
+    }
+
+    // MARK: - Renaming
+
+    /// Commits the edited name. Fires on Return and on losing focus alike —
+    /// clicking away from a half-typed name should keep it, not discard it,
+    /// matching how renaming works elsewhere in the system.
+    func controlTextDidEndEditing(_ obj: Notification) {
+        commitTitleEdit()
+    }
+
+    /// Split out of the delegate callback so the rule itself is reachable from
+    /// a test without synthesizing an editing session.
+    func commitTitleEdit() {
+        let typed = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let current = model.folders[folderID]?.name ?? ""
+        guard !typed.isEmpty else {
+            // An empty name is not a rename — put the old one back.
+            titleField.stringValue = current
+            return
+        }
+        guard typed != current else { return }
+        model.renameFolder(folderID, to: typed)
+        Task { await model.save() }
     }
 
     // MARK: - Drag safety net

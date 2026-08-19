@@ -33,7 +33,23 @@ final class FolderOverlayPresenter {
         /// applied through.
         let iconSize: Double
         let configuredColumns: Int
+        /// The folder icon's rect in the host's coordinates, so the band can
+        /// point back at what opened it. `nil` when the cell is not realized
+        /// (a debug hook, or a folder reached from search), in which case the
+        /// band centers itself and draws no notch.
+        let anchorIconFrame: NSRect?
     }
+
+    /// Side margin left around the band. The system's own folder panel does
+    /// not quite touch the screen edges either.
+    private static let bandSideInset: CGFloat = 96
+    /// Gap between the folder icon and the top of the band, leaving room for
+    /// the notch that spans it.
+    private static let notchHeight: CGFloat = 13
+    private static let notchWidth: CGFloat = 30
+    /// Kept clear of the screen edges when a folder near the top or bottom of
+    /// the grid would otherwise push the band off-screen.
+    private static let bandScreenMargin: CGFloat = 24
 
     private let model: GridModel
     private let iconCache: IconCache
@@ -41,6 +57,7 @@ final class FolderOverlayPresenter {
     /// Held for lifetime only — the panel's view is in the backdrop's
     /// subview tree, but nothing else retains the controller behind it.
     private var contentsViewController: FolderContentsViewController?
+    private var bandNotch: NSView?
 
     init(model: GridModel, iconCache: IconCache) {
         self.model = model
@@ -71,11 +88,10 @@ final class FolderOverlayPresenter {
             itemCount: itemCount,
             configuredColumns: configuredColumns
         )
-        let panelWidth = FolderContentsViewController.panelWidth(
-            availableWidth: hostView.bounds.width - 192,
-            columns: folderColumns,
-            iconSize: CGFloat(metrics.iconSize)
-        )
+        // A band spans the screen the way the system's own Launchpad does,
+        // rather than shrink-wrapping the grid. The tiles inside stay centered,
+        // so a folder holding two apps does not spread them to the edges.
+        let panelWidth = max(hostView.bounds.width - 2 * Self.bandSideInset, 320)
 
         let folderVC = FolderContentsViewController(
             model: model,
@@ -105,21 +121,15 @@ final class FolderOverlayPresenter {
             self?.contentsViewController?.handleArrowKey(delta: delta) ?? false
         }
 
-        // Blurs the grid behind the overlay, then darkens on top — matches
-        // the reference's `blur(22px)` + `rgba(8,8,9,.55)` exactly (a flat
-        // dim color alone, the previous implementation, left the grid
-        // sharply visible underneath instead of visibly blurred).
-        let blur = NonInteractiveFolderBlurView(frame: backdrop.bounds)
-        blur.autoresizingMask = [.width, .height]
-        blur.material = .fullScreenUI
-        blur.blendingMode = .withinWindow
-        blur.state = .active
-        backdrop.addSubview(blur)
-
+        // Dims the grid without hiding it. The system's own folder panel leaves
+        // the apps behind it recognisable — a full-strength blur plus 55% black
+        // (what this used while the panel was a centered card taking over the
+        // whole screen) removed the surroundings entirely, which no longer
+        // suits a band that is visibly attached to one icon among them.
         let tint = NSView(frame: backdrop.bounds)
         tint.autoresizingMask = [.width, .height]
         tint.wantsLayer = true
-        tint.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        tint.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.42).cgColor
         backdrop.addSubview(tint)
 
         let panel = folderVC.view
@@ -159,12 +169,25 @@ final class FolderOverlayPresenter {
         // overlays (Quick Look, alerts, About panels) rather than pinning
         // them to a fixed offset tuned for one specific content size.
         let backdropSize = hostView.bounds.size
-        panel.frame = NSRect(
-            x: (backdropSize.width - size.width) / 2,
-            y: (backdropSize.height - size.height) / 2,
-            width: size.width,
-            height: size.height
+        let placement = Self.bandPlacement(
+            size: size,
+            in: backdropSize,
+            anchorIconFrame: metrics.anchorIconFrame
         )
+        panel.frame = placement.frame
+        if placement.showsNotch, let anchor = metrics.anchorIconFrame {
+            let notch = FolderBandNotchView(
+                frame: NSRect(
+                    x: min(max(anchor.midX - Self.notchWidth / 2, panel.frame.minX + 20),
+                           panel.frame.maxX - Self.notchWidth - 20),
+                    y: panel.frame.maxY,
+                    width: Self.notchWidth,
+                    height: Self.notchHeight
+                )
+            )
+            backdrop.addSubview(notch)
+            bandNotch = notch
+        }
         // Forces `root`'s internal Auto Layout children (title/scroll view/
         // hosted SwiftUI grid, all pinned to `root`'s now-final frame) to
         // resolve synchronously against that frame before the entrance
@@ -190,6 +213,43 @@ final class FolderOverlayPresenter {
         DiagnosticsLog.launcher.info("folder transition: build+show full-screen overlay took \(ms, privacy: .public)ms")
     }
 
+    /// Where the band sits, and whether the notch is meaningful there.
+    ///
+    /// The band grows out of the folder icon the way the system's own does —
+    /// but only when it actually fits below it. This grid's icons can be large
+    /// enough that a three-row folder is most of the screen tall, and forcing
+    /// such a band under its icon just pins it to the top of the screen with
+    /// the icon buried somewhere inside it. A notch pointing at something the
+    /// band is itself covering is worse than no notch, so when the band cannot
+    /// sit below its icon it centers instead and drops the notch.
+    ///
+    /// Pure so the placement can be checked without a window. AppKit's y axis
+    /// runs upward here, so "below the icon" means a *smaller* maxY.
+    struct BandPlacement: Equatable {
+        let frame: NSRect
+        let showsNotch: Bool
+    }
+
+    static func bandPlacement(size: NSSize, in hostSize: NSSize, anchorIconFrame: NSRect?) -> BandPlacement {
+        let x = (hostSize.width - size.width) / 2
+        let centered = NSRect(
+            x: x,
+            y: (hostSize.height - size.height) / 2,
+            width: size.width,
+            height: size.height
+        )
+        guard let anchor = anchorIconFrame else {
+            return BandPlacement(frame: centered, showsNotch: false)
+        }
+        let below = anchor.minY - Self.notchHeight - size.height
+        let fitsBelow = below >= Self.bandScreenMargin
+        guard fitsBelow else { return BandPlacement(frame: centered, showsNotch: false) }
+        return BandPlacement(
+            frame: NSRect(x: x, y: below, width: size.width, height: size.height),
+            showsNotch: true
+        )
+    }
+
     func close() {
         guard let backdrop else { return }
         self.backdrop = nil
@@ -200,6 +260,7 @@ final class FolderOverlayPresenter {
             Task { @MainActor [weak self] in
                 backdrop.removeFromSuperview()
                 self?.contentsViewController = nil
+                self?.bandNotch = nil
             }
         })
     }
@@ -215,6 +276,27 @@ final class FolderOverlayPresenter {
 /// window's own Escape-hides-the-whole-launcher handling — this view must be
 /// made first responder when shown for that interception to actually happen
 /// (see `FolderOverlayPresenter.open`).
+/// The small upward triangle joining the band to the folder icon above it —
+/// the visual claim that the panel came out of that icon rather than appearing
+/// from nowhere. Decorative only, so it never takes a click — a purely
+/// decorative view that swallows clicks is a bug this codebase has shipped
+/// before.
+private final class FolderBandNotchView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: bounds.minX, y: bounds.minY))
+        path.line(to: NSPoint(x: bounds.midX, y: bounds.maxY))
+        path.line(to: NSPoint(x: bounds.maxX, y: bounds.minY))
+        path.close()
+        // Matches the band's own glass tint rather than a flat fill, so the two
+        // read as one surface.
+        NSColor.white.withAlphaComponent(0.09).setFill()
+        path.fill()
+    }
+}
+
 private final class FolderOverlayBackdropView: NSView {
     var onDismiss: (() -> Void)?
     /// Returns whether the panel consumed the key, so an unhandled arrow still
@@ -244,19 +326,4 @@ private final class FolderOverlayBackdropView: NSView {
         // rather than matching key codes by hand.
         interpretKeyEvents([event])
     }
-}
-
-/// Blurs the live grid content behind the folder overlay — matching the
-/// design reference's own mockup
-/// (`background:rgba(8,8,9,.55);backdrop-filter:blur(22px)`), which shows
-/// the grid as visibly *blurred and darkened*, not just darkened. A purely
-/// decorative background must never intercept clicks (same reasoning as
-/// `Launcher.NonInteractiveVisualEffectView`, which this file can't import
-/// across the module boundary — `Grid` sits below `Launcher` — so this is a
-/// local copy of the same one-line fix): overriding `hitTest` to
-/// unconditionally return `nil` lets every click fall through to
-/// `FolderOverlayBackdropView.mouseDown` (the actual dismiss handler)
-/// regardless of this view sitting on top of it in z-order.
-private final class NonInteractiveFolderBlurView: NSVisualEffectView {
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
