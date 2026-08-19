@@ -2164,10 +2164,22 @@ neither editable nor selectable, which would have sent the click past the field
 to the backdrop and closed the folder — the same trap this project hit once in
 the search field.
 
-Not done: trackpad swipe-to-page inside a folder. The main grid's swipe state
-machine lives in `GridCollectionView.scrollWheel` and touches no collection-view
-API, so it can be lifted into a shared type — but that area has broken on real
-hardware three times, so it is deliberately a separate step.
+Trackpad swipe pages a folder too. The main grid's swipe state machine has been
+lifted out of `GridCollectionView.scrollWheel` into `SwipePageRecognizer`
+verbatim — it only ever read `NSEvent` fields and its own state, which is what
+made it liftable — and the folder panel feeds it the same way. The folder
+commits at the same distance (20pt) and flick velocity (400pt/s) the grid uses,
+but does not track the finger continuously: that is the specific path page
+paging has broken on real hardware three times here, so it stays a separate
+step.
+
+That extraction also put the gesture under test for the first time. `CGEvent`
+can synthesize scroll events with real phases and precise deltas, so
+`SwipePageRecognizerTests` now pins the engage gate, cumulative-delta reporting,
+horizontal-over-vertical priority, and the discrete-wheel cooldown — behaviour
+that previously could only be checked by hand on a trackpad. The
+horizontal-priority test was confirmed to fail when the axis choice is reverted
+to the version that once regressed it.
 
 ## Requirements
 
