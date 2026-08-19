@@ -346,7 +346,14 @@ public final class GridModel {
     ///   which records the snapshot happened to hold. A cached snapshot can
     ///   only ever add confidence that an app exists, never that one is gone,
     ///   so removal stays gated on a completed scan.
-    public func reconcile(with records: [ApplicationRecord], prunesMissingItems: Bool = true) {
+    @discardableResult
+    public func reconcile(with records: [ApplicationRecord], prunesMissingItems: Bool = true) -> Bool {
+        let previousRecords = recordsByIDValue
+        let previousPages = pages
+        let previousFolders = folders
+        let previousItemOrder = document.itemOrder
+        let previousDateAdded = document.dateAddedByID
+
         recordsByIDValue = Dictionary(uniqueKeysWithValues: records.map { ($0.id.value, $0) })
         let hiddenIDs = Set(document.hiddenApplicationIDs.map(\.value))
         let validIDs = Set(recordsByIDValue.values.filter(isEligibleForGrid(_:)).map { $0.id.value })
@@ -369,7 +376,16 @@ public final class GridModel {
             appendToLastPage(.app(identifier))
             document.dateAddedByID[identifier] = Date()
         }
-        onChange?()
+
+        let changed = previousRecords != recordsByIDValue
+            || previousPages != pages
+            || previousFolders != folders
+            || previousItemOrder != document.itemOrder
+            || previousDateAdded != document.dateAddedByID
+        if changed {
+            onChange?()
+        }
+        return changed
     }
 
     /// Apps placed before `dateAddedByID` existed (i.e. every app already in

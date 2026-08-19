@@ -49,10 +49,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// reversal here, but a reversal can never leave the window in the
     /// wrong final state either.
     private var animationGeneration = 0
-    /// Reflow is sampled once after WindowServer settles the Dock. Retain the
-    /// task so a quick hide/reopen can cancel the old sample instead of
-    /// touching a window that is already closing or has moved screens.
-    private var dockSettleTask: Task<Void, Never>?
     /// Reads the window's own real visibility rather than a separately
     /// tracked bool — a manually-maintained `isVisible` flag drifted out of
     /// sync with the actual window state during hands-on testing (e.g. the
@@ -78,7 +74,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     }
 
     deinit {
-        dockSettleTask?.cancel()
         let menuBarVisibility = menuBarVisibility
         Task { @MainActor in
             _ = menuBarVisibility.setHidden(false)
@@ -120,8 +115,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     }
 
     public func prepareForTermination() {
-        dockSettleTask?.cancel()
-        dockSettleTask = nil
         setLauncherPresentation(active: false)
     }
 
@@ -323,8 +316,9 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             }
         }
 
-        gridModel.reconcile(with: records, prunesMissingItems: isAuthoritative)
-        Task { await gridModel.save() }
+        if gridModel.reconcile(with: records, prunesMissingItems: isAuthoritative) {
+            Task { await gridModel.save() }
+        }
     }
 
     /// Real, confirmed gap found while implementing `showsHiddenAppsInSearch`:
@@ -373,8 +367,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         }
         let window = window ?? makeWindow(on: screen)
         let wasVisible = window.isVisible
-        dockSettleTask?.cancel()
-        dockSettleTask = nil
         // Reopening keeps the warm icon cache — only a launcher that stays
         // closed pays the eviction.
         iconEvictionTask?.cancel()
@@ -393,9 +385,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             reason: "show before frame",
             screenFrame: screen.frame
         )
-        // The launcher window is reused across displays; refresh the retained
-        // background view's wallpaper source and full-frame gradient canvas too.
-        backgroundView?.update(screen: screen, viewportOrigin: .zero)
         viewController?.resetSearch()
 
         animationGeneration += 1
@@ -432,15 +421,10 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // can never leave the window at alpha 0 (the previous black-screen
         // failure mode).
         refreshOverlayLayout(reason: "show overlay")
-        // Settle the layout *before* the window becomes visible. Reserving
-        // room for the Dock is a constraint change, and a constraint change
-        // does not reach `PagedGridLayout`'s cell size until the next layout
-        // pass — so the first frame was drawn with the pre-Dock viewport and
-        // the icons visibly shrank a moment later once that pass ran
-        // (measured: icon size 152pt on the first pass, 136pt after, the 63pt
-        // difference being exactly the Dock's reserved height). Forcing the
-        // pass here means the first visible frame already has the final
-        // geometry.
+        // refreshOverlayLayout() has already synchronously settled the Dock
+        // constraint and custom grid layout. Run the parent pass once more so
+        // the search surface and grid share the same final viewport before the
+        // alpha transition starts.
         viewController?.view.layoutSubtreeIfNeeded()
         // Do not rely on CA's animator to perform the first visibility
         // transition. If the window was ordered while the app was changing
@@ -449,16 +433,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // authoritative first, then add the cosmetic animation.
         window.alphaValue = 1
         if !wasVisible { animateIn(window: window) }
-        dockSettleTask = Task { @MainActor [weak self] in
-            defer { self?.dockSettleTask = nil }
-            do {
-                try await Task.sleep(nanoseconds: 180_000_000)
-            } catch {
-                return
-            }
-            guard let self, self.isVisible else { return }
-            self.viewController?.refreshDockLayout()
-        }
 
         DiagnosticsLog.launcher.info("show(): after makeKeyAndOrderFront, isVisible=\(window.isVisible, privacy: .public), isKeyWindow=\(window.isKeyWindow, privacy: .public), windowFrame=\(String(describing: window.frame), privacy: .public), screenFrame=\(String(describing: screen.frame), privacy: .public), optionsRaw=\(NSApp.presentationOptions.rawValue, privacy: .public), currentSystemOptionsRaw=\(NSApp.currentSystemPresentationOptions.rawValue, privacy: .public), isActive=\(NSApp.isActive, privacy: .public), frontmostPID=\(Self.frontmostPID, privacy: .public)")
 
@@ -467,8 +441,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     }
 
     public func hide() {
-        dockSettleTask?.cancel()
-        dockSettleTask = nil
         guard let window, window.isVisible else {
             setLauncherPresentation(active: false)
             _ = NSApp.setActivationPolicy(.accessory)
@@ -814,7 +786,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             reason: "windowDidBecomeKey",
             screenFrame: window.screen?.frame
         )
-        viewController?.refreshDockLayout()
     }
 
     public func windowDidChangeScreen(_ notification: Notification) {

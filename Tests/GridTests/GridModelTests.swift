@@ -85,6 +85,21 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(model.record(for: StableAppIdentifier(value: appIDs[1]))?.displayName == "Zebra")
 }
 
+@Test @MainActor func reconcileSkipsNotificationWhenCatalogAndLayoutAreUnchanged() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = [record("Apple", id: "a"), record("Banana", id: "b")]
+
+    #expect(model.reconcile(with: apps))
+    var notifications = 0
+    model.onChange = { notifications += 1 }
+
+    #expect(!model.reconcile(with: apps))
+    #expect(notifications == 0)
+}
+
 @Test @MainActor func menuBarAndBackgroundAppsFollowGridPlacementPolicy() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }

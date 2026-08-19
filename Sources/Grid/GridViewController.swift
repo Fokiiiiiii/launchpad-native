@@ -32,7 +32,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private let iconCache: IconCache
     private var prefetchTask: Task<Void, Never>?
     private var prefetchGeneration = 0
-    private var dockReflowTask: Task<Void, Never>?
     /// Bounds the usual four-page working set (35 items per page by default)
     /// with room for folder previews; larger/custom pages may exceed it.
     private static let maxPrefetchIcons = 160
@@ -46,6 +45,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private var pageControlBottomConstraint: NSLayoutConstraint?
     private let layout = PagedGridLayout()
     private var dockReservedHeight: CGFloat = 0
+    private var dockLayoutNeedsPass = false
 
     private var currentPage = 0
     /// Real, confirmed lifecycle bug: nothing previously retained the
@@ -119,7 +119,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     deinit {
         prefetchTask?.cancel()
-        dockReflowTask?.cancel()
     }
 
     public override func loadView() {
@@ -217,22 +216,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         model.onChange = { [weak self] in self?.reload() }
     }
 
-    public override func viewDidAppear() {
-        super.viewDidAppear()
-        updatePageControlBottomMargin()
-    }
-
     public override func viewDidLayout() {
         super.viewDidLayout()
-        // `LauncherWindowController.show()` changes a reused panel from its
-        // previous screen/size immediately before ordering it front. At that
-        // moment `viewDidAppear` can still observe the old geometry. Running
-        // this after the final Auto Layout pass keeps the bottom safe area
-        // correct for warm opens, display moves, and a Dock revealed over an
-        // auto-hidden configuration.
-        updatePageControlBottomMargin()
-        // That call can change the bottom inset, which changes the cell size,
-        // which changes the icon size every visible cell was built with.
+        // refreshDockLayout() owns the Dock constraint and settles it before a
+        // presentation pass. This hook only applies the already-settled cell
+        // geometry after AppKit has committed the current viewport.
         refreshVisibleIconSizes()
     }
 
@@ -291,7 +279,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             return dockReservedHeight
         }
         pageControlBottomConstraint?.constant = bottomConstant
-        scheduleDockReflow()
+        dockLayoutNeedsPass = true
         DiagnosticsLog.grid.info(
             "page control inset: hideDock=\(self.model.hideDockWhileLauncherOpen, privacy: .public), screenDockReservedHeight=\(screenDockReservedHeight, privacy: .public), windowBottomInset=\(windowBottomInset, privacy: .public), dockReservedHeight=\(dockReservedHeight, privacy: .public), bottomConstant=\(bottomConstant, privacy: .public), screenFrame=\(String(describing: screen.frame), privacy: .public), visibleFrame=\(String(describing: screen.visibleFrame), privacy: .public)"
         )
@@ -304,27 +292,19 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     @discardableResult
     public func refreshDockLayout() -> CGFloat {
         let dockInset = updatePageControlBottomMargin()
-        scheduleDockReflow()
-        return dockInset
-    }
+        guard dockLayoutNeedsPass else { return dockInset }
+        dockLayoutNeedsPass = false
 
-    /// A Dock reveal changes the outer scroll view's clip height after the
-    /// page-control constraint has moved. AppKit does not guarantee that a
-    /// custom collection layout will be prepared again for that constraint
-    /// change, so explicitly invalidate it on the next run-loop turn, after
-    /// Auto Layout has committed the new viewport size. The coalescing guard
-    /// avoids retaining a separate task for every repeated callback.
-    private func scheduleDockReflow() {
-        guard dockReflowTask == nil else { return }
-        dockReflowTask = Task { @MainActor [weak self] in
-            defer { self?.dockReflowTask = nil }
-            try? await Task.sleep(nanoseconds: 40_000_000)
-            guard let self, !Task.isCancelled else { return }
-            self.view.layoutSubtreeIfNeeded()
-            self.layout.invalidateLayout()
-            self.collectionView.collectionViewLayout?.invalidateLayout()
-            self.collectionView.layoutSubtreeIfNeeded()
-        }
+        // The constraint change above must be consumed before any cell is
+        // created. Invalidate first, then run one synchronous layout pass;
+        // this replaces the old 40ms delayed reflow that made the first frame
+        // use a larger cell and the next frame use a smaller one.
+        layout.invalidateLayout()
+        collectionView.collectionViewLayout?.invalidateLayout()
+        view.layoutSubtreeIfNeeded()
+        collectionView.layoutSubtreeIfNeeded()
+        refreshVisibleIconSizes()
+        return dockInset
     }
 
     public func reload() {
