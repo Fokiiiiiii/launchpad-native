@@ -571,28 +571,15 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             ? cellSize
             : NSSize(width: 96, height: 110) // before the grid's first layout pass
         let margin = CGFloat(settings.pageMargins)
-        let itemCount = searchRecordsOnCurrentPage().count
-        let isSingleRowResultSet = !viewModel.query.isEmpty
-            && itemCount > 0
-            && itemCount <= max(settings.columns, 1)
-        let viewport = searchResultsScrollView.contentView.bounds.size
-        let contentWidth = CGFloat(itemCount) * itemSize.width
-            + CGFloat(max(itemCount - 1, 0)) * CGFloat(settings.horizontalSpacing)
-        let horizontalInset = isSingleRowResultSet
-            ? max(margin, (viewport.width - contentWidth) / 2)
-            : margin
-        let verticalInset = isSingleRowResultSet
-            ? max(margin, (viewport.height - itemSize.height) / 2)
-            : margin
         // The scroll view's bottom constraint already moves up by
         // `currentDockInset` in `refreshDockLayout()`. Keep the collection
         // view's own section inset to the persistent page margin only; adding
         // the Dock inset here as well would reserve that height twice.
         let insets = NSEdgeInsets(
-            top: verticalInset,
-            left: horizontalInset,
-            bottom: verticalInset,
-            right: horizontalInset
+            top: margin,
+            left: margin,
+            bottom: margin,
+            right: margin
         )
 
         let currentInset = searchResultsLayout.sectionInset
