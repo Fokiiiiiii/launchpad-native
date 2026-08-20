@@ -49,3 +49,34 @@ import Testing
     #expect(GridIconLayoutPolicy.maxVisualScale(safeSlot: 100, gap: -4) == 1)
     #expect(GridIconLayoutPolicy.safeSlot(cellSize: .zero, labelAllowance: 23) == 1)
 }
+
+@Test func everySupportedRowAndColumnCombinationKeepsAStableIconGroup() {
+    let viewport = CGSize(width: 1_680, height: 932)
+    let margin: CGFloat = 42
+    let spacing: CGFloat = 28
+
+    for columns in 3...12 {
+        for rows in 2...8 {
+            let cellSize = CGSize(
+                width: (viewport.width - margin * 2 - spacing * CGFloat(columns - 1)) / CGFloat(columns),
+                height: (viewport.height - margin * 2 - spacing * CGFloat(rows - 1)) / CGFloat(rows)
+            )
+            let metrics = GridIconLayoutPolicy.iconMetrics(
+                cellSize: cellSize,
+                labelAllowance: 23,
+                requestedScale: 1.20,
+                gap: spacing
+            )
+            let displayedSize = metrics.baseSize * metrics.visualScale
+            let labelGroupHeight = displayedSize + 5 + 14
+
+            #expect(displayedSize.isFinite)
+            #expect(displayedSize > 0)
+            #expect(displayedSize <= GridIconLayoutPolicy.maximumDisplayedIconSize + 0.001)
+            // The expansion is allowed to consume the configured gap, but it
+            // must never make the icon/label group overflow its slot plus that
+            // gap and clip at the next row.
+            #expect(labelGroupHeight <= cellSize.height + spacing + 0.001, "columns=\(columns), rows=\(rows)")
+        }
+    }
+}

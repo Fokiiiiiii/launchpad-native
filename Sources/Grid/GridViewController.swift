@@ -1375,12 +1375,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// multiplier is applied by `GridCellItem` to the real icon constraint, so
     /// its centered icon+label group and hit region use the same geometry.
     public var currentIconSize: Double {
-        let cellSize = layout.currentCellSize
-        guard cellSize.width > 0, cellSize.height > 0 else { return 96 }
-
-        let labelsVisible = model.gridSettings.labelVisible
-        let labelAllowance: CGFloat = labelsVisible ? 23 : 8
-        return Double(GridIconLayoutPolicy.safeSlot(cellSize: cellSize, labelAllowance: labelAllowance))
+        currentIconLayoutMetrics.baseSize
     }
 
     /// The effective visual multiplier after the current inter-cell gap has
@@ -1388,21 +1383,26 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// derived here, beside `currentIconSize`, so every cell and snapshot uses
     /// the same value without changing `PagedGridLayout` or Settings APIs.
     public var currentEffectiveIconScale: Double {
+        currentIconLayoutMetrics.visualScale
+    }
+
+    private var currentIconLayoutMetrics: (baseSize: Double, visualScale: Double) {
         let cellSize = layout.currentCellSize
-        guard cellSize.width > 0, cellSize.height > 0 else { return 1 }
+        guard cellSize.width > 0, cellSize.height > 0 else { return (96, 1) }
 
         let labelsVisible = model.gridSettings.labelVisible
         let labelAllowance: CGFloat = labelsVisible ? 23 : 8
-        let safeSlot = GridIconLayoutPolicy.safeSlot(cellSize: cellSize, labelAllowance: labelAllowance)
         let gap = min(
             CGFloat(model.gridSettings.horizontalSpacing),
             CGFloat(model.gridSettings.verticalSpacing)
         )
-        return Double(GridIconLayoutPolicy.effectiveVisualScale(
+        let metrics = GridIconLayoutPolicy.iconMetrics(
+            cellSize: cellSize,
+            labelAllowance: labelAllowance,
             requestedScale: model.gridSettings.iconScale,
-            safeSlot: safeSlot,
             gap: gap
-        ))
+        )
+        return (Double(metrics.baseSize), Double(metrics.visualScale))
     }
 
     /// The grid's actual per-cell size right now (`PagedGridLayout`'s
