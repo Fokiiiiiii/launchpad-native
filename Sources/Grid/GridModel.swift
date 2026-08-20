@@ -329,6 +329,38 @@ public final class GridModel {
         Array(recordsByIDValue.values)
     }
 
+    /// Returns catalog records in the same order the user sees them in the
+    /// grid: page order, then folder position, then any not-yet-placed records.
+    /// Search uses this instead of inventing a second alphabetical order.
+    public func orderedRecords(from records: [ApplicationRecord]) -> [ApplicationRecord] {
+        let recordsByID = Dictionary(uniqueKeysWithValues: records.map { ($0.id.value, $0) })
+        var orderedIDs: [String] = []
+        var seen = Set<String>()
+
+        func append(_ id: StableAppIdentifier) {
+            guard seen.insert(id.value).inserted else { return }
+            orderedIDs.append(id.value)
+        }
+
+        for page in pages {
+            for item in page {
+                switch item {
+                case .app(let id):
+                    append(id)
+                case .folder(let folderID):
+                    for folderPage in folders[folderID]?.pages ?? [] {
+                        for folderItem in folderPage {
+                            if case .app(let id) = folderItem { append(id) }
+                        }
+                    }
+                }
+            }
+        }
+
+        let placed = orderedIDs.compactMap { recordsByID[$0] }
+        return placed + records.filter { seen.insert($0.id.value).inserted }
+    }
+
     /// Reconciles the live catalog against the persisted arrangement: apps no
     /// longer installed (or newly hidden) are pruned from pages/folders;
     /// newly discovered apps are appended in alphabetical order.

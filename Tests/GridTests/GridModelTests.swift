@@ -100,6 +100,20 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(notifications == 0)
 }
 
+@Test @MainActor func orderedRecordsFollowPagesAndFolderContents() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")]
+    model.reconcile(with: apps)
+
+    model.moveItem(fromPage: 0, fromIndex: 2, toPage: 0, toIndex: 0)
+    let ordered = model.orderedRecords(from: apps)
+
+    #expect(ordered.map(\.bundleIdentifier) == ["c", "a", "b"])
+}
+
 @Test @MainActor func menuBarAndBackgroundAppsFollowGridPlacementPolicy() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }

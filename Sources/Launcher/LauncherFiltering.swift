@@ -1,12 +1,12 @@
 import Catalog
 import Foundation
 
-/// Pure filtering/sorting logic, deliberately free of AppKit so it can be
+/// Pure filtering logic, deliberately free of AppKit so it can be
 /// unit-tested without a window server. Matches against both the (possibly
 /// aliased later, Phase 6) display name and the original bundle name, per
 /// "検索はaliasと元名の両方へ一致" — alias matching itself lands in Phase 6
 /// once `LayoutDocument.aliases` is wired in; this is the substring/sort core
-/// both will share.
+/// both use.
 enum LauncherFiltering {
     static func filter(
         _ records: [ApplicationRecord],
@@ -21,9 +21,7 @@ enum LauncherFiltering {
             !$0.isBackgroundOnly && (showMenuBarApplications || !$0.isMenuBarApp)
         }
 
-        guard !trimmed.isEmpty else {
-            return base.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
-        }
+        guard !trimmed.isEmpty else { return base }
 
         // The prefix-ranking flag is computed once per record instead of
         // inside the comparator. `sorted` calls its comparator O(n log n)
@@ -32,10 +30,10 @@ enum LauncherFiltering {
         // around 20,000 throwaway string allocations for a 1,000-app catalog,
         // which pushed this synchronous, called-on-every-keystroke filter to
         // 26-41ms, well past the one-frame budget its own test asserts.
-        // Matching and the final ordering still go through the same
-        // locale-aware APIs, so results are unchanged.
+        // Prefix matches remain first, while each group keeps the caller's
+        // order so search follows the main grid instead of a second sort.
         let loweredQuery = trimmed.lowercased()
-        let ranked = base.compactMap { record -> (record: ApplicationRecord, isPrefixMatch: Bool)? in
+        let ranked = base.enumerated().compactMap { offset, record -> (record: ApplicationRecord, isPrefixMatch: Bool, order: Int)? in
             // Case folding via `lowercased()` rather than
             // `localizedCaseInsensitiveContains`. Measured on this machine at
             // 1,000 records: the localized call costs 25.5ms for the two
@@ -45,18 +43,16 @@ enum LauncherFiltering {
             // diacritics as distinct, so for app names this only changes
             // locale-specific casing edge cases (Turkish dotless i and the
             // like), never the ASCII/Japanese names in a real catalog.
-            // Ordering below deliberately keeps the locale-aware comparison,
-            // which measured at 1.6ms and governs what the user actually sees.
             let loweredDisplay = record.displayName.lowercased()
             guard loweredDisplay.contains(loweredQuery)
                 || record.originalDisplayName.lowercased().contains(loweredQuery) else { return nil }
-            return (record, loweredDisplay.hasPrefix(loweredQuery))
+            return (record, loweredDisplay.hasPrefix(loweredQuery), offset)
         }
 
         return ranked
             .sorted { lhs, rhs in
                 if lhs.isPrefixMatch != rhs.isPrefixMatch { return lhs.isPrefixMatch }
-                return lhs.record.displayName.localizedCaseInsensitiveCompare(rhs.record.displayName) == .orderedAscending
+                return lhs.order < rhs.order
             }
             .map(\.record)
     }

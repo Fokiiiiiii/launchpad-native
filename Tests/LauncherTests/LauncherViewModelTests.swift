@@ -39,7 +39,7 @@ private func record(
     ]
     vm.setRecords(records)
     // LSBackgroundOnly is always omitted; LSUIElement is visible by default.
-    #expect(vm.filteredRecords.map(\.displayName) == ["CodexBar", "Normal"])
+    #expect(vm.filteredRecords.map(\.displayName) == ["Normal", "CodexBar"])
     vm.setShowMenuBarApplications(false)
     #expect(vm.filteredRecords.map(\.displayName) == ["Normal"])
 }

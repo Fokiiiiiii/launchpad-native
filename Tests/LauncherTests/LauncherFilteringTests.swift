@@ -30,10 +30,10 @@ private func record(
     )
 }
 
-@Test func emptyQueryReturnsAllSortedAlphabetically() {
+@Test func emptyQueryPreservesGridOrder() {
     let records = [record("Zebra", id: "z"), record("Apple", id: "a"), record("Mango", id: "m")]
     let result = LauncherFiltering.filter(records, query: "")
-    #expect(result.map(\.displayName) == ["Apple", "Mango", "Zebra"])
+    #expect(result.map(\.displayName) == ["Zebra", "Apple", "Mango"])
 }
 
 @Test func filtersByDisplayNameSubstring() {
@@ -46,6 +46,12 @@ private func record(
     let records = [record("Notes", id: "n"), record("iNote Pro", id: "inp")]
     let result = LauncherFiltering.filter(records, query: "not")
     #expect(result.first?.displayName == "Notes")
+}
+
+@Test func matchingAppsKeepInputOrderWithinTheSameRank() {
+    let records = [record("Alpine", id: "alpine"), record("Alpha", id: "alpha")]
+    let result = LauncherFiltering.filter(records, query: "al")
+    #expect(result.map(\.displayName) == ["Alpine", "Alpha"])
 }
 
 @Test func backgroundOnlyAppsAreExcludedFromResults() {
@@ -61,7 +67,7 @@ private func record(
         record("Agent", id: "agent", backgroundOnly: true, menuBarApp: true)
     ]
 
-    #expect(LauncherFiltering.filter(records, query: "").map(\.displayName) == ["CodexBar", "Visible"])
+    #expect(LauncherFiltering.filter(records, query: "").map(\.displayName) == ["Visible", "CodexBar"])
     #expect(LauncherFiltering.filter(records, query: "", showMenuBarApplications: false).map(\.displayName) == ["Visible"])
     // Background-only wins over the opt-in menu-bar policy.
     #expect(LauncherFiltering.filter(records, query: "", showMenuBarApplications: true).contains { $0.displayName == "Agent" } == false)

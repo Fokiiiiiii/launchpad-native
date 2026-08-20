@@ -297,7 +297,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     ///   reshuffling bug that distinction exists to prevent.
     public func updateRecords(_ records: [ApplicationRecord], isAuthoritative: Bool = true) {
         latestRecords = records
-        applySearchableRecords()
 
         // Legacy import must run BEFORE reconcile: `applyLegacyImportIfFirstRun`
         // only applies when the grid is still completely empty, and
@@ -319,6 +318,9 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         if gridModel.reconcile(with: records, prunesMissingItems: isAuthoritative) {
             Task { await gridModel.save() }
         }
+        // Reconcile first so search follows the same current page/folder order
+        // as the visible grid, including newly imported or moved items.
+        applySearchableRecords()
     }
 
     /// Real, confirmed gap found while implementing `showsHiddenAppsInSearch`:
@@ -330,11 +332,12 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// one).
     private func applySearchableRecords() {
         viewModel.setShowMenuBarApplications(gridModel.showMenuBarApplications)
+        let orderedRecords = gridModel.orderedRecords(from: latestRecords)
         if gridModel.showsHiddenAppsInSearch {
-            viewModel.setRecords(latestRecords)
+            viewModel.setRecords(orderedRecords)
         } else {
             let hiddenValues = Set(gridModel.hiddenApplicationIdentifiers.map(\.value))
-            viewModel.setRecords(latestRecords.filter { !hiddenValues.contains($0.id.value) })
+            viewModel.setRecords(orderedRecords.filter { !hiddenValues.contains($0.id.value) })
         }
     }
 
