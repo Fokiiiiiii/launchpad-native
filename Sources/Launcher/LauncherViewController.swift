@@ -27,9 +27,11 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private let searchResultsCollectionView = SearchResultsCollectionView()
     private let searchResultsScrollView = NSScrollView()
     private let searchResultsLayout = NSCollectionViewFlowLayout()
+    private let searchPageControl = PageControlView(frame: .zero)
     private let emptySearchResultsView = NSStackView()
-    private var searchResultsBottomConstraint: NSLayoutConstraint?
+    private var searchPageControlBottomConstraint: NSLayoutConstraint?
     private var currentDockInset: CGFloat = 0
+    private var searchCurrentPage = 0
     private let itemIdentifier = NSUserInterfaceItemIdentifier("AppIconItem")
     private lazy var gridViewController = GridViewController(
         model: gridModel,
@@ -185,6 +187,16 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchResultsCollectionView.isSelectable = true
         searchResultsCollectionView.backgroundColors = [.clear]
         searchResultsCollectionView.onBackgroundClick = { [weak self] in self?.onDidCancel() }
+        searchResultsScrollView.hasVerticalScroller = false
+        searchResultsScrollView.hasHorizontalScroller = false
+        searchResultsScrollView.verticalScrollElasticity = .none
+        searchResultsScrollView.horizontalScrollElasticity = .none
+
+        searchPageControl.translatesAutoresizingMaskIntoConstraints = false
+        searchPageControl.isHidden = true
+        searchPageControl.onSelectPage = { [weak self] page in self?.selectSearchPage(page) }
+        searchPageControl.onPrevious = { [weak self] in self?.selectSearchPage((self?.searchCurrentPage ?? 0) - 1) }
+        searchPageControl.onNext = { [weak self] in self?.selectSearchPage((self?.searchCurrentPage ?? 0) + 1) }
 
         let emptyIcon = NSImageView()
         emptyIcon.image = NSImage(
@@ -252,8 +264,9 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         root.addSubview(searchBar)
         root.addSubview(gridViewController.view)
         root.addSubview(searchResultsScrollView)
-        let searchResultsBottom = searchResultsScrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
-        searchResultsBottomConstraint = searchResultsBottom
+        root.addSubview(searchPageControl)
+        let searchPageControlBottom = searchPageControl.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24)
+        searchPageControlBottomConstraint = searchPageControlBottom
         NSLayoutConstraint.activate([
             // 300x36 — `TSLayout.searchWidth`/`searchHeight` from the
             // reference exactly; the previous 400x44 was an invented value.
@@ -296,11 +309,17 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             searchResultsScrollView.topAnchor.constraint(equalTo: searchBar.bottomAnchor, constant: 30),
             searchResultsScrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             searchResultsScrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            searchResultsBottom
+            searchResultsScrollView.bottomAnchor.constraint(equalTo: searchPageControl.topAnchor, constant: -8),
+
+            searchPageControl.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            searchPageControlBottom,
+            searchPageControl.widthAnchor.constraint(equalToConstant: 240),
+            searchPageControl.heightAnchor.constraint(equalToConstant: 32)
         ])
 
         view = root
         viewModel.onChange = { [weak self] in
+            self?.syncSearchPage()
             self?.searchResultsCollectionView.reloadData()
             self?.updateSearchResultsPresentation()
             self?.applySearchResultsLayoutMetrics()
@@ -468,9 +487,49 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         let dockInset = gridViewController.refreshDockLayout()
         guard abs(currentDockInset - dockInset) > 0.5 else { return }
         currentDockInset = dockInset
-        searchResultsBottomConstraint?.constant = -dockInset
+        searchPageControlBottomConstraint?.constant = -(dockInset + 24)
         applySearchResultsLayoutMetrics()
         view.layoutSubtreeIfNeeded()
+    }
+
+    private var searchPageSize: Int {
+        max(gridModel.gridSettings.columns, 1) * max(gridModel.gridSettings.rows, 1)
+    }
+
+    private var searchPageCount: Int {
+        max((viewModel.filteredRecords.count + searchPageSize - 1) / searchPageSize, 1)
+    }
+
+    private func searchRecordsOnCurrentPage() -> [ApplicationRecord] {
+        let start = min(searchCurrentPage * searchPageSize, viewModel.filteredRecords.count)
+        let end = min(start + searchPageSize, viewModel.filteredRecords.count)
+        return Array(viewModel.filteredRecords[start..<end])
+    }
+
+    private func syncSearchPage() {
+        let previousPage = searchCurrentPage
+        let pageCount = searchPageCount
+        if let selectedIndex = viewModel.selectedIndex {
+            searchCurrentPage = min(max(selectedIndex / searchPageSize, 0), pageCount - 1)
+        } else {
+            searchCurrentPage = min(searchCurrentPage, pageCount - 1)
+        }
+        searchPageControl.numberOfPages = pageCount
+        searchPageControl.currentPage = searchCurrentPage
+        if previousPage != searchCurrentPage {
+            searchResultsScrollView.contentView.bounds.origin = .zero
+        }
+    }
+
+    private func selectSearchPage(_ page: Int) {
+        guard !viewModel.filteredRecords.isEmpty else { return }
+        let nextPage = min(max(page, 0), searchPageCount - 1)
+        guard nextPage != searchCurrentPage else { return }
+        searchCurrentPage = nextPage
+        searchPageControl.currentPage = nextPage
+        searchResultsScrollView.contentView.bounds.origin = .zero
+        searchResultsCollectionView.reloadData()
+        applySearchResultsLayoutMetrics()
     }
 
     /// Debug-only entry point (`LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG`, wired
@@ -504,7 +563,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     /// per-cell size (`GridViewController.currentCellSize`) and its real
     /// spacing/margins from `GridSettings` — instead of independently-tuned
     /// constants — makes the flat search list line up as the *same* grid,
-    /// just filtered, rather than a different one.
+    /// just filtered and paged, rather than a different one.
     private func applySearchResultsLayoutMetrics() {
         let cellSize = gridViewController.currentCellSize
         let settings = gridModel.gridSettings
@@ -512,7 +571,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             ? cellSize
             : NSSize(width: 96, height: 110) // before the grid's first layout pass
         let margin = CGFloat(settings.pageMargins)
-        let itemCount = viewModel.filteredRecords.count
+        let itemCount = searchRecordsOnCurrentPage().count
         let isSingleRowResultSet = !viewModel.query.isEmpty
             && itemCount > 0
             && itemCount <= max(settings.columns, 1)
@@ -553,6 +612,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     private func updateSearchResultsPresentation() {
         emptySearchResultsView.isHidden = viewModel.query.isEmpty || !viewModel.filteredRecords.isEmpty
+        searchPageControl.isHidden = viewModel.query.isEmpty || viewModel.filteredRecords.isEmpty
     }
 
     @objc private func settingsButtonTapped() {
@@ -612,6 +672,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private func setSearchMode(active: Bool) {
         searchResultsScrollView.isHidden = !active
         gridViewController.view.isHidden = active
+        updateSearchResultsPresentation()
     }
 
     private func launch(_ record: ApplicationRecord) {
@@ -730,15 +791,18 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     func numberOfSections(in collectionView: NSCollectionView) -> Int { 1 }
 
     func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
-        viewModel.filteredRecords.count
+        searchRecordsOnCurrentPage().count
     }
 
     func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
         guard let item = collectionView.makeItem(withIdentifier: itemIdentifier, for: indexPath) as? AppIconCollectionViewItem else {
             return NSCollectionViewItem()
         }
-        let record = viewModel.filteredRecords[indexPath.item]
-        let isSelected = viewModel.selectedIndex == indexPath.item
+        let pageRecords = searchRecordsOnCurrentPage()
+        guard pageRecords.indices.contains(indexPath.item) else { return item }
+        let record = pageRecords[indexPath.item]
+        let globalIndex = searchCurrentPage * searchPageSize + indexPath.item
+        let isSelected = viewModel.selectedIndex == globalIndex
         let iconSize = gridViewController.currentIconSize
         let visualScale = gridViewController.currentEffectiveIconScale
         let cache = iconCache
@@ -767,7 +831,8 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     }
 
     func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
-        guard let index = indexPaths.first?.item else { return }
+        guard let localIndex = indexPaths.first?.item else { return }
+        let index = searchCurrentPage * searchPageSize + localIndex
         if index == viewModel.selectedIndex {
             launchSearchSelection()
         } else {

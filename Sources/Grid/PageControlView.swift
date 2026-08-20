@@ -10,12 +10,12 @@ import Localization
 /// Full gesture-driven paging physics (rubber-band/velocity projection per
 /// apple-design) remains a follow-up polish pass — see PagedGridLayout's
 /// doc comment.
-final class PageControlView: NSView {
-    var onSelectPage: ((Int) -> Void)?
-    var onPrevious: (() -> Void)?
-    var onNext: (() -> Void)?
+public final class PageControlView: NSView {
+    public var onSelectPage: ((Int) -> Void)?
+    public var onPrevious: (() -> Void)?
+    public var onNext: (() -> Void)?
 
-    var numberOfPages: Int = 1 {
+    public var numberOfPages: Int = 1 {
         didSet {
             // `GridViewController.reload()` reassigns this on every model
             // change, and `rebuildDots()` tears down and recreates every dot
@@ -27,7 +27,7 @@ final class PageControlView: NSView {
         }
     }
 
-    var currentPage: Int = 0 {
+    public var currentPage: Int = 0 {
         didSet {
             updateDotStates()
             updateChevronEnabledState()
@@ -42,7 +42,7 @@ final class PageControlView: NSView {
     private let previousButton = NSButton()
     private let nextButton = NSButton()
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
 
         dotStack.translatesAutoresizingMaskIntoConstraints = false
@@ -94,7 +94,7 @@ final class PageControlView: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("unavailable") }
+    public required init?(coder: NSCoder) { fatalError("unavailable") }
 
     private func configureChevron(_ button: NSButton, symbol: String, label: String, action: Selector) {
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -164,12 +164,12 @@ final class PageControlView: NSView {
         }
     }
 
-    override func viewDidChangeEffectiveAppearance() {
+    public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         updateDotStates()
     }
 
-    override func viewDidMoveToWindow() {
+    public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         updateDotStates()
     }

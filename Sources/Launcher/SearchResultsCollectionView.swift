@@ -1,6 +1,6 @@
 import AppKit
 
-/// The flat search-results list has no paging/context-menu needs (unlike
+/// The paged search surface has no context-menu needs (unlike
 /// `Grid.GridCollectionView`), but it shares the exact same problem: since
 /// the layout-matching fix made search cells size to the grid's real
 /// per-cell size, a cell's clickable bounding box became far larger than
