@@ -91,6 +91,17 @@ private func record(
     #expect(LauncherFiltering.filter(records, query: "browser").map(\.displayName) == ["Utilities"])
 }
 
+@Test func fuzzyMatchesKeepCharacterOrderAndStayBelowDirectMatches() {
+    let records = [
+        record("Google Chrome", id: "chrome"),
+        record("Guitar", id: "guitar"),
+        record("Safari", id: "safari")
+    ]
+
+    #expect(LauncherFiltering.filter(records, query: "gcr").map(\.displayName) == ["Google Chrome"])
+    #expect(LauncherFiltering.filter(records, query: "gua").map(\.displayName) == ["Guitar"])
+}
+
 /// Phase 9 performance target: filtering must stay well under one frame
 /// (16ms at 60Hz) on MainActor even at catalog sizes around 1,000 apps —
 /// the real search field calls this synchronously while the user types.

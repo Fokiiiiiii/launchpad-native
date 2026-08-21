@@ -47,8 +47,20 @@ enum LauncherFiltering {
             let metadataMatch = loweredBundleID.contains(loweredQuery)
                 || loweredFileName.contains(loweredQuery)
                 || loweredCategory.contains(loweredQuery)
-            guard displayMatch || metadataMatch else { return nil }
-            return (record, displayPrefix ? 0 : (displayMatch ? 1 : 2), offset)
+            let fuzzyDisplayMatch = fuzzyMatch(loweredQuery, in: loweredDisplay)
+                || fuzzyMatch(loweredQuery, in: loweredOriginal)
+            let fuzzyMetadataMatch = fuzzyMatch(loweredQuery, in: loweredBundleID)
+                || fuzzyMatch(loweredQuery, in: loweredFileName)
+                || fuzzyMatch(loweredQuery, in: loweredCategory)
+            guard displayMatch || metadataMatch || fuzzyDisplayMatch || fuzzyMetadataMatch else { return nil }
+            let rank = displayPrefix
+                ? 0
+                : displayMatch
+                    ? 1
+                    : fuzzyDisplayMatch
+                        ? 2
+                        : metadataMatch ? 3 : 4
+            return (record, rank, offset)
         }
 
         return ranked
@@ -57,5 +69,18 @@ enum LauncherFiltering {
                 return lhs.order < rhs.order
             }
             .map(\.record)
+    }
+
+    private static func fuzzyMatch(_ query: String, in text: String) -> Bool {
+        let query = query.filter { $0.isLetter || $0.isNumber }
+        guard !query.isEmpty else { return false }
+        var index = query.startIndex
+        for character in text where character.isLetter || character.isNumber {
+            if character == query[index] {
+                index = query.index(after: index)
+                if index == query.endIndex { return true }
+            }
+        }
+        return false
     }
 }
