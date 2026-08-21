@@ -26,6 +26,42 @@ func launcherViewLoadsEmptySearchStateWithoutInvalidCrossHierarchyConstraints() 
     #expect(viewController.view.window == nil)
 }
 
+@Test @MainActor
+func searchSurfaceUsesPagingWithoutScrollbars() {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("launchpad-search-surface-test-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = GridModel(layoutStore: LayoutStore(directory: directory))
+    let viewController = LauncherViewController(
+        viewModel: LauncherViewModel(),
+        gridModel: model,
+        iconCache: IconCache(cacheDirectory: directory.appendingPathComponent("icons", isDirectory: true)),
+        onDidLaunch: {},
+        onDidCancel: {},
+        onOpenSettings: {}
+    )
+
+    viewController.loadViewIfNeeded()
+
+    func searchScrollView(in view: NSView) -> NSScrollView? {
+        if let scrollView = view as? NSScrollView,
+           scrollView.documentView is SearchResultsCollectionView {
+            return scrollView
+        }
+        for child in view.subviews {
+            if let result = searchScrollView(in: child) { return result }
+        }
+        return nil
+    }
+
+    guard let scrollView = searchScrollView(in: viewController.view) else {
+        Issue.record("search results scroll view was not installed")
+        return
+    }
+    #expect(!scrollView.hasVerticalScroller)
+    #expect(!scrollView.hasHorizontalScroller)
+}
+
 @Test @MainActor func launcherWindowAcceptsMouseMovedEvents() {
     let window = LauncherWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100))
 

@@ -145,6 +145,7 @@ struct UninstallPanelView: View {
                 .labelsHidden()
                 .toggleStyle(.checkbox)
                 .disabled(selectableRows.isEmpty || viewModel.hasConfirmedRemoval)
+                .accessibilityLabel(Text(sectionTitle(kind)))
                 Label(sectionTitle(kind), systemImage: sectionSymbol(kind))
                     .font(.system(size: 13))
                 Spacer()
@@ -182,6 +183,7 @@ struct UninstallPanelView: View {
             .labelsHidden()
             .toggleStyle(.checkbox)
             .disabled(row.isDisabled || viewModel.hasConfirmedRemoval)
+            .accessibilityLabel(Text(row.removalItem.path.lastPathComponent))
 
             if row.removalItem.path == viewModel.record.bundleURL, let appIcon {
                 Image(nsImage: appIcon)
@@ -229,6 +231,7 @@ struct UninstallPanelView: View {
                     .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text(L10n.menuShowInFinder))
         }
         .padding(.leading, 50)
         .padding(.trailing, 22)

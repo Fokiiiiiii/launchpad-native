@@ -241,7 +241,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchResultsScrollView.translatesAutoresizingMaskIntoConstraints = false
         searchResultsScrollView.documentView = searchResultsCollectionView
         searchResultsScrollView.drawsBackground = false
-        searchResultsScrollView.hasVerticalScroller = true
+        // Search is paged like the main grid. A scroller here is both
+        // misleading and visually competes with the page control; the
+        // collection view is intentionally limited to one page of items.
+        searchResultsScrollView.hasVerticalScroller = false
         searchResultsScrollView.isHidden = true
 
         addChild(gridViewController)

@@ -85,6 +85,21 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
         applyVisualTransforms()
     }
 
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        currentRequestKey = nil
+        iconView.image = nil
+        label.stringValue = ""
+        displayedIconSize = 64
+        iconWidthConstraint?.constant = displayedIconSize
+        iconHeightConstraint?.constant = displayedIconSize
+        view.layer?.removeAllAnimations()
+        view.layer?.setAffineTransform(.identity)
+        view.layer?.opacity = 1
+        view.isHidden = false
+        applyVisualTransforms()
+    }
+
     /// Matches `Grid.GridCellItem`'s icon sizing — this item was previously
     /// hardcoded to 64pt regardless of the main grid's actual icon size (a
     /// fixed function of the row/column geometry), so search results

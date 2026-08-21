@@ -2,6 +2,7 @@ import AppKit
 
 /// One window thumbnail cell: preview image, title, close/minimize buttons.
 final class WindowBrowserCellItem: NSCollectionViewItem {
+    private(set) var currentWindowID: Int?
     private let thumbnailView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let closeButton = NSButton()
@@ -59,6 +60,15 @@ final class WindowBrowserCellItem: NSCollectionViewItem {
         view = container
     }
 
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        currentWindowID = nil
+        thumbnailView.image = nil
+        titleLabel.stringValue = ""
+        onClose = nil
+        onMinimize = nil
+    }
+
     private func configureButton(_ button: NSButton, symbol: String, label: String, action: Selector) {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.isBordered = false
@@ -70,7 +80,8 @@ final class WindowBrowserCellItem: NSCollectionViewItem {
         button.setAccessibilityLabel(label)
     }
 
-    func configure(title: String, thumbnail: NSImage?) {
+    func configure(windowID: Int, title: String, thumbnail: NSImage?) {
+        currentWindowID = windowID
         let resolvedTitle = title.isEmpty ? "Untitled Window" : title
         titleLabel.stringValue = resolvedTitle
         thumbnailView.image = thumbnail

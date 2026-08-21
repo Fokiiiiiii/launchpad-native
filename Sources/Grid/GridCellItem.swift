@@ -120,7 +120,13 @@ final class GridCellItem: NSCollectionViewItem {
         view.isHidden = false
         view.layer?.opacity = 1
         resetVisualTransforms()
+        currentRequestKey = nil
+        iconView.image = nil
+        label.stringValue = ""
+        currentIconSizeValue = 96
         displayedIconSizeValue = 96
+        folderHostingView?.isHidden = true
+        folderHostingView?.rootView = FolderIconView(icons: [], size: displayedIconSizeValue)
     }
 
     override func viewDidLayout() {

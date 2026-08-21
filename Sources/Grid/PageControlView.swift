@@ -2,11 +2,9 @@ import AppKit
 import DesignSystem
 import Localization
 
-/// Page-dot indicator plus explicit prev/next chevron buttons. The dots
-/// alone (6x6pt, 8pt apart) turned out to be too small a hit target for
-/// reliable clicking during hands-on testing ("can't get to the side
-/// pages") — the chevrons give a large, unambiguous, discoverable control
-/// that doesn't depend on trackpad gesture support or precise dot aim.
+/// Page-dot indicator plus explicit prev/next chevron buttons. The dots remain
+/// visually small, but each has a larger hit target; the chevrons provide an
+/// additional unambiguous control that does not depend on precise dot aim.
 /// Full gesture-driven paging physics (rubber-band/velocity projection per
 /// apple-design) remains a follow-up polish pass — see PagedGridLayout's
 /// doc comment.
@@ -115,13 +113,18 @@ public final class PageControlView: NSView {
             let button = NSButton(title: "", target: self, action: #selector(dotClicked(_:)))
             button.tag = index
             button.isBordered = false
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 3
+            button.focusRingType = .none
+            button.image = NSImage(
+                systemSymbolName: "circle.fill",
+                accessibilityDescription: nil
+            )?.withSymbolConfiguration(.init(pointSize: 6, weight: .regular))
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleNone
             button.setContentHuggingPriority(.required, for: .horizontal)
             button.setAccessibilityLabel(L10n.pageNumberAccessibilityLabel(index + 1))
             NSLayoutConstraint.activate([
-                button.widthAnchor.constraint(equalToConstant: 6),
-                button.heightAnchor.constraint(equalToConstant: 6)
+                button.widthAnchor.constraint(equalToConstant: 24),
+                button.heightAnchor.constraint(equalToConstant: 24)
             ])
             dotStack.addArrangedSubview(button)
             dotButtons.append(button)
@@ -151,9 +154,9 @@ public final class PageControlView: NSView {
             guard let self else { return }
             for (index, button) in dotButtons.enumerated() {
                 let isCurrentPage = index == currentPage
-                button.layer?.backgroundColor = isCurrentPage
-                    ? NSColor.labelColor.cgColor
-                    : NSColor.tertiaryLabelColor.cgColor
+                button.contentTintColor = isCurrentPage
+                    ? NSColor.labelColor
+                    : NSColor.tertiaryLabelColor
                 // The selected state is the semantic source of truth for
                 // VoiceOver; the dot color remains a visual supplement.
                 if button.isAccessibilitySelected() != isCurrentPage {

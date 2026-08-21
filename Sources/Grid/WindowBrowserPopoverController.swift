@@ -88,11 +88,12 @@ final class WindowBrowserPopoverController: NSViewController, NSCollectionViewDa
             return NSCollectionViewItem()
         }
         let window = windows[indexPath.item]
-        cell.configure(title: window.title, thumbnail: nil)
+        cell.configure(windowID: window.id, title: window.title, thumbnail: nil)
         let service = thumbnailService
         Task { @MainActor in
             let thumbnail = await service.thumbnail(for: window)
-            cell.configure(title: window.title, thumbnail: thumbnail)
+            guard cell.currentWindowID == window.id else { return }
+            cell.configure(windowID: window.id, title: window.title, thumbnail: thumbnail)
         }
         cell.onClose = { [weak self] in self?.closeWindow(at: indexPath.item) }
         cell.onMinimize = { [weak self] in self?.minimizeWindow(at: indexPath.item) }
