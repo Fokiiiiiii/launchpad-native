@@ -26,18 +26,9 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private static let iconEvictionDelayNanoseconds: UInt64 = 60_000_000_000
     private let menuBarVisibility = SystemMenuBarVisibility()
     private var hasAttemptedLegacyImport = false
-    /// The full, unfiltered scan result from the most recent `updateRecords(_:)`
-    /// — kept around so `refreshSearchableRecords()` can re-derive the
-    /// searchable set immediately when `showsHiddenAppsInSearch` changes in
-    /// Settings, without waiting for the next catalog scan.
     private var latestRecords: [ApplicationRecord] = []
     private var onOpenSettings: (() -> Void)?
     private var onRequestUninstall: ((String) -> Void)?
-    /// Round 13 §A: fired from `hide()` (see its own doc comment for why
-    /// that single insertion point covers every path that can hide the
-    /// launcher) so Settings/the Uninstall panel can close themselves
-    /// whenever the launcher itself goes away — neither should ever be
-    /// visible while the launcher isn't.
     private var onDidHide: (() -> Void)?
     /// Incremented on every show()/hide() call — a hide() animation's
     /// completion handler checks this before calling `orderOut`, so an
@@ -49,20 +40,10 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// reversal here, but a reversal can never leave the window in the
     /// wrong final state either.
     private var animationGeneration = 0
-    /// Reads the window's own real visibility rather than a separately
-    /// tracked bool — a manually-maintained `isVisible` flag drifted out of
-    /// sync with the actual window state during hands-on testing (e.g. the
-    /// outside-click monitor kept seeing a stale `false` while the window
-    /// was still genuinely on screen, so clicking outside silently did
-    /// nothing). `NSWindow.isVisible` is always the ground truth.
     public var isVisible: Bool {
         window?.isVisible ?? false
     }
 
-    /// Round 13 §A: lets Settings/the Uninstall panel center themselves on
-    /// whichever screen the launcher is actually showing on, instead of
-    /// `NSWindow.center()`'s default (the main screen, which has no
-    /// relationship to the launcher on a multi-display setup).
     public var currentScreen: NSScreen? {
         window?.screen
     }
@@ -245,12 +226,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         return config
     }
 
-    /// Called from Settings' background controls (type picker, material
-    /// slider, blur-wallpaper toggle) — `SettingsViewModel` already persists
-    /// the new value to `GridModel` itself (mirroring `appIconStyle`'s own
-    /// "model write + separate live-apply" split, not `hideDockWhileLauncherOpen`'s
-    /// single-callback-does-both shape), so this only needs to push the new
-    /// values into the already-live `LauncherBackgroundView` instance.
     public func updateBackgroundSettings(mode: LauncherBackgroundMode, materialIntensity: Double, blursWallpaper: Bool) {
         var config = LauncherBackgroundView.Configuration()
         config.mode = mode
@@ -323,13 +298,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         applySearchableRecords()
     }
 
-    /// Real, confirmed gap found while implementing `showsHiddenAppsInSearch`:
-    /// hidden apps were never excluded from search results at all — only
-    /// from the grid itself — despite `GridModel.hideApplication`'s own doc
-    /// comment claiming otherwise. This is the actual exclusion, gated on
-    /// the new setting (default off, matching the *new* "excluded" behavior
-    /// this fixes the app into, not the old undocumented "always included"
-    /// one).
     private func applySearchableRecords() {
         viewModel.setShowMenuBarApplications(gridModel.showMenuBarApplications)
         let orderedRecords = gridModel.orderedRecords(from: latestRecords)
@@ -401,11 +369,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             window.alphaValue = 0
         }
 
-        // Activate the app *before* asking the launcher window to become key — doing
-        // it in the other order (as a prior version did) let `activate`
-        // reassign key status right after `makeKeyAndOrderFront`, which
-        // showed up live as the launcher opening and immediately resigning
-        // key (closing itself) within ~50ms of every trigger firing.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         // An accessory app can be ordered while another app owns a fullscreen
@@ -568,11 +531,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             onDidLaunch: { [weak self] in self?.hide() },
             onDidCancel: { [weak self] in self?.hide() },
             onOpenSettings: { [weak self] in
-                // Deliberately does NOT hide the launcher first — Settings
-                // now floats above it (see `SettingsWindowController`'s
-                // elevated window level), matching real Launchpad-style
-                // reference apps where the grid stays visible behind an
-                // open preferences panel instead of disappearing.
                 self?.onOpenSettings?()
             },
             onRequestUninstall: { [weak self] bundleIdentifier in
@@ -580,28 +538,11 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             }
         )
 
-        // The background is a plain sibling subview behind the real
-        // content — not a container for it — so normal AppKit hit-testing
-        // applies to every button/cell (`LauncherBackgroundView.hitTest`
-        // also hard-disables itself, same discipline the shared glass-surface
-        // implementation establishes for why: a purely decorative
-        // background must never be a hit-test target).
         let root = NSView(frame: NSRect(origin: .zero, size: screen.frame.size))
         // Backs the open/close scale animation — animated on `root`'s own
         // layer, a level above `background`/`content.view`, so scaling
         // never fights with either of their own layer usage.
         root.wantsLayer = true
-        // `LauncherBackgroundView`, not the shared card material — a real,
-        // confirmed regression ("アプリの周りにある謎の枠を消してくれ")
-        // traced back to stretching `NSGlassEffectView`'s own Liquid Glass
-        // material (which self-draws a specular/edge highlight as part of
-        // the material itself) edge-to-edge across the entire screen. The
-        // design reference's own full-screen background (`TSBackground`)
-        // never uses glass at all — only small cards/chips do (search bar,
-        // folder panel, Settings) — so the whole-window background now
-        // mirrors that reference composition (blurred desktop wallpaper +
-        // scrim + material sheen + ambient blooms) instead of routing
-        // through the same glass factory used for cards.
         let background = LauncherBackgroundView(
             screen: screen,
             configuration: currentBackgroundConfiguration()
@@ -643,24 +584,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// lands outside this window's frame while it's visible closes it,
     /// independent of key-window bookkeeping.
     private var outsideClickMonitor: Any?
-    /// Real, confirmed gap in the click monitor above: a real screenshot
-    /// showed the launcher grid still fully visible with the *system menu
-    /// bar reading a completely different app's name* — meaning the
-    /// launcher stayed on screen while some other app was frontmost.
-    /// `outsideClickMonitor` only catches a *mouse click* landing outside
-    /// the window; switching apps via Cmd+Tab, Mission Control, Spotlight,
-    /// or clicking a Dock icon reassigns "frontmost app" without any click
-    /// this window (or even this process) ever observes. `NSWorkspace`'s
-    /// `didActivateApplicationNotification` is the one reliable, app-switch-
-    /// method-agnostic signal for "some other app just became frontmost" —
-    /// the launcher now keeps the menu bar in its native reserved area via
-    /// `screen.visibleFrame`, so as soon as another app activates its menu
-    /// bar naturally remains authoritative without any process-wide
-    /// presentation option to undo.
-    /// The fix is to hide the launcher the instant that happens, matching
-    /// real Launchpad/Mission Control's own behavior (losing focus dismisses
-    /// the overlay) — not to keep trying to suppress a menu bar this app no
-    /// longer has any say over.
     private var appActivationObserver: Any?
 
     private func startOutsideClickMonitorIfNeeded() {
@@ -717,24 +640,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     // MARK: NSWindowDelegate
 
     public func windowDidResignKey(_ notification: Notification) {
-        // Clicking another app or the desktop resigns key — that's the
-        // "click outside" close condition. A click on the launcher's own
-        // empty background is handled separately by
-        // `BackgroundClickCatcherView`, since that click stays inside this
-        // window and never resigns key.
-        //
-        // Real, confirmed regression (found via the
-        // `LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM` hook): `windowDidResignKey`
-        // also fires when a *different window of this same app* — Settings —
-        // becomes key, not just when a different app steals focus. Without
-        // this guard, opening Settings hid the launcher out from under it
-        // immediately, silently undoing the Round 6 design where Settings
-        // floats *above* the still-visible grid instead of replacing it
-        // (see `SettingsWindowController`'s doc comment). `NSApp.isActive`
-        // stays true when key status moves to another window of this same
-        // app, and only goes false when a genuinely different app becomes
-        // frontmost — that's the actual "clicked away" signal this handler
-        // needs, not "this particular window merely isn't key anymore."
         guard !NSApp.isActive else {
             DiagnosticsLog.launcher.info("windowDidResignKey fired, but app is still active (key moved to another of this app's windows) — not hiding")
             return

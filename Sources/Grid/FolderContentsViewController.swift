@@ -4,28 +4,6 @@ import Diagnostics
 import Persistence
 import SwiftUI
 
-/// Shown inside a full-screen dimming backdrop when a folder is opened
-/// (`GridViewController.openFolder`/`FolderOverlayBackdropView`) — this
-/// controller only owns its own content (title + tile grid + glass card
-/// background); the full-screen take-over presentation is entirely the
-/// caller's concern. One of `Folder.pages` is shown at a time, with the same
-/// dot/chevron control the main grid uses — matching how the system's own
-/// Launchpad pages through a folder, and matching the data model, which has
-/// always packed folders into pages of `GridSettings.folderGridSize`. An
-/// earlier version flattened every page into one vertically scrolling list;
-/// that hid the fact that some folders held pages packed past that capacity
-/// (see `GridModel.normalizeFolderPages`).
-///
-/// The tile grid itself is real SwiftUI (`FolderOverlayGridContent`/
-/// `FolderOverlayTileView`, hosted via `NSHostingView`), directly adapted
-/// from the user-supplied design reference's own `FolderOverlay`/
-/// `AppTile` — not a hand-translated AppKit/`NSCollectionView` reinterpretation
-/// of its numbers. This follows the same lesson already applied to the
-/// closed folder icon (`FolderIconView`): tuning AppKit geometry to
-/// *approximate* the reference repeatedly fell short of the user's explicit
-/// "寸分違わず同じものにできないの？" (can't you make it exactly,
-/// pixel-for-pixel identical to the reference?) ask, whereas hosting the
-/// reference's actual view code is identical by construction.
 final class FolderContentsViewController: NSViewController, NSTextFieldDelegate {
     private let model: GridModel
     private let folderID: FolderID
@@ -58,11 +36,6 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     /// grid uses.
     private static let swipeFlickVelocity: CGFloat = 400
     private let gridModel = FolderOverlayGridModel()
-    /// The main grid's own current icon size (`GridViewController.currentIconSize`)
-    /// — a real design reference the user supplied directly asked for
-    /// "内部アイコンが通常サイズの配置へ広がる" (contained icons expand to
-    /// their normal size when the folder opens), which a fixed 56pt
-    /// regardless of the grid's actual configured size did not satisfy.
     private let iconSize: Double
     /// The main grid's own column count (`GridSettings.columns`) — a real
     /// screenshot of a genuinely different app (confirmed by the user;
@@ -131,16 +104,6 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     /// The shape a folder is laid out around — see `displayedColumnCount`.
     private static let preferredRowCount = 3
 
-    /// The same column count the grid itself uses, so a folder reads as a
-    /// window onto the same layout rather than a differently-shaped one.
-    ///
-    /// An earlier pass laid folders out around three rows instead, to stop nine
-    /// items becoming a row of six with three stragglers. That produced a
-    /// squarer folder but a much taller one — at this grid's icon sizes, tall
-    /// enough to take most of the display. Following the grid's own columns
-    /// keeps the same nine items to two rows, which is both shorter and what
-    /// the reference launcher this was compared against does (18 items there
-    /// lay out 7 + 7 + 4, not 6 × 3).
     static func displayedColumnCount(itemCount: Int, configuredColumns: Int) -> Int {
         min(max(itemCount, 1), max(configuredColumns, 1))
     }
@@ -230,30 +193,6 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     override func loadView() {
         let root = FolderPanelRootView()
         root.onScroll = { [weak self] event in self?.swipeRecognizer.handle(event) }
-        // `root`'s own outer frame is deliberately plain/frame-based (this
-        // is the default — `translatesAutoresizingMaskIntoConstraints`
-        // stays `true`), never Auto Layout, and the caller
-        // (`GridViewController.openFolder`) sets `root.frame` directly
-        // rather than via constraints. This sidesteps a real, confirmed
-        // AppKit behavior: when a view controller's view *does* use pure
-        // Auto Layout for its own outer geometry, `NSViewController`
-        // automatically maintains its own width/height constraints mirroring
-        // `preferredContentSize` (visible in a live constraint dump as
-        // `'NSViewController.preferredContentSize.width'`) — and in one
-        // confirmed real regression ("フォルダを開くと画面が半分になる" /
-        // "フォルダのみためがひどすぎる"), that auto-mirrored constraint
-        // intermittently won over an explicit, equal-or-higher-priority
-        // caller-side constraint for `root`'s width, leaving the panel
-        // rendered at its SwiftUI content's own narrower intrinsic size
-        // instead of the intended screen-relative width — reproducibly, on
-        // a fresh rebuild, regardless of priority tuning or explicitly
-        // deactivating that constraint after the fact (both tried; neither
-        // held). Never having `root` participate in Auto Layout for its own
-        // frame in the first place removes the interaction entirely: Auto
-        // Layout still governs everything *inside* `root` (background/
-        // titleField/hosting/pageControl, all pinned to `root`'s bounds),
-        // which works identically regardless of whether `root` itself is
-        // frame- or constraint-positioned by its own superview.
 
         titleField.translatesAutoresizingMaskIntoConstraints = false
         // 21pt regular weight — the reference's own
@@ -311,18 +250,6 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         pageControl.onPrevious = { [weak self] in self?.goToAdjacentPage(-1) }
         pageControl.onNext = { [weak self] in self?.goToAdjacentPage(1) }
 
-        // Light, barely-tinted frosted-glass card background — a decorative
-        // sibling behind the grid only (not the title, which floats
-        // directly on the backdrop above it — see the constraint below).
-        // Real, confirmed report ("フォルダの背景を再度表示させて"): this
-        // was removed in an earlier pass under the mistaken belief it was
-        // the "black background" a prior report meant; see
-        // `GlassBackgroundHelper.makeFolderCardBackground`'s doc comment.
-        // Tint stays low on purpose. `NSGlassEffectView` does not simply lay a
-        // wash behind its siblings — raising this to 0.16 visibly hazed the
-        // folder's own icons, which sit *above* it in the view order. The panel
-        // reads as a light surface because what is behind it is hidden while it
-        // is open, not because the glass itself is opaque.
         let background = GlassBackgroundHelper.makeFolderCardBackground(
             cornerRadius: 26,
             tint: NSColor.white.withAlphaComponent(0.08),
@@ -342,12 +269,6 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         self.pageControlHeight = pageControlHeight
 
         NSLayoutConstraint.activate([
-            // The card background covers the grid and the page dots, but not
-            // the title — which floats directly on the backdrop above it.
-            // Pinning `background` to `root`'s full bounds instead put the
-            // title *inside* the same boxed card as the grid, a real,
-            // confirmed regression ("その他の文字が枠内にはいてるのが気に
-            // なる") from an earlier pass.
             background.topAnchor.constraint(equalTo: hosting.topAnchor),
             background.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             background.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -547,22 +468,6 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
                     guard let self, self.refreshGeneration == generation else { return }
                     guard let index = self.gridModel.tiles.firstIndex(where: { $0.id == tileID }) else { return }
                     self.gridModel.tiles[index].icon = icon
-                    // Real, confirmed bug: a fresh folder open has every icon
-                    // start nil and trickle in one at a time as each
-                    // `cache.icon(for:)` await resolves — each of these
-                    // `@Published` writes re-renders `FolderOverlayGridContent`,
-                    // and one debug-hook check (which happened to sample
-                    // only twice, at 0ms and +300ms) missed that a mid-stream
-                    // re-render can race Auto Layout's width-constraint
-                    // resolution and leave `NSHostingView` measured against
-                    // its own narrower SwiftUI-computed intrinsic size
-                    // instead of the width imposed by its pinning to `root`
-                    // — exactly the collapsed-column symptom, just
-                    // intermittent depending on how many icons are still
-                    // loading when a screenshot is taken. Forcing a
-                    // synchronous layout pass after every trickle update
-                    // makes the correct width win deterministically instead
-                    // of depending on AppKit "eventually" reconciling it.
                     self.view.window?.layoutIfNeeded()
                 }
             }
@@ -571,21 +476,6 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         view.window?.layoutIfNeeded()
     }
 
-    /// Real, confirmed report ("フォルダ内のアプリ移動が違和感がある...
-    /// 下にある実装からそのまま持ってきて"): a plain drop-to-reorder
-    /// (the previous, already-shipped implementation) landed correctly in
-    /// the model but gave no feedback *while* dragging — unlike the main
-    /// grid's `ItemDragSession`, where other icons visibly shift out of the
-    /// way in real time. These four methods split "model" from "live
-    /// preview" the same way `ItemDragSession` does: `model`/`layout.json`
-    /// is touched exactly once, in `commitTileDrag()`, when a drop actually
-    /// lands — never during hover. `gridModel.tiles` (the SwiftUI-visible
-    /// array) is the live-preview surface instead: `hoverTileDrag` reorders
-    /// *only* that array, under animation, as the drag passes over other
-    /// tiles. Because the real model is never touched mid-drag, a cancelled
-    /// drag reconciles for free — `cancelTileDrag()` just calls the
-    /// existing `refresh()`, which rebuilds `gridModel.tiles` from
-    /// `model.folders[folderID]`, untouched throughout.
     private static let tileDragHoverSpring = Animation.spring(response: 0.30, dampingFraction: 0.85)
 
     private func beginTileDrag(id: String) {

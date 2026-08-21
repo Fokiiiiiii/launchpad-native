@@ -26,11 +26,6 @@ final class GridCellItem: NSCollectionViewItem {
     private var iconWidthConstraint: NSLayoutConstraint?
     private var iconHeightConstraint: NSLayoutConstraint?
     private var iconTopConstraint: NSLayoutConstraint?
-    /// Hosts `FolderIconView` (real SwiftUI code from the user-supplied
-    /// design reference) exactly over `iconView`'s own frame — created
-    /// lazily since most cells in a real grid are apps and never need it.
-    /// Shown/hidden opposite `iconView` depending on whether this cell is
-    /// currently configured as a folder or an app.
     private var folderHostingView: NSHostingView<FolderIconView>?
     /// Base size supplied by the grid before the user's scale is applied.
     private var currentIconSizeValue: CGFloat = 96
@@ -265,16 +260,6 @@ final class GridCellItem: NSCollectionViewItem {
         applyVisualTransforms()
     }
 
-    /// Renders as a Springboard-style folder: a live-hosted `FolderIconView`
-    /// (real SwiftUI code from the user-supplied design reference, not a
-    /// Core Graphics reinterpretation of its numbers — see that type's doc
-    /// comment) — replaces the generic `folder.fill` glyph + red count
-    /// badge this app used before Round 12, and every subsequent from-
-    /// scratch AppKit attempt at reproducing the reference's look. `icons`
-    /// starts empty (renders as an all-placeholder 3x3 grid) until the
-    /// caller's own async `IconCache` fetch resolves — see `setFolderIcons`
-    /// — using the same `requestKey`/`currentRequestKey` cell-reuse guard
-    /// as `configureAsApp`.
     func configureAsFolder(name: String, isSelected: Bool, iconSize: Double, visualScale: Double = 1, icons: [NSImage], requestKey: String) {
         currentRequestKey = requestKey
         applyIconSize(iconSize, visualScale: visualScale)
@@ -309,25 +294,6 @@ final class GridCellItem: NSCollectionViewItem {
         applyVisualTransforms()
     }
 
-    /// A soft glass highlight (translucent white fill + thin bright edge)
-    /// rather than a flat system-accent block — reads as a piece of the
-    /// same glass material lifting slightly, matching how Liquid Glass
-    /// surfaces (Control Center's own selection state) highlight rather
-    /// than painting a solid color over themselves.
-    ///
-    /// Drawn on `highlightView` — sized to hug the icon+label, not `view`
-    /// (the full collection-view cell). `view` is sized to the grid's
-    /// actual per-slot size, which at low column/row counts (or large
-    /// configured icon sizes) can be far bigger than the icon it holds;
-    /// painting the highlight across the *entire* slot then produces a
-    /// large, mostly-empty colored rectangle around a small icon —
-    /// confirmed by the user as visibly broken-looking ("これどう見ても
-    /// おかしい") via a debug-driven screenshot of a real search result.
-    /// Not `private`: `GridViewController`'s item-drag press feedback calls
-    /// this directly on the already-existing cell view, instead of going
-    /// through `collectionView.reloadItems(at:)` — see that call site's doc
-    /// comment for why `reloadItems` specifically must not be called from
-    /// inside a mouseDown handler for the same item.
     func applySelection(_ isSelected: Bool) {
         highlightView.layer?.cornerRadius = 12
         highlightView.layer?.backgroundColor = isSelected
@@ -337,39 +303,10 @@ final class GridCellItem: NSCollectionViewItem {
         highlightView.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
     }
 
-    /// The icon's own rendered frame in this cell's coordinate space. The
-    /// effective scale is part of the Auto Layout frame, not a hidden layer
-    /// transform, so hit testing and decoration use the same geometry.
-    /// Exposed so callers that need to align decoration to the icon itself
-    /// — not the whole cell, which is far taller than the icon once the
-    /// label band below it is included — have a single source of truth
-    /// instead of re-deriving the icon's top-inset/centering/size
-    /// independently (which would drift if this cell's own Auto Layout
-    /// constants ever changed). Real, confirmed report ("フォルダ制作の
-    /// Uiがひどすぎる長方形だし"): `GridViewController`'s folder-drop-zone
-    /// indicator used to be sized from the full cell slot rect (icon +
-    /// label + padding), reading as an oversized rectangle instead of a
-    /// ring around just the icon.
     var iconFrame: NSRect {
         iconView.frame
     }
 
-    /// The icon+label's actual rendered bounds, in this cell's own view
-    /// coordinate space. A 7x5 grid's cells are far larger than any one
-    /// icon, so treating the *whole cell* as clickable (NSCollectionView's
-    /// default) meant clicking what looked like empty space between icons
-    /// still launched/selected something — confirmed as a real usability
-    /// bug during hands-on testing ("判定がアイコンより大きすぎる"/hit area
-    /// is way bigger than the icon). `GridCollectionView` uses this to tell
-    /// "really clicked the icon" from "clicked the gap around it," treating
-    /// the latter as a background click.
-    ///
-    /// The label's own `frame` is pinned edge-to-edge across the full cell
-    /// width (see the leading/trailing constraints above), so unioning it
-    /// as-is would make a short app name's hit region span the entire
-    /// cell's width, not just the name's own rendered text — capped to the
-    /// label's actual rendered text width instead (falling back to the
-    /// icon's width for an empty/hidden label, e.g. `showsLabel: false`).
     var contentHitTestFrame: NSRect {
         let iconFrame = self.iconFrame
         let textWidth = min(label.attributedStringValue.size().width, label.frame.width)

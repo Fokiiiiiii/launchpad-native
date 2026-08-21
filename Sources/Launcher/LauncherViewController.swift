@@ -7,11 +7,6 @@ import Localization
 import Persistence
 import UniformTypeIdentifiers
 
-/// Two display modes sharing one search field: an empty query shows
-/// `GridViewController` (the persistent, folder-aware, custom-layout paged
-/// grid from Phase 4); typing a query switches to a flat, flattened search
-/// results list (folders don't nest in search — matches Launchpad/Spotlight
-/// convention of flattening structure once you start typing).
 final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCollectionViewDataSource, NSCollectionViewDelegate {
     private let viewModel: LauncherViewModel
     private let gridModel: GridModel
@@ -68,18 +63,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         let root = BackgroundClickCatcherView()
         root.onBackgroundClick = { [weak self] in self?.onDidCancel() }
 
-        // The search field reads as its own floating glass capsule (Spotlight's
-        // own search field is a distinct material, not bare text on the
-        // ambient background) — `searchBarGlass` is a purely decorative
-        // sibling behind `searchIcon`/`searchField`, never their container,
-        // for the same hit-testing reason used by the shared glass-surface
-        // implementation. Real, confirmed
-        // report ("検索バーのデザインが堅い"): the reference's own SwiftUI
-        // source (`TSLayout.searchCorner` = 10) and its HTML mockup
-        // disagree here (20pt/half-height in the HTML) — 10pt on a 36pt-tall
-        // bar reads as a barely-rounded rectangle, not a soft capsule. Full
-        // stadium shape (half the bar's own height) matches what the user
-        // actually saw and asked for.
         let searchBarGlass = GlassSurfaceFactory.makeBackground(cornerRadius: 18)
         searchBarGlass.translatesAutoresizingMaskIntoConstraints = false
 
@@ -94,24 +77,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.cell = SearchFieldCell()
-        // Real, confirmed root cause of "clicking the search field closes
-        // the launcher": a bare `NSTextFieldCell()` (what `SearchFieldCell()`
-        // constructs) defaults to *not* editable/selectable — unlike
-        // `NSTextField`'s own convenience initializers, which configure
-        // their default cell that way for you. Assigning a fresh custom
-        // cell via `.cell = ...` does not inherit that configuration, so
-        // without these two lines the cell silently declined every mouse
-        // click (not editable → nothing to track), and `NSControl.mouseDown`
-        // fell back to `super.mouseDown(event)`, which walks the responder
-        // chain up through this field's superviews and ultimately reached
-        // `BackgroundClickCatcherView.mouseDown` — indistinguishable from a
-        // real background click, so it closed the launcher. Confirmed via a
-        // debug hook that called `mouseDown(with:)` directly on the exact
-        // view `hitTest` had already identified as the search field: even
-        // that direct call still propagated to the background catcher,
-        // which only makes sense as a responder-chain fallback, not a
-        // hit-testing problem — hitTest was correctly resolving to this
-        // field the entire time.
         searchField.isEditable = true
         searchField.isSelectable = true
         // Same bug family as isEditable/isSelectable above: a bare
@@ -133,17 +98,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // 13.5pt — the reference's own `.font(.system(size: 13.5))`; the
         // previous 20pt was an invented value, not taken from the reference.
         searchField.font = .systemFont(ofSize: 13.5, weight: .regular)
-        // Round 13 §E: confirmed via real measurement (`log stream` with
-        // `LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING=1`) that without this, the
-        // field editor's typed text falls back to `.controlTextColor` — a
-        // flat, non-vibrancy-aware color meant for opaque controls, not
-        // the translucent glass search bar it actually sits on. The
-        // placeholder above already got this right via its explicit
-        // `.placeholderTextColor`; `GridCellItem`'s app-name labels
-        // (`Sources/Grid/GridCellItem.swift`) establish `.labelColor` as
-        // this codebase's convention for legible text over glass/blur
-        // materials — this was the one place that convention wasn't
-        // followed, and is the root cause of "入力時だけ検索の文字がおかしい".
         searchField.textColor = .labelColor
         searchField.isBordered = false
         searchField.drawsBackground = false
@@ -151,22 +105,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchField.delegate = self
         searchField.setAccessibilityLabel(L10n.searchAccessibilityLabel)
 
-        // Real, confirmed duplication the user called out ("設定ボタンへの
-        // 経路は二つある"): this used to be a second, permanently-visible
-        // glass chip with its own gearshape button living right next to
-        // the quick-menu chip below — both routes opened the exact same
-        // Settings window. Removed in favor of a single entry point (the
-        // quick menu's "Open Settings…" item, wired up below).
-        //
-        // The quick-menu button itself now lives *inside* the search bar's
-        // own pill (trailing edge) instead of as a separate floating chip
-        // beside it — matches the design reference's `SearchField`
-        // exactly, whose "•••" button is one more element in the same
-        // `HStack` as the magnifying glass and text field, not a second
-        // glass shape. Symbol is plain `ellipsis` (not `ellipsis.circle` —
-        // the circle is drawn manually via the button's own layer, matching
-        // the reference's `.background(.white.opacity(0.12), in: Circle())`),
-        // 10pt bold, in a 20x20 circle.
         quickMenuButton.translatesAutoresizingMaskIntoConstraints = false
         quickMenuButton.bezelStyle = .circular
         quickMenuButton.isBordered = false
@@ -372,11 +310,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchField.stringValue = ""
         viewModel.setQuery("")
         setSearchMode(active: false)
-        // Safety net for the page-drag machinery: every time the launcher
-        // shows, force a clean state regardless of how the previous
-        // session ended — see `GridViewController.resetDragStateIfNeeded`'s
-        // doc comment for why this exists (a lesson from a prior version
-        // of this feature that could get stuck).
         gridViewController.resetDragStateIfNeeded()
         // Same guarantee for item drags. Without this, a drag left active by a
         // trigger that hid the launcher mid-gesture stayed active, and only the
@@ -387,28 +320,11 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         gridViewController.setGridContentHidden(false)
     }
 
-    /// Debug-only entry point (`LAUNCHPAD_DEBUG_SEARCH_QUERY`, wired in
-    /// `AppDelegate`) so the search-results layout can actually be driven
-    /// and screenshotted without Accessibility/GUI-scripting permission to
-    /// type into the field interactively — see `AppDelegate`'s doc comment
-    /// on the env var for why this exists.
     func debugSetSearchQuery(_ query: String) {
         searchField.stringValue = query
         applyQuery(query)
     }
 
-    /// Debug-only entry point (`LAUNCHPAD_DEBUG_CLICK_SEARCH_FIELD`, wired
-    /// in `AppDelegate`) — synthesizes a *real* `NSEvent` mouse down/up pair
-    /// at the search field's actual on-screen location and dispatches it
-    /// through `window.sendEvent(_:)`, so the exact hit-testing/responder
-    /// path a real trackpad click takes can be exercised and logged without
-    /// Accessibility/GUI-scripting permission to perform one. Exists
-    /// specifically because a prior fix (making the decorative glass
-    /// background's `hitTest` always return `nil`) didn't resolve a real
-    /// user report that clicking the search field still closes the
-    /// launcher — this lets that exact path be re-examined via `log
-    /// stream` without needing the user's own hands-on retest for every
-    /// iteration.
     func debugSimulateSearchFieldClick() {
         guard let window = view.window else {
             DiagnosticsLog.launcher.info("debugSimulateSearchFieldClick: no window")
@@ -454,27 +370,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         DiagnosticsLog.launcher.info("debugSimulateSearchFieldClick: after sendEvent, firstResponder=\(String(describing: window.firstResponder), privacy: .public), windowIsVisible=\(window.isVisible, privacy: .public), windowIsKey=\(window.isKeyWindow, privacy: .public)")
     }
 
-    /// Round 13 §E debug-only entry point (`LAUNCHPAD_DEBUG_TYPE_SEARCH_FIELD`,
-    /// wired in `AppDelegate`) — `debugSetSearchQuery` sets `stringValue`
-    /// directly and never attaches a real field editor, so it can't
-    /// reproduce "検索欄が入力時だけおかしい" (only shows up while a real
-    /// field editor is actively receiving characters). Focuses the field
-    /// via `makeFirstResponder` (the same real API `viewDidAppear` already
-    /// uses, not the synthetic click hook — see note below) to establish
-    /// a real field editor, then dispatches real synthetic keyDown events
-    /// per character so the field editor's layout is exercised exactly as
-    /// it would be by a user typing.
-    ///
-    /// Deliberately does NOT reuse `debugSimulateSearchFieldClick`: while
-    /// diagnosing this bug, that hook was found to hang indefinitely after
-    /// dispatching its synthetic mouseDown — the process stays alive but
-    /// never logs its "after sendEvent" line and stops responding. Root
-    /// cause not yet investigated (likely `NSTextView.mouseDown`'s internal
-    /// tracking loop blocking on a real subsequent event that the
-    /// synchronously-issued synthetic mouseUp can't satisfy via
-    /// `sendEvent`), and is a separate pre-existing issue from this
-    /// Round's search-field-during-typing bug — flagged for follow-up, not
-    /// fixed here to keep this diagnosis unblocked.
     func debugSimulateSearchFieldTyping(_ text: String) {
         guard let window = view.window else {
             DiagnosticsLog.launcher.info("debugSimulateSearchFieldTyping: no window")
@@ -575,17 +470,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         gridViewController.debugSimulateItemDrag(mode: mode)
     }
 
-    /// Search results previously used their own hardcoded cell size,
-    /// spacing, and margins entirely independent of the persistent grid —
-    /// two related user reports ("検索欄に文字を入れるとアプリのサイズが
-    /// 壊れる", then "レイアウトも合わない" once icon size alone was fixed):
-    /// typing a query didn't just change icon size, it swapped in a
-    /// visually different grid (different column count, gaps, edges). Both
-    /// views share one full-width surface, so reusing the grid's actual
-    /// per-cell size (`GridViewController.currentCellSize`) and its real
-    /// spacing/margins from `GridSettings` — instead of independently-tuned
-    /// constants — makes the flat search list line up as the *same* grid,
-    /// just filtered and paged, rather than a different one.
     private func applySearchResultsLayoutMetrics() {
         let cellSize = gridViewController.currentCellSize
         let settings = gridModel.gridSettings
@@ -726,14 +610,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         logSearchFieldEditingGeometryIfEnabled(context: "didChange")
     }
 
-    /// Round 13 §E: diagnoses "検索欄が入力時だけおかしい" — `SearchFieldCell
-    /// .drawingRect(forBounds:)` only governs the non-editing display
-    /// (placeholder/committed text); while a real field editor `NSTextView`
-    /// is attached during active typing, its own `textContainerInset` is a
-    /// separate value this override never touches. Logs both sides so the
-    /// mismatch (if any) shows up in `log stream` instead of being guessed
-    /// at — gated behind `LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING` since this
-    /// fires on every keystroke.
     private func logSearchFieldEditingGeometryIfEnabled(context: String) {
         guard ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING"] == "1" else { return }
         let fieldEditor = view.window?.fieldEditor(false, for: searchField) as? NSTextView

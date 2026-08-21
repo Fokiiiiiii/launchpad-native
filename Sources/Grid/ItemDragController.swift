@@ -110,72 +110,19 @@ final class ItemDragController {
     /// machine actually returned to rest.
     var isDragging: Bool { activeItemDrag != nil }
 
-    // MARK: Item drag (lift, live reorder, folder creation, page-turn)
-    //
-    // Replaces NSCollectionView's built-in click/selection/drag machinery
-    // entirely for cell content (see `GridCollectionView.onItemMouseDown`'s
-    // doc comment for why): that machinery fires selection synchronously on
-    // mouseDown before it's known whether the gesture continues into a drag
-    // (a real, confirmed regression from an earlier round — dragging opened
-    // the app instead of moving it), and has no notion of live neighbor
-    // displacement, folder-candidate hover zones, or drag-triggered page
-    // turning — the user's explicit "iOS home screen" interaction ask,
-    // detailed in a pasted specification this design follows (adapted from
-    // its SwiftUI-flavored pseudocode to this project's AppKit/CALayer
-    // idioms, which is what actually works reliably in this codebase — see
-    // the page-drag paging section above for the established pattern of
-    // direct `transform.translation.x/y` manipulation this reuses).
-    //
-    // Deliberately deferred out of this pass (flagged, not silently
-    // dropped): the spec's precise geometric hysteresis band (distinct from
-    // the debounce-timer approach used here), Cmd+Arrow/Option+Arrow
-    // keyboard reorder/page-move shortcuts, dragging an icon out to the
-    // real Dock (previously free via NSCollectionView's native drag
-    // session + `.fileURL` pasteboard type — removed along with that
-    // machinery), and giving `FolderContentsViewController`'s own grid the
-    // same rich system (it keeps its prior, simpler reorder behavior).
 
     private var pendingItemPress: (indexPath: IndexPath, startPoint: NSPoint)?
     private var activeItemDrag: ItemDrag.ItemDragSession?
     private var itemDragGeneration = 0
-    /// Round 12 §8c: lightweight velocity approximation for
-    /// `animateLayerTranslation`'s re-targeted springs (reorder-preview
-    /// shift, item-drag page-turn) — keyed by layer identity so a cell
-    /// reused for a *different* record on a later drag never inherits a
-    /// stale velocity estimate. Cleared in `endItemDrag`/`revertItemDrag`.
     private var lastAnimatedValueByLayer: [ObjectIdentifier: (x: CGFloat, xTime: CFTimeInterval, y: CGFloat, yTime: CFTimeInterval)] = [:]
 
 
     func handleItemMouseDown(indexPath: IndexPath, event: NSEvent) {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(indexPath.item) else { return }
-        // Real, confirmed bug caught live via log stream during actual user
-        // testing: a fresh mouseDown on a DIFFERENT item can arrive while
-        // `activeItemDrag` is still set from a previous gesture whose own
-        // mouseUp never reached us (the same real-world AppKit routing gap
-        // the global mouseUp monitor below exists for — a single pointer
-        // can't genuinely have two concurrent presses). Left unhandled, this
-        // method only overwrote `pendingItemPress`, leaving the stale session
-        // active — and `handleItemMouseDragged` checks `activeItemDrag`
-        // before `pendingItemPress`, so every subsequent drag update kept
-        // moving the FIRST (stale) item while the user believed they'd
-        // grabbed the new one. Matches the reported symptom exactly:
-        // "after one drag breaks, dragging a different app moves the first
-        // app instead." Commit the stale session now, using its own
-        // last-tracked position, before handling this new press — the same
-        // treatment the global monitor gives a genuinely lost mouseUp.
         if let staleSession = activeItemDrag {
             DiagnosticsLog.grid.notice("handleItemMouseDown: new press on item \(indexPath.item, privacy: .public) arrived while item \(staleSession.sourceOriginalIndex, privacy: .public)'s drag was still active — committing the stale session first")
             endItemDrag(session: staleSession)
         }
-        // Real, confirmed regression: this used to call
-        // `collectionView.reloadItems(at: [indexPath])` right here to make
-        // the selection highlight visible. Reloading the very cell that's
-        // mid-mouseDown reconfigures (and can recreate) its view instance —
-        // AppKit routes subsequent mouseDragged/mouseUp to whichever view
-        // received mouseDown, so swapping that view out from under an
-        // in-flight press broke every drag entirely (dragging did nothing
-        // at all). Toggling the highlight directly on the already-existing
-        // live cell views avoids touching the view identity mid-gesture.
         let previousSelection = collectionView.selectionIndexPaths
         callbacks.clearKeyboardSelection()
         collectionView.selectionIndexPaths = [indexPath]
@@ -215,15 +162,6 @@ final class ItemDragController {
         callbacks.activateItem(pending.indexPath)
     }
 
-    /// Cancels any in-progress item drag, reverting to the original
-    /// arrangement — reachable from a background click (mirrors the
-    /// page-drag machinery's own safety net) and available for a future
-    /// Escape-key wire-up.
-    ///
-    /// Also called every time the launcher is shown, which is what
-    /// `resetDragStateIfNeeded()` already guarantees for the *page*-drag
-    /// machinery: however a previous session ended, the next open starts
-    /// clean. Item drags had no equivalent entry point.
     func cancelItemDragIfNeeded() {
         guard let session = activeItemDrag else { return }
         DiagnosticsLog.grid.notice("cancelItemDragIfNeeded: reverting drag of item \(session.sourceOriginalIndex, privacy: .public)")
@@ -332,37 +270,8 @@ final class ItemDragController {
         session.floatingView = imageView
         session.floatingViewHost = host
         session.floatingViewOriginalFrameInHost = frameInHost
-        // Real, confirmed bug found via genuine CGEvent-driven drag testing:
-        // setting `cell.view.isHidden = true` here — even though `cell.view`
-        // is a descendant of `collectionView`, not `collectionView` itself —
-        // silently broke AppKit's mouse-tracking continuity for the rest of
-        // the gesture. A live drag would fire `mouseDown` -> the first
-        // `mouseDragged` -> `beginItemDrag`, then never receive another
-        // `mouseDragged`/`mouseUp` at all, exactly matching "the grabbed
-        // icon doesn't move" and "surrounding icons shift oddly" (the
-        // reorder-preview path is driven separately and kept animating).
-        // Confirmed by toggling only this one line: removing it let 6/6
-        // synthetic `mouseDragged` events through and `endItemDrag` commit
-        // correctly; restoring it reproduced the 1-event cutoff every time.
-        // Same family as the `reloadItems`-mid-mouseDown regression
-        // documented above `handleItemMouseDown` — mutating view-hierarchy/
-        // visibility state on the actively-tracked view's subtree mid-
-        // gesture is unsafe. Fixed by hiding the cell via its `CALayer`
-        // opacity instead, which doesn't touch AppKit's view-visibility
-        // machinery at all.
         cell.view.layer?.opacity = 0
 
-        // Spec 5.2: a short lift (scale 1.00 -> 1.06), a touch of bounce
-        // since a real grab is what triggered it (apple-design: reserve
-        // bounce for gesture-driven motion). Reduce Motion keeps the
-        // functional feedback (the icon still visibly separates and gets a
-        // shadow) without the scale animation itself. Uses the
-        // `"transform.scale"` structured keypath (not a raw
-        // `CATransform3DMakeScale` assignment to `layer.transform`) so it
-        // composes cleanly with the `"transform.translation.x/y"` keypath
-        // `updateItemDrag` uses for movement — see that method's doc
-        // comment for why mixing `.frame` and `.transform` on the same
-        // view was a real, confirmed bug.
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         guard let layer = imageView.layer else { return }
         if !reduceMotion {
@@ -371,39 +280,9 @@ final class ItemDragController {
         }
     }
 
-    /// Real, confirmed bug (user report: "the grabbed app flies off
-    /// erratically"): the first version of this method repeatedly
-    /// reassigned `floatingView.frame.origin` on every drag update, while
-    /// the *same* view's layer also carried the lift's scale transform.
-    /// `NSView.frame` is computed against the view's untransformed
-    /// geometry — reassigning it while a layer transform is simultaneously
-    /// active (and, during the lift's spring, still mid-animation) fights
-    /// with that transform instead of composing with it, producing
-    /// compounding/erratic positional drift. Every other continuous drag in
-    /// this codebase (page-drag, reorder preview) avoids this by never
-    /// touching `.frame` after initial placement and driving all movement
-    /// through the `transform.translation.x/y` keypaths instead, which
-    /// compose independently of `transform.scale` — this now does the same.
     private func updateItemDrag(session: ItemDrag.ItemDragSession, point: NSPoint) {
         session.lastPoint = point
         guard let floatingView = session.floatingView, let layer = floatingView.layer else { return }
-        // Real, confirmed bug found via genuine CGEvent-driven drag testing
-        // with diagnostic logging: converting `targetOriginInCollectionView`
-        // as a *point* here, while `floatingViewOriginalFrameInHost` (below,
-        // in `createFloatingDragView`) is computed by converting the cell's
-        // *rect* — `NSView.convert(_ rect:to:)` automatically corrects for a
-        // flipped/non-flipped mismatch between `collectionView` (flipped)
-        // and `view` (non-flipped) so `minY` always means "the visual
-        // bottom edge" in the destination coordinate space, but
-        // `convert(_ point:to:)` does not perform that same correction — it
-        // just remaps the raw value. Mixing the two meant `dy` was always
-        // off by exactly one cell's height (confirmed via logging: a purely
-        // horizontal drag produced `dy == cell height` on every frame,
-        // never 0), which is why the floating icon visually jumped to a
-        // wildly wrong vertical position while still technically tracking
-        // the cursor horizontally. Fixed by building a full rect here too,
-        // so both sides of the subtraction go through the same rect-convert
-        // path and agree on what `minY` means.
         let targetOriginInCollectionView = NSPoint(x: point.x - session.grabOffset.x, y: point.y - session.grabOffset.y)
         let targetRectInCollectionView = NSRect(origin: targetOriginInCollectionView, size: session.originalFrame.size)
         let host = session.floatingViewHost ?? view
@@ -417,18 +296,6 @@ final class ItemDragController {
         layer.setValue(dy, forKeyPath: "transform.translation.y")
         CATransaction.commit()
 
-        // Real, confirmed report ("グループ化しようとするとアプリが逃げる
-        // ような感じがしてやりにくい"): evaluating reorder and folder
-        // candidates independently meant that moving toward another app to
-        // group it also crossed the reorder hysteresis radius around that
-        // same cell, so the target app itself got nudged aside by the
-        // reorder preview right as the user tried to hover over it — the
-        // thing being grabbed for kept moving. The folder zone check is now
-        // evaluated first, and while the pointer is inside another app's
-        // center zone, reorder candidate evaluation is skipped entirely
-        // (not just gated on the folder candidate having *committed* —
-        // gating this early, before the folder hover delay fires, is what
-        // keeps the target from being nudged in the first place).
         let folderTarget = folderZoneTarget(session: session, point: point)
         if folderTarget != nil {
             suppressReorderForFolderZone(session: session)
@@ -453,24 +320,6 @@ final class ItemDragController {
         )
     }
 
-    /// Real, confirmed report ("アプリを狙った位置に移動させるのがめちゃく
-    /// ちゃむずい...狙った位置にアプリを置いてもそこにあるアプリが動かな
-    /// かったりする"): the previous implementation found the single
-    /// nearest *other item* (by dx²+dy² distance) and decided front/back
-    /// purely from that item's X coordinate — a fundamentally 1D judgment
-    /// bolted onto a 2D grid. Dragging straight up/down onto a different
-    /// row landed on the same X-based front/back call as a same-row drag,
-    /// which didn't reliably resolve to "the row the pointer is actually
-    /// over." This computes the slot directly from the grid's own geometry
-    /// (same `column = slot % columns; row = slot / columns` convention as
-    /// `PagedGridLayout.prepare()` and `frameForSlot` below) instead of
-    /// comparing to other items at all — "which cell is the pointer over,"
-    /// not "which existing item is closest." The column is clamped to
-    /// `0..<columns` *before* combining with the row — without that, a
-    /// point past the grid's right edge would compute a raw column >=
-    /// columns, which folds into the next row's slot range and silently
-    /// points at a completely unrelated cell instead of "the last column
-    /// of this row."
     private func insertionSlot(forPoint point: NSPoint, excluding excludedIndex: Int?) -> Int? {
         guard model.pages.indices.contains(currentPage) else { return nil }
         // One slot is freed up by the dragged item itself only while that item
@@ -489,20 +338,6 @@ final class ItemDragController {
         )
     }
 
-    /// Round 12 §8a, revised: real hysteresis around the *committed* slot,
-    /// not just the raw cell-under-pointer answer — the pointer must move
-    /// far enough from the committed slot's own center before a new
-    /// candidate is even considered. Real, confirmed bug found while fixing
-    /// "狙った位置にアプリを置いてもそこにあるアプリが動かない": the
-    /// previous version judged this purely from `point.x` (`point.x >
-    /// committedFrame.midX + threshold` / `< ... - threshold`), so a
-    /// straight vertical drag onto a different row — where `point.x` barely
-    /// moves — could never satisfy either condition even though `rawSlot`
-    /// (from `insertionSlot`, itself now genuinely 2D) had already changed
-    /// correctly. The candidate would then never commit no matter how far
-    /// the pointer moved vertically. Judging by straight-line distance from
-    /// the committed cell's center instead works for movement in any
-    /// direction.
     private func evaluateReorderCandidate(session: ItemDrag.ItemDragSession, point: NSPoint) {
         guard let rawSlot = insertionSlot(forPoint: point, excluding: session.sourceIndexOnCurrentPage) else { return }
         guard rawSlot != session.candidateSlot else {
@@ -548,11 +383,6 @@ final class ItemDragController {
         animateReorderPreview(session: session)
     }
 
-    /// Spec 8.2: remaining items spring to their preview slot — no fade, no
-    /// rotation, uniform timing regardless of row. Only the *visual*
-    /// arrangement changes here (via each live cell view's own layer
-    /// transform); `model.pages` itself is untouched until the drop
-    /// actually commits in `endItemDrag`.
     private func animateReorderPreview(session: ItemDrag.ItemDragSession) {
         guard model.pages.indices.contains(currentPage) else { return }
         let items = model.pages[currentPage]
@@ -564,32 +394,10 @@ final class ItemDragController {
                   let originalFrame = layout.layoutAttributesForItem(at: IndexPath(item: originalIndex, section: 0))?.frame,
                   let layer = cell.view.layer else { continue }
             let targetFrame = frameForSlot(previewSlot)
-            // Real, confirmed report ("アプリを狙った位置に移動させるのが
-            // めちゃくちゃむずい"): the shared default (damping 0.86,
-            // response 0.24) reads fine for a settle/revert landing but
-            // adds one more layer of lag on top of the hysteresis/debounce
-            // changes above for a "make way" nudge during live dragging.
-            // Snappier, less bouncy values here only — `settleFloatingView`
-            // and `revertItemDrag` below keep calling this with no damping/
-            // response arguments, so their behavior is untouched.
             animateLayerTranslation(layer, toX: targetFrame.minX - originalFrame.minX, toY: targetFrame.minY - originalFrame.minY, damping: 0.90, response: 0.16)
         }
     }
 
-    /// Round 12 §8c: reads the layer's current presentation-value (already
-    /// correct for position-continuity on a mid-flight re-target — no
-    /// "jump") *and* now also approximates its current velocity by
-    /// comparing against the value recorded at the previous re-target on
-    /// this exact layer/keypath pair, handing that off as the new spring's
-    /// `initialVelocity` so a re-targeted reorder-preview shift doesn't
-    /// visually hard-cut to a standstill before easing toward the new slot
-    /// (apple-design §3's interruptibility rule). This is a coarse,
-    /// event-to-event average, not true instantaneous release velocity —
-    /// appropriate given every caller here is a discrete, event-driven
-    /// re-target (a candidate-slot change), not a continuously-scrubbing
-    /// gesture; see `commitPageTurnDuringDrag` for the other velocity-
-    /// handoff case, which reuses the edge-peek's own last-known offset/time
-    /// instead of this generic per-layer cache.
     private func animateLayerTranslation(_ layer: CALayer, toX dx: CGFloat, toY dy: CGFloat, damping: CGFloat = 0.86, response: CGFloat = 0.24) {
         let presentationLayer = layer.presentation() ?? layer
         let currentX = (presentationLayer.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? 0
@@ -625,13 +433,6 @@ final class ItemDragController {
 
     // MARK: Folder-candidate detection
 
-    /// Spec 11.1: only apps can be a folder-creation *source* onto another
-    /// item — dragging a folder doesn't nest folders, matching
-    /// `GridModel.createOrJoinFolder`'s existing app+app/app+folder-only
-    /// semantics (unchanged by this rewrite). Extracted out of
-    /// `evaluateFolderCandidate` so `updateItemDrag` can also consult it
-    /// *before* evaluating the reorder candidate — see that method's doc
-    /// comment for why the ordering matters.
     private func folderZoneTarget(session: ItemDrag.ItemDragSession, point: NSPoint) -> Int? {
         guard case .app = session.draggedItem, model.pages.indices.contains(currentPage) else { return nil }
         let items = model.pages[currentPage]
@@ -651,12 +452,6 @@ final class ItemDragController {
             clearFolderCandidate(session: session)
             return
         }
-        // Real, confirmed report ("グループ化...ui的にも操作的にもわかり
-        // やすく"): the raw zone entry (before the hover delay commits)
-        // now gets its own immediate feedback — a visible drop-zone ring
-        // with a progress sweep timed to the hover delay, and the dragged
-        // icon itself pulling inward — instead of nothing changing until
-        // `commitFolderCandidate` fires after the hover delay.
         showFolderZoneIndicator(session: session, targetIndex: zoneTarget)
         beginFloatingViewFolderPull(session: session, engaged: true)
         session.folderTimer = Timer.scheduledTimer(withTimeInterval: ItemDrag.itemDragFolderHoverDelay, repeats: false) { [weak self, weak session] _ in
@@ -699,14 +494,6 @@ final class ItemDragController {
         beginFloatingViewFolderPull(session: session, engaged: false)
     }
 
-    /// Real, confirmed report ("グループ化しようとするとアプリが逃げる"):
-    /// called from `updateItemDrag` whenever the pointer is inside another
-    /// app's folder drop zone, *before* the hover delay confirms a
-    /// folder candidate — pins the reorder preview back to its identity
-    /// state (every item at its own natural slot, zero visual
-    /// displacement) so the target app being hovered over never gets
-    /// nudged aside by a reorder candidate change while the user is trying
-    /// to hold the pointer over it.
     private func suppressReorderForFolderZone(session: ItemDrag.ItemDragSession) {
         session.reorderTimer?.invalidate()
         // Keeps `evaluateReorderCandidate`'s "same as last pending raw slot"
@@ -735,18 +522,6 @@ final class ItemDragController {
         resetItemTransform(cell.view)
     }
 
-    /// Real, confirmed report ("グループ化...UI的にも操作的にもわかりや
-    /// すく"): the dragged icon itself never changed when it entered a
-    /// folder drop zone — only the far-away target cell grew slightly.
-    /// Since the user's eyes are usually on the icon they're actually
-    /// holding, that made the "this will make a folder" signal easy to
-    /// miss. Shrinking the floating icon toward the growing target (0.92x
-    /// vs. the target's 1.06x, same damping/response so both feel like
-    /// one gesture) gives a visible cue right where the user is looking.
-    /// Starts from the layer's current presentation value (same technique
-    /// `animateLayerTranslation` already uses) so this reads smoothly even
-    /// if the initial 1.0→1.06 lift spring from `createFloatingDragView`
-    /// hasn't finished yet.
     private func beginFloatingViewFolderPull(session: ItemDrag.ItemDragSession, engaged: Bool) {
         guard let layer = session.floatingView?.layer else { return }
         let liftScale: CGFloat = 1.06
@@ -759,18 +534,6 @@ final class ItemDragController {
         layer.add(GridSpring.animation(keyPath: "transform.scale", from: currentScale, to: targetScale, damping: 0.82, response: 0.2), forKey: "folderPull")
     }
 
-    /// Real, confirmed report ("フォルダ制作のUiがひどすぎる長方形だし
-    /// iphoneのような美しくわかりやすい素晴らしいデザインにして"): this
-    /// used to be sized from the *whole grid slot* rect (icon + label band
-    /// + padding, via `layout.layoutAttributesForItem`), which read as an
-    /// oversized rectangle instead of a ring around the icon. Now built
-    /// from `GridCellItem.iconFrame` (see that property's doc comment) —
-    /// a rounded square a little larger than the icon itself, matching how
-    /// iOS's own folder-creation highlight wraps just the icon, not the
-    /// name label underneath it. `folderZoneTarget`'s hit-test zone (still
-    /// the full cell's center 60%) is intentionally left wider than what's
-    /// drawn here — iOS does the same: the hit region is generous, the
-    /// visual feedback is tight to the icon.
     private func showFolderZoneIndicator(session: ItemDrag.ItemDragSession, targetIndex: Int) {
         clearFolderZoneIndicator(session: session, animated: false)
         guard let cell = collectionView.item(at: IndexPath(item: targetIndex, section: 0)) as? GridCellItem else { return }
@@ -864,14 +627,6 @@ final class ItemDragController {
 
     // MARK: Page-edge turning while dragging
 
-    /// Spec 9: holding the dragged icon near a page edge previews and then
-    /// commits a page turn, while the dragged icon itself stays fixed under
-    /// the pointer (it's a floating overlay on the window content host,
-    /// independent of the collection view being transformed) — only the
-    /// grid/background/page
-    /// indicator move, matching "掴んだアイコンまでページと一緒に流しては
-    /// いけない". First/last page gets a small resistance nudge instead
-    /// (spec 10), reusing the page-drag machinery's own `rubberBand` helper.
     private func evaluateEdgeCandidate(session: ItemDrag.ItemDragSession, point: NSPoint) {
         let width = max(collectionView.bounds.width, 1)
         var direction = 0
@@ -901,17 +656,6 @@ final class ItemDragController {
         }
     }
 
-    /// Round 12 §8b: continuous, non-animated (per apple-design §1 —
-    /// feedback lives *during* the interaction, not just at its end) preview
-    /// of the incoming page while the pointer dwells in an edge zone, before
-    /// `evaluateEdgeCandidate`'s dwell timer actually commits the turn.
-    /// Reuses `renderPageSnapshot` — the same real-`NSWindow`-hosted
-    /// offscreen renderer already proven safe for the trackpad-swipe page-
-    /// turn's own neighbor snapshot (fixed twice in this file's history:
-    /// once for a permanently-stuck-hidden live grid, once for a fully-
-    /// transparent bitmap from a collection view that was never actually
-    /// hosted in a real window) — rather than inventing a second snapshot
-    /// mechanism for this one.
     private func updateEdgePeek(session: ItemDrag.ItemDragSession, point: NSPoint) {
         let width = max(collectionView.bounds.width, 1)
         let zone = ItemDrag.itemDragEdgeZoneWidth
@@ -946,12 +690,6 @@ final class ItemDragController {
             session.edgePeekImageView = imageView
         }
 
-        // Real, confirmed report ("ページ端についてその先へ無理や進もう
-        // とした時に起きるアニメーションが過剰すぎる"): reuses the same
-        // rubber-band resistance formula the trackpad page-swipe already
-        // uses at its own edges — overshoot-proportional resistance
-        // instead of the old linear `proximity * 30` ramp that kept
-        // growing the harder the pointer pushed.
         let dampedOffset = GridSpring.rubberBand(penetration, dimension: ItemDrag.itemDragEdgePeekResistanceDimension)
         let previewOffset = -dampedOffset * CGFloat(direction)
         CATransaction.begin()
@@ -1002,11 +740,6 @@ final class ItemDragController {
         // re-evaluated" sequence in 9.4).
         for item in collectionView.visibleItems() { resetItemTransform(item.view) }
 
-        // Round 12 §8c: hand off the peek's own in-flight velocity to the
-        // commit spring, rather than starting fresh from zero — the peek
-        // (§8b) is very likely still easing when the dwell timer fires this,
-        // and a zero-velocity restart here is exactly the "hard cut" apple-
-        // design §3 warns against.
         let width = max(collectionView.bounds.width, 1)
         let offset: CGFloat = direction > 0 ? -width : width
         let presentationX = (collectionView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? 0
@@ -1080,15 +813,6 @@ final class ItemDragController {
                         .item(at: IndexPath(item: indexOnCurrentPage, section: 0))?
                         .view.layer?.opacity = 0
                 }
-                // Real, confirmed latent bug (found while wiring up the
-                // folder zone indicator, not user-reported): this function
-                // already resets pendingRawSlot/candidateSlot/edgeDirection
-                // for the new page, but never reset the folder-candidate
-                // state — a folder candidate committed on the page being
-                // left would survive the page turn pointing at a now-
-                // unrelated index on the new page, and endItemDrag could
-                // call createOrJoinFolder against the wrong app. Same
-                // symmetric reset, added here for the same reason.
                 session.folderTimer?.invalidate()
                 session.pendingRawFolderCandidateIndex = nil
                 self.clearFolderCandidateHighlight(session: session)
@@ -1111,16 +835,6 @@ final class ItemDragController {
         let hasFolderTarget = session.folderCandidateOriginalIndex != nil
         DiagnosticsLog.grid.notice("endItemDrag: committing reorder to slot \(session.candidateSlot, privacy: .public), folderTarget=\(hasFolderTarget, privacy: .public)")
 
-        // Real, confirmed bug: resetting cells' transforms *after*
-        // stopWobble() removed their one active, continuous animation left
-        // the reset's own bare (animation-disabled) transform write with
-        // nothing to piggyback a repaint on — cells could stay visually
-        // stuck at their last reorder-preview offset even though their
-        // model transform (and therefore hit-testing, which AppKit always
-        // computes from untransformed layout) was already back to identity.
-        // That mismatch is what made clicks resolve to the wrong item
-        // ("なぜか上のだけ開く"). Resetting first, while wobble is still
-        // active, ensures the reset itself gets composited.
         for item in collectionView.visibleItems() { resetItemTransform(item.view) }
         stopWobble()
 
@@ -1144,13 +858,6 @@ final class ItemDragController {
         settleFloatingView(session: session)
     }
 
-    /// Spec 13.1: the floating icon springs to its final cell before being
-    /// cleaned up, so the drop reads as "landing," not an abrupt swap.
-    /// Spec 13.1: springs to the final cell — like `updateItemDrag`, this
-    /// drives the move purely via `transform.translation.x/y` relative to
-    /// the floating view's never-reassigned `.frame`, not by touching
-    /// `.frame` itself (see that method's doc comment for why mixing the
-    /// two was a real, confirmed bug).
     private func settleFloatingView(session: ItemDrag.ItemDragSession) {
         guard let floatingView = session.floatingView, let layer = floatingView.layer else {
             collectionView.reloadData()
@@ -1167,12 +874,6 @@ final class ItemDragController {
         let dy = targetFrameInHost.minY - session.floatingViewOriginalFrameInHost.minY
 
         animateLayerTranslation(layer, toX: dx, toY: dy)
-        // Real, confirmed report ("グループ化...アプリが逃げる"): reads the
-        // layer's current presentation value instead of assuming 1.06 —
-        // while hovering over a folder target this layer may have been
-        // pulled to 0.92 by `beginFloatingViewFolderPull`, and settling
-        // from a hardcoded 1.06 would visibly jump backward before easing
-        // to 1.0.
         let currentScale = (layer.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat) ?? 1.06
         layer.setValue(1.0, forKeyPath: "transform.scale")
         layer.add(GridSpring.animation(keyPath: "transform.scale", from: currentScale, to: 1.0, damping: 1.0, response: 0.18), forKey: "settleScale")
@@ -1244,12 +945,6 @@ final class ItemDragController {
             anim.duration = 0.22 + Double.random(in: -0.01...0.01)
             anim.repeatCount = .infinity
             anim.isRemovedOnCompletion = false
-            // A random per-cell begin time (rather than a fixed offset) is
-            // what desyncs the wobble across cells — repeatCount == .infinity
-            // makes the animation strictly periodic, so a different start
-            // phase persists as a different phase forever, matching real
-            // Launchpad's slightly-uncoordinated wobble instead of every
-            // icon shaking in perfect unison.
             anim.beginTime = CACurrentMediaTime() + Double.random(in: 0..<anim.duration)
             layer.add(anim, forKey: "wobble")
         }

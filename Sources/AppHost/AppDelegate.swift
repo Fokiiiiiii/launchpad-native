@@ -73,17 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         iconCache: iconCache,
         onWillClose: { [weak self] in self?.launcherWindowController.reclaimKeyIfVisible() }
     )
-    /// Shown instead of the launcher on the very first cold start (see
-    /// `OnboardingState`) — the catalog scan/FSEvents watching still run
-    /// unconditionally in the background regardless, so by the time
-    /// onboarding finishes and the launcher actually appears, the catalog
-    /// is already populated exactly like the existing "scan finishes after
-    /// show()" pattern. Trigger registration, however, is deliberately
-    /// deferred until onboarding actually finishes (see `shouldShowOnboarding`
-    /// below) — arming it earlier caused a real, confirmed bug: the
-    /// default-on bottom-right hot corner could fire mid-launch if the
-    /// cursor already happened to be there, popping the launcher open at
-    /// the same time as this wizard.
     private lazy var onboardingWindowController = OnboardingWindowController { [weak self] in
         guard let self else { return }
         Task { @MainActor in
@@ -148,11 +137,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             uninstallPanelWindowController.show(for: record, allRecords: launcherWindowController.model.allRecords, on: launcherWindowController.currentScreen)
         }
 
-        // Round 13 §A: neither panel should ever stay visible once the
-        // launcher itself hides — `closeWithoutKeyReclaim()` (not plain
-        // `close()`) since there's nothing to reclaim key status onto here
-        // and a plain `close()` could steal focus back while the launcher
-        // is still mid-fade (see that method's doc comment).
         launcherWindowController.setOnDidHide { [weak self] in
             guard let self else { return }
             settingsWindowController.closeWithoutKeyReclaim()
@@ -170,44 +154,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppIconStyleApplier.apply(launcherWindowController.model.appIconStyle)
             menuBarIconController.setVisible(launcherWindowController.model.showsMenuBarIcon)
 
-            // Trigger registration and the first show() used to wait for
-            // performFullScan() below to finish -- neither actually depends
-            // on the catalog being scanned, only on the persisted grid
-            // document (already loaded above). Real user report: cold start
-            // felt slow, and hot corners/gestures were silently inert until
-            // the scan finished (which scales with installed-app count).
-            // Moving both here means triggers work and the launcher can
-            // appear immediately after launch; updateRecords(_:) below
-            // fills in real records moments later exactly the same way the
-            // live FSEvents watcher's incremental updates already do, so
-            // there's nothing new to reconcile.
-            //
-            // Double-clicking the app in Finder is the single most natural
-            // thing a first-time user tries — and until now it did nothing
-            // visible at all (LSUIElement means no Dock icon, no window
-            // unless a trigger fires). Showing the launcher immediately
-            // means that first double-click actually shows something right
-            // away, instead of silently backgrounding while waiting on a
-            // full catalog scan with no discoverable way to know it worked.
-            // On a genuine first run, the onboarding wizard takes this slot
-            // instead, and triggers stay unarmed until it finishes (see
-            // `onboardingWindowController`'s doc comment) — otherwise the
-            // default-on hot corner could pop the launcher open right on
-            // top of the wizard.
-            // Restore the bounded last-known-good catalog before the first
-            // frame. This path only reads JSON and cheap filesystem metadata;
-            // the expensive Bundle/Security work remains in the background scan.
-            //
-            // Deliberately a plain synchronous call. Moving it to
-            // `await Task.detached { ... }.value` looks like it should help —
-            // the load costs ~60-85ms of a cold start — but it measurably made
-            // things worse (median cold start to first frame 287ms -> 400ms
-            // over three runs each). Awaiting the detached task immediately
-            // means the main actor still cannot proceed past this point, so
-            // nothing is gained in parallelism and the thread hop is pure
-            // added cost. If this is revisited, the win has to come from
-            // giving the main actor real work to do while the load runs, not
-            // from moving the load alone.
             let configuredSources = applicationSources()
             let scanner = ApplicationScanner(sources: configuredSources)
             self.scanner = scanner
@@ -235,37 +181,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
-            // Debug-only: drives a real search query into the launcher
-            // right after it actually shows, so the search-results layout
-            // can be screenshotted for verification. This session's
-            // Terminal has no Accessibility/GUI-scripting permission, so
-            // typing into the field interactively isn't otherwise
-            // possible. Deliberately placed here (not a fixed delay from
-            // launch) — a flat delay raced the catalog scan and fired
-            // before the window ever existed, silently no-op'ing.
             if let query = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SEARCH_QUERY"], !query.isEmpty {
                 launcherWindowController.debugSetSearchQuery(query)
             }
 
-            // Debug-only: dispatches a *real* synthetic NSEvent mouse down/up
-            // at the search field's actual on-screen location, so the exact
-            // hit-testing/responder path a real click takes can be examined
-            // via log stream. Added because a prior fix (glass background
-            // hitTest -> nil) didn't resolve a real user report that
-            // clicking the search field still closes the launcher.
             if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_CLICK_SEARCH_FIELD"] == "1" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                     self?.launcherWindowController.debugSimulateSearchFieldClick()
                 }
             }
 
-            // Debug-only (Round 13 §E): clicks the search field for real,
-            // then dispatches real synthetic keyDown events per character —
-            // exercises the real field editor's layout, unlike
-            // `LAUNCHPAD_DEBUG_SEARCH_QUERY` above (which bypasses the
-            // field editor entirely) — to diagnose "検索欄が入力時だけ
-            // おかしい". Combine with `LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING=1`
-            // to also log the field editor's geometry at each keystroke.
             if let text = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_TYPE_SEARCH_FIELD"], !text.isEmpty {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                     self?.launcherWindowController.debugSimulateSearchFieldTyping(text)
@@ -283,20 +208,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
 
-            // Debug-only: drives beginPageDrag/updatePageDrag/endPageDrag
-            // with synthetic input so the state-machine transition can be
-            // confirmed via log stream without Accessibility/GUI-scripting
-            // permission to perform a real trackpad gesture. Needs the real
-            // catalog loaded first (more than one page to drag between).
-            // "commit" or "abort" selects which path to simulate; "rapid"
-            // fires a second commit ~150ms after the first (well inside the
-            // up-to-~1s settle window) — a real, confirmed regression
-            // ("連続でページをスワイプした時にページが送られない時があ
-            // る") where a swipe starting during a still-settling previous
-            // one was silently dropped. Kept permanently (not a one-off
-            // test) since this exact class of bug — a new gesture arriving
-            // before the previous one's async settle completes — has a real
-            // history of resurfacing in this file.
             if let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG"] {
                 if mode == "rapid" {
                     launcherWindowController.debugSimulatePageDrag(commit: true)
@@ -308,28 +219,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
-            // Debug-only: drives the custom item-drag state machine
-            // (lift/reorder/folder-creation) with synthetic points, same
-            // reasoning as LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG above —
-            // "reorder" or "folder" selects which outcome to simulate.
             if let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG"] {
                 launcherWindowController.debugSimulateItemDrag(mode: mode)
             }
 
-            // Debug-only: opens a folder on the current page (the value is
-            // which one, 1-based), exercising the full-screen overlay's view
-            // construction and its item-count-dependent sizing without needing
-            // a real click.
             if let ordinal = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_OPEN_FIRST_FOLDER"].flatMap(Int.init) {
                 launcherWindowController.debugOpenFolder(ordinal: ordinal)
             }
 
-            // Debug-only: opens the Uninstall panel against
-            // Scripts/build-uninstall-fixture.sh's throwaway fixture app —
-            // never a real installed app — so the panel's section/row
-            // rendering can be checked via log stream without needing a
-            // real right-click-menu interaction (this session has no
-            // Accessibility/GUI-scripting permission to perform one).
             if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_UNINSTALL"] == "1" {
                 let fixtureURL = URL(fileURLWithPath: NSHomeDirectory() + "/.cache/launchpad-native/fixtures/UninstallFixture.app")
                 let bundleID = "com.launchpadnative.uninstallfixture"
@@ -371,18 +268,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Debug-only: opens Settings, then closes it, then logs whether the
-        // launcher window regained key status — exercises the fix for a
-        // real, confirmed regression (user report: the search field stopped
-        // accepting clicks/keyboard input after closing Settings).
-        // The launcher is a same-desktop overlay; AppKit's automatic
-        // "hand key status to the next window" behavior does not always pick
-        // it back up after the window that
-        // took key status over (Settings) closes, so
-        // `SettingsWindowController.onWillClose` ->
-        // `LauncherWindowController.reclaimKeyIfVisible()` now does it
-        // explicitly. No Accessibility/GUI-scripting permission is needed
-        // for this, since nothing here simulates an actual mouse click.
         if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                 self?.settingsWindowController.show(on: self?.launcherWindowController.currentScreen)
@@ -472,10 +357,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let runtimeResult = applyCurrentTriggerSettingsRuntime(preparedRuntimeSettings)
         let result: TriggerSettingsApplyResult
         if isFingerSwitch, runtimeResult.gestureConflictStatus == .unchanged {
-            // The transition was split into an explicit restore and a
-            // pre-captured disable, so the coordinator's final phase is
-            // intentionally `.unchanged`; preserve the public status that a
-            // new conflict backup was applied for Settings/reporting.
             result = TriggerSettingsApplyResult(
                 f4Active: runtimeResult.f4Active,
                 multitouchActive: runtimeResult.multitouchActive,

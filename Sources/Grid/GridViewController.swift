@@ -6,25 +6,6 @@ import Persistence
 import WindowBrowser
 
 
-/// The persistent, folder-aware paged grid (2.2/2.4/2.7): backed by
-/// `GridModel`+`PagedGridLayout`, with in-page reorder, folder
-/// creation/join/dissolve via drag, and a per-item context menu. This is
-/// what `LauncherViewController` shows when there's no active search query;
-/// search results still use the flat list from Phase 3.
-///
-/// Pages are a **data-source swap**, not a scroll position: the
-/// `NSCollectionView` always shows exactly one section — `model.pages[currentPage]`
-/// — and changing page calls `reloadData()` with the new page's items rather
-/// than scrolling a wide horizontal strip. An earlier version tried the
-/// "one continuous strip, scroll to the page's x-offset" approach; hands-on
-/// testing repeatedly found the page never visibly changed despite the
-/// scroll code executing correctly (a real, reproducible AppKit scroll-
-/// position quirk that wasn't worth chasing further). The trade-off is that
-/// dragging an item directly from one page onto another isn't possible in
-/// this model — a real regression the earlier design's docs even called out
-/// as being made functional; it's removed here in favor of *guaranteed
-/// correctness* for basic page navigation, which is what actually blocked
-/// the user.
 public final class GridViewController: NSViewController, NSCollectionViewDataSource, NSCollectionViewDelegate {
     private let itemIdentifier = NSUserInterfaceItemIdentifier("GridCellItem")
 
@@ -48,30 +29,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private var dockLayoutNeedsPass = false
 
     private var currentPage = 0
-    /// Real, confirmed lifecycle bug: nothing previously retained the
-    /// `FolderContentsViewController` created in `openFolder` beyond that
-    /// function's own local scope — its `.view` stayed alive (retained by
-    /// `backdrop`'s subview list), but the *view controller itself*
-    /// deallocated almost immediately after `openFolder` returned, since
-    /// `NSView` does not retain its owning `NSViewController` back. A view
-    /// whose controller has already been deallocated while the view is
-    /// still on screen is an invalid, undefined-behavior state for AppKit
-    /// (view controller lifecycle/appearance callbacks, `preferredContentSize`
-    /// bookkeeping, and this controller's own async icon-loading `Task`
-    /// blocks — which capture `[weak self]` pointing at itself — all assume
-    /// the controller outlives its view). Retaining it here for as long as
-    /// the overlay is shown is the correct, necessary fix regardless of any
-    /// single symptom it happens to explain.
     private lazy var folderOverlay = FolderOverlayPresenter(model: model, iconCache: iconCache)
     private let windowThumbnailService = WindowThumbnailService()
 
-    // MARK: Drag-tracked page paging state (see `beginPageDrag`)
-    //
-    // Deliberately minimal: unlike the reverted first attempt, there is no
-    // "hide the live grid, show 3 snapshots" overlay. The live
-    // `collectionView` is transformed directly and is NEVER hidden, so a
-    // stuck drag state can visually shift it at worst — it can't make
-    // content disappear the way the reverted version could.
 
     /// Only the one snapshot actually needed (whichever neighbor the drag
     /// direction reveals), created lazily once direction is known — not
@@ -123,19 +83,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     public override func loadView() {
         let root = NSView()
-        // The floating item-drag preview (`createFloatingDragView`) is added
-        // directly as this view's child. Every other place in this file that
-        // continuously mutates a CALayer transform either sets `wantsLayer`
-        // on that exact view first or pairs the write with an active
-        // `CAAnimation` — `updateItemDrag`'s per-frame position update does
-        // neither, relying instead on the floating view's ancestor chain
-        // being part of one coherent, layer-backed compositing tree from the
-        // root down. Without this, the floating view's one-shot "lift"
-        // animation (added once, auto-removed after ~0.2s) was the only
-        // thing keeping it under active compositing — once that settled,
-        // later bare `transform.translation` writes stopped reliably
-        // recompositing to screen (real, confirmed regression: "the grabbed
-        // icon doesn't move from its spot").
         root.wantsLayer = true
 
         layout.settings = model.gridSettings
@@ -167,27 +114,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         scrollView.drawsBackground = false
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = false
-        // Real, confirmed regression ("ページを変えるとアプリが下に下がる
-        // ...ずっと下がったまま...スワイプだけ"): user-confirmed that the
-        // shift is a real, *permanent* downward displacement, only via
-        // trackpad swipe (never dot/chevron clicks) — which this session
-        // couldn't reproduce directly, since simulating a swipe requires
-        // Accessibility/GUI-scripting permission this session doesn't have,
-        // and the existing `debugSimulatePageDrag` hook calls
-        // `beginPageDrag`/`updatePageDrag`/`endPageDrag` directly, bypassing
-        // `GridCollectionView.scrollWheel` (and its axis detection/momentum-
-        // phase handling) entirely — it can't exercise the one code path
-        // implicated. `hasVerticalScroller = false` above only hides the
-        // scroll *indicator*; it does not disable scrolling or elastic
-        // rubber-band bounce, both of which are otherwise allowed by
-        // default on both axes. This view has no scrollable content of its
-        // own at all (every page fits its viewport exactly — see
-        // `GridCollectionView.scrollWheel`'s own doc comment), so there is
-        // no legitimate reason for any elastic movement here, vertical or
-        // horizontal, regardless of whether it's proven to be the exact
-        // mechanism — disabling both removes an entire class of "some
-        // scroll-wheel-adjacent event reaches the scroll view's own
-        // elasticity machinery and leaves a residual offset" bugs outright.
         scrollView.verticalScrollElasticity = .none
         scrollView.horizontalScrollElasticity = .none
 
@@ -258,10 +184,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.layoutSubtreeIfNeeded()
     }
 
-    /// The launcher deliberately owns the full target screen so that its
-    /// background reaches behind the menu bar. Its interactive grid therefore
-    /// has to reserve a bottom safe area itself whenever the real Dock remains
-    /// visible.
     @discardableResult
     private func updatePageControlBottomMargin() -> CGFloat {
         guard let window = view.window, let screen = window.screen else { return dockReservedHeight }
@@ -325,24 +247,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         prefetchAdjacentPageIcons()
     }
 
-    /// Warms `IconCache` for the pages adjacent to `currentPage`, ahead of
-    /// time. Real user report: icons visibly "popped in" a few seconds
-    /// after switching pages — `itemForRepresentedObjectAt:` only starts
-    /// fetching an icon once its cell is actually about to be displayed,
-    /// so a page nobody has looked at yet starts every cell blank. This
-    /// also matters for the live drag-neighbor snapshot
-    /// (`renderPageSnapshot`), which can only use `cachedIconIfAvailable`
-    /// — a synchronous peek that returns blank for anything not already in
-    /// memory — so keeping the pages a swipe is likely to reveal warmed
-    /// *before* the swipe even starts is what actually makes that snapshot
-    /// show real icons instead of placeholders, matching the user's other
-    /// ask ("right before a swipe reveals it, have it ready").
-    ///
-    /// Called whenever `currentPage` changes (here, `jumpToPage`,
-    /// `finishPageDrag`) and once on initial load (via `reload()`, already
-    /// invoked after the first catalog reconcile). Fire-and-forget: results
-    /// land in `IconCache`'s memory dict as a side effect, nothing here
-    /// needs to consume them directly.
     private func prefetchAdjacentPageIcons(including targetPage: Int? = nil) {
         prefetchGeneration &+= 1
         let generation = prefetchGeneration
@@ -436,14 +340,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    // MARK: Keyboard navigation (forwarded from LauncherViewController)
-    /// A mouse click tracks `collectionView.selectionIndexPaths` (needed for
-    /// drag/launch/context-menu targeting) but must NOT draw the visible
-    /// highlight ring — a real user found the box+glow that appeared around
-    /// every clicked icon distracting ("アプリをいじった時に出る白い枠は基本
-    /// 的に出ないように"). Keyboard arrow-key browsing (`moveSelection`/
-    /// `select`) is the one case that should still show it, since without
-    /// any visual feedback there'd be no way to see where keyboard focus is.
     private var keyboardSelectionActive = false
 
 
@@ -577,42 +473,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         jumpToPage(currentPage + delta)
     }
 
-    // MARK: Drag-tracked page paging (real-time finger-following swipe), v2
-    //
-    // First attempt (reverted): hid the live `collectionView` and overlaid
-    // 3 pre-rendered snapshots (prev/current/next). Failed on real hardware
-    // — the overlay engaged on essentially any trackpad touch (no minimum
-    // distance gate) and, if the settle path didn't complete for any
-    // reason, `collectionView.isHidden` never reverted to `false`,
-    // permanently blanking the grid (confirmed via screenshot, required a
-    // force-quit). This version is structurally different, not just
-    // tuned differently:
-    //  1. `GridCollectionView` now requires the cumulative delta to clear
-    //     `minimumEngageDistance` before engaging at all (see that type).
-    //  2. The live `collectionView` is never hidden — its own layer is
-    //     transformed directly, and only the *one* neighbor page actually
-    //     being revealed gets a lazily-created snapshot placed beside it.
-    //     Worst case if something goes wrong: a transform offset or a
-    //     stray image, never a blank grid.
-    //  3. A hard, fixed-duration (`dragSafetyNetTimeout`) fallback timer —
-    //     independent of `CASpringAnimation.settlingDuration`, which is what
-    //     silently misbehaved before — force-resets everything no matter
-    //     what. This is armed from the *start* of the drag, not from its
-    //     end, so it must be far longer than any real gesture takes: a
-    //     confirmed real bug (not hypothetical) had this at a flat 1s,
-    //     which fired *while the user was still mid-drag* on anything
-    //     slower than a quick flick — exactly the "look at the next page
-    //     before committing" use this feature exists for — silently
-    //     force-resetting the neighbor snapshot and transform out from
-    //     under still-active fingers. 30s keeps the same last-resort
-    //     recovery guarantee without ever tripping during real use.
-    //  4. `resetDragStateIfNeeded()` is called every time the launcher
-    //     shows (see `LauncherWindowController.show()`), so even if a prior
-    //     session somehow left this mid-drag, the next open starts clean.
-    // Given the two prior failures in this exact area, this still needs
-    // the user's own hands-on trackpad verification — these safeguards
-    // change what happens if something goes wrong, not whether the gesture
-    // *feels* right, which can't be tested without Accessibility permission.
 
     /// Fires once a swipe has been confirmed and has cleared the minimum
     /// engage distance (see `GridCollectionView`). Only arms bookkeeping
@@ -620,19 +480,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// created lazily in `updatePageDrag` once the direction is known.
     private func beginPageDrag() {
         if dragDirection != 0 || dragNeighborImageView != nil {
-            // Real, confirmed bug ("連続でページをスワイプした時にページ
-            // が送られない時がある"): a previous swipe's settle spring can
-            // take up to ~1s to finish (see `endPageDrag`'s commit-case
-            // response), and silently bailing here meant a new swipe that
-            // began during that window did *nothing at all* — not queued,
-            // not deferred, just dropped, with no visible feedback. Instead
-            // of bailing, complete the pending transition immediately
-            // (landing on whatever page it already committed to, via
-            // `pendingPageDragTargetPage` — falling back to `currentPage`
-            // only defensively, since a real in-flight drag always sets
-            // it) so the new swipe can begin right away rather than being
-            // swallowed. This only skips the tail of the previous
-            // transition's visual settle, never the transition itself.
             DiagnosticsLog.grid.notice("beginPageDrag: previous drag still settling, finishing it immediately so this swipe isn't dropped")
             finishPageDrag(targetPage: pendingPageDragTargetPage ?? currentPage)
         }
@@ -708,31 +555,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         CATransaction.commit()
     }
 
-    /// Decides the destination page from the final position and estimated
-    /// release velocity (a sufficiently fast flick commits even short of
-    /// the distance threshold — apple-design's momentum projection), then
-    /// springs the rest of the way with the release velocity handed off
-    /// (not hard-cut) before swapping in the real page content. The actual
-    /// cleanup (`finishPageDrag`) is scheduled off the spring's own
-    /// settling duration for visual accuracy, but `beginPageDrag`'s fixed
-    /// `dragSafetyNetTimeout` fallback is the real safety net if that
-    /// duration ever misbehaves.
-    /// Round 13 §G: fixed, not width-relative — "even the slightest
-    /// deliberate swipe" should commit regardless of screen size/column
-    /// count, and a fixed point value reads as more predictable/tunable
-    /// than a width fraction that changes with icon size. Real, confirmed
-    /// report ("ページ送りの感度が下がってる、少しでもスワイプしたら動く
-    /// ように"): 48pt required a noticeably deliberate swipe. Lowered to
-    /// 20pt — still comfortably above `GridCollectionView
-    /// .minimumEngageDistance` (10pt — the separate, unrelated gate for
-    /// "does this even count as a horizontal gesture at all," checked
-    /// before this function is ever reached), leaving a little room for a
-    /// deliberate reversal to still land under the commit line, but small
-    /// enough that a light swipe commits instead of springing back.
-    /// `deltaX`/`velocity` here are already the gesture's *final* values at
-    /// release (not a stored peak), so reversing an in-progress swipe back
-    /// toward the original page already reads as a cancel for free — no
-    /// separate "was this reversed" logic is needed.
     private static let pageDragCommitDistance: CGFloat = 20
 
     private func endPageDrag(deltaX: CGFloat, velocity: CGFloat) {
@@ -792,62 +614,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    /// Real, confirmed bug (user report: "the previous app flashes right at
-    /// the switch"): this used to reset `collectionView`'s transform to 0
-    /// — bringing it into the visible position — *before* calling
-    /// `reloadData()`. Between that transform reset and `reloadData()`'s
-    /// cells actually being laid out, `collectionView` sat on-screen still
-    /// showing the *old* page's content, and removing the neighbor snapshot
-    /// (which was covering it with the correct new-page image) right after
-    /// exposed that stale frame for however long AppKit took to catch up —
-    /// a real, visible flash of the previous page.
-    ///
-    /// Fixed by doing everything data-related while `collectionView` is
-    /// still off-screen (at whatever transform `endPageDrag`'s spring left
-    /// it at, e.g. ±width): reload, force the layout *and* the actual
-    /// on-screen redraw to complete synchronously, and only *then* bring it
-    /// on-screen (transform reset to 0) and remove the neighbor overlay. By
-    /// the time either of those becomes visible, the live view already
-    /// shows the correct content — nothing stale to flash.
     private func finishPageDrag(targetPage: Int) {
         currentPage = targetPage
 
-        // A large-scale parallel code audit (7 independent finders) traced
-        // a real, confirmed bug ("ページを変えるとアプリが下に下がる...
-        // スワイプだけ...数百msくらいで下に行く") to this exact spot:
-        // `jumpToPage` (dot/chevron clicks, which NEVER reproduce the
-        // symptom) never forces a synchronous layout/redraw pass at all —
-        // it just calls `reloadData()` and lets AppKit's normal deferred
-        // layout cycle handle it. This function used to be the one place
-        // in the whole file that called `layoutSubtreeIfNeeded()`/
-        // `displayIfNeeded()` while `collectionView`'s own layer transform
-        // was still non-identity (off-screen, ±width from the drag).
-        // Multiple independent auditors flagged that exact combination as
-        // the only structural difference between the two page-change
-        // paths, and traced it (via `PagedGridLayout.prepare()`'s own
-        // self-referential `contentSize` computation, fixed separately in
-        // `PagedGridLayout.swift`) to the long-documented ~63pt "content
-        // taller than viewport" overflow this function's own
-        // `resetScrollPosition()` doc comment records.
-        //
-        // Fix: reset the transform to identity *before* reloading/forcing
-        // layout, not after. The first version of this fix assumed
-        // `dragNeighborImageView` — positioned `.above` `scrollView`, see
-        // `updatePageDrag` — fully covered `collectionView` at this point,
-        // making the early on-screen transform invisible. Real, confirmed
-        // regression from that assumption (user report: "前のページの
-        // アプリ名の文字が一瞬残って既存の文字と重なる"): the snapshot's
-        // host collection view renders with a transparent background
-        // (`SnapshotDataSource`'s `tempCollectionView.backgroundColors =
-        // [.clear]`, see `renderPageSnapshot`), so only the icon/label
-        // *shapes* are opaque — the gaps between/around cells are see-
-        // through. With `collectionView` moved on-screen but not yet
-        // reloaded for the new page, its stale (previous-page) labels
-        // bled through those transparent gaps for one frame, doubling up
-        // visibly with the snapshot's own labels. `isHidden` guarantees
-        // nothing is drawn at all regardless of what's underneath or how
-        // transparent the covering snapshot is — strictly safer than
-        // relying on the snapshot's opacity.
         collectionView.isHidden = true
 
         CATransaction.begin()
@@ -874,42 +643,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         prefetchAdjacentPageIcons()
     }
 
-    /// Real, confirmed regression ("ページを変えるとアプリが下に下がる...
-    /// ずっと下がったまま...スワイプだけ...数百msくらいで下に行く"): a
-    /// real, measured fact (via a temporary diagnostic, since a real
-    /// trackpad swipe can't be simulated in this session) is that
-    /// `collectionView`'s content is actually ~63pt *taller* than
-    /// `scrollView`'s visible viewport for this grid's configuration —
-    /// contradicting `GridCollectionView.scrollWheel`'s own doc comment
-    /// ("a page fits entirely in the viewport... nothing to actually
-    /// scroll"), which is evidently not true for every grid configuration.
-    /// That 63pt is a *real*, legitimate scrollable range, so if a real
-    /// 2-finger trackpad gesture's vertical component ever causes the
-    /// enclosing `NSScrollView`/`NSClipView` to scroll even partway into
-    /// it (through some path independent of `GridCollectionView`'s own
-    /// `scrollWheel` override, which never forwards to `super` and — per
-    /// direct code reading — shouldn't be able to cause this on its own),
-    /// nothing previously reset it back — only the layer's *transform* was
-    /// ever zeroed after a page change, never the scroll view's actual
-    /// `contentView.bounds.origin`, a completely independent property. That
-    /// would explain every reported detail: permanent (nothing undoes it),
-    /// swipe-only (dot/chevron clicks never touch the scroll view at all),
-    /// and only becoming visible after the settle delay (this method is
-    /// what fires at that point). Forcing it back to `.zero` on every page
-    /// change closes off this entire class of drift regardless of the
-    /// exact mechanism that first nudges it.
     private func resetScrollPosition() {
         guard scrollView.contentView.bounds.origin != .zero else { return }
         scrollView.contentView.bounds.origin = .zero
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
-    /// Hard safety net, reachable from three independent places (the fixed
-    /// safety-net fallback timer (30s), a background click during a drag, and every time
-    /// the launcher shows) — forces the grid back to a normal, fully-
-    /// visible state no matter what state the drag machinery is in. Safe
-    /// to call even when no drag is active (idempotent no-op beyond a
-    /// harmless transform reset and reload).
     public func resetDragStateIfNeeded() {
         guard dragNeighborImageView != nil || dragDirection != 0 else { return }
         forceResetPageDrag()
@@ -946,16 +685,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         )
     }
 
-    /// Debug-only — this session has no Accessibility/GUI-scripting
-    /// permission, so a real trackpad gesture can't be simulated to verify
-    /// `beginPageDrag`/`updatePageDrag`/`endPageDrag` end-to-end. This drives
-    /// the exact same production methods with synthetic input so at least
-    /// the state-machine transition (current page -> next page, no crash)
-    /// can be confirmed via `log stream` — not a substitute for real
-    /// hands-on trackpad verification, which the drag's actual visual feel
-    /// still needs. `commit: true` simulates a fast flick past the commit
-    /// threshold; `commit: false` simulates a short drag that springs back
-    /// to the current page — both paths matter given this feature's history.
     public func debugSimulatePageDrag(commit: Bool) {
         guard model.pages.count > 1 else {
             DiagnosticsLog.launcher.info("debugSimulatePageDrag: only \(self.model.pages.count, privacy: .public) page(s), nothing to drag between")
@@ -965,13 +694,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         DiagnosticsLog.launcher.info("debugSimulatePageDrag: starting at page \(startPage, privacy: .public), commit=\(commit, privacy: .public)")
         beginPageDrag()
         let width = max(collectionView.bounds.width, 1)
-        // Round 13 §G (revised): `endPageDrag`'s commit threshold is now a
-        // fixed 20pt (lowered further from 48pt per a real report that the
-        // swipe felt insensitive) — the abort case must stay a small fixed
-        // delta clearly *below* that threshold regardless of screen width,
-        // small enough not to collide with the new lower commit line. The
-        // commit case can stay width-relative since half the page width
-        // always clears 20pt.
         let commitTargetDeltaX: CGFloat = -width * 0.5
         let abortTargetDeltaX: CGFloat = -8
         let targetDeltaX = commit ? commitTargetDeltaX : abortTargetDeltaX
@@ -988,19 +710,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    /// Debug-only (`LAUNCHPAD_DEBUG_OPEN_FIRST_FOLDER`, wired in
-    /// `AppDelegate`) — opens the first folder found on the current page,
-    /// exercising the exact same `openFolder` path a real click on a
-    /// folder icon takes (`activate(at:)` calls it directly; this just
-    /// skips finding the folder via a real click). Verifies the new
-    /// full-screen overlay's view hierarchy/constraints/animation build
-    /// without crashing — real click-to-dismiss-on-backdrop and drag-out-
-    /// of-folder still need the user's own hands-on confirmation, since
-    /// those depend on real event delivery this session can't fully drive.
-    /// - Parameter ordinal: which folder on the current page to open, 1-based.
-    ///   Folder panels size themselves from their item count, so checking the
-    ///   layout at all means being able to reach a folder with a given number
-    ///   of items rather than only whichever one happens to come first.
     public func debugOpenFolder(ordinal: Int) {
         guard model.pages.indices.contains(currentPage) else { return }
         let folderIndices = model.pages[currentPage].indices.filter {
@@ -1017,16 +726,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         openFolder(folderID)
     }
 
-    /// Debug-only — this session has no Accessibility/GUI-scripting
-    /// permission, so a real mouse-down/drag/mouse-up on an icon can't be
-    /// performed to verify the item-drag state machine end-to-end. Drives
-    /// the real `handleItemMouseDown`/`handleItemMouseDragged`/
-    /// `handleItemMouseUp` methods with synthetic points (bypassing only
-    /// the `NSEvent`/`sendEvent` layer, not the state machine itself), so
-    /// the reorder/folder-creation outcome and absence of a crash can be
-    /// confirmed via `log stream`. `mode: "folder"` drags item 0 onto item
-    /// 1's center (past the folder dwell delay); `mode: "reorder"` drags
-    /// item 0 toward the end of the page.
     public func debugSimulateItemDrag(mode: String) {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].count > 1,
               let sourceFrame = layout.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame else {
@@ -1089,14 +788,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    /// Reproduces the exact interleaving caught live via `log stream`
-    /// during real user testing: a fresh mouseDown on item 2 arrives while
-    /// item 0's drag is still active, with NO mouseUp for item 0 in
-    /// between. Before the `handleItemMouseDown` fix, every subsequent
-    /// mouseDragged kept updating item 0's stale session (checked first in
-    /// `handleItemMouseDragged`) instead of starting a fresh one for item
-    /// 2 — matching the report "after one drag breaks, dragging a
-    /// different app moves the first app instead."
     private func debugSimulateInterruptedItemDrag() {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].count > 2,
               let firstFrame = layout.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
@@ -1168,19 +859,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    /// - Parameter hostView: the reference's own `FolderOverlay` is a
-    ///   full-screen `ZStack` sibling covering the *entire* launcher (search
-    ///   bar included) — not scoped to just the grid area. `GridViewController
-    ///   .view` itself is only the bottom ~954pt of the 1050pt-tall window (the
-    ///   search bar occupies the top ~96pt as a sibling within
-    ///   `LauncherViewController.view`), so anchoring the backdrop to `view`
-    ///   left the search bar strip completely undimmed/unblurred while a folder
-    ///   was open — a real, confirmed visual bug ("上の部分がおかしい": the
-    ///   search bar area read as a bright, untouched strip floating above the
-    ///   darkened grid instead of being part of the same full-screen overlay).
-    ///   `view.window?.contentView` is the window's actual full-bounds root view
-    ///   (see `LauncherWindowController.makeWindow`'s own `root`), so anchoring
-    ///   there instead covers the whole screen, exactly like the reference.
     private func openFolder(_ folderID: FolderID) {
         // Whatever a previous open left behind, start from visible.
         collectionView.alphaValue = 1
@@ -1405,16 +1083,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         return (Double(metrics.baseSize), Double(metrics.visualScale))
     }
 
-    /// The grid's actual per-cell size right now (`PagedGridLayout`'s
-    /// computed `columns x rows` slot, not a fixed constant). Exposed for
-    /// the same reason as `currentIconSize`: search results previously used
-    /// their own hardcoded cell size/spacing/margins, which meant flipping
-    /// between the grid and search changed not just icon size but the whole
-    /// arrangement (column count, gaps, edge margins) — a second, related
-    /// user report ("レイアウトも合わない") after the icon-size-only fix.
-    /// Reusing the grid's real cell size (plus its actual spacing/margins,
-    /// read directly from `GridSettings` by the caller) makes the two views
-    /// share one visual grid, not two independently-tuned ones.
     public var currentCellSize: NSSize {
         layout.currentCellSize
     }
@@ -1448,20 +1116,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             let cache = iconCache
             let displayName = model.displayName(for: record)
             let expectedKey = record.iconCacheKey
-            // Round 13 §F: diagnosed "ページ移動後にアプリアイコンが一瞬
-            // ちらつく/消える" — this cell used to *always* configure with a
-            // blank `NSImage()` first and only pick up the real icon once
-            // the `Task` below completed, even when `cache` already had the
-            // icon warm in memory (`prefetchAdjacentPageIcons()` normally
-            // ensures this for a page reached via a normal swipe/jump).
-            // Entering `Task { @MainActor in ... }` always defers to a
-            // later run-loop turn no matter how fast the awaited work
-            // resolves, so every `jumpToPage` reload guaranteed at least one
-            // rendered frame of blank icons before — this is the flicker.
-            // Mirrors `SnapshotDataSource`'s existing synchronous
-            // `cachedIconIfAvailable` peek (used for the drag-neighbor
-            // snapshot) — falling back to the async path only on a genuine
-            // cache miss.
             if let cachedIcon = cache.cachedIconIfAvailable(for: record) {
                 DiagnosticsLog.grid.debug("itemForRepresentedObjectAt: icon cache hit for \(record.bundleIdentifier, privacy: .public)")
                 cell.configureAsApp(record: record, icon: cachedIcon, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, displayName: displayName)

@@ -3,21 +3,6 @@ import Diagnostics
 import Persistence
 import QuartzCore
 
-/// Full-screen decorative background matching the design
-/// reference's own `TSBackground` composition (the reference's
-/// `.glass` mode / the reference mockup's Stage layer stack): a base fill, a
-/// blurred wallpaper layer, a dark scrim, a soft "material sheen" highlight,
-/// and (main window only) two ambient light blooms.
-///
-/// Deliberately built from plain `CALayer`/`CAGradientLayer` sublayers —
-/// **not** `NSGlassEffectView`/`NSVisualEffectView`. The reference itself
-/// never uses a glass/blur *material* for its full-screen background (that's
-/// reserved exclusively for small chip/card UI — the search pill, the folder
-/// panel, Settings); stretching `NSGlassEffectView`'s self-drawn Liquid Glass
-/// specular/edge highlight across the entire screen is what produced a real,
-/// confirmed "mysterious frame around the whole app" — this view is the
-/// direct fix, replacing that edge-to-edge glass usage with a composition
-/// that mirrors what the reference actually does full-screen.
 final class LauncherBackgroundView: NSView {
     struct GlassMaterialParameters: Equatable {
         let wallpaperOpacity: Float
@@ -191,10 +176,6 @@ final class LauncherBackgroundView: NSView {
         case .wallpaper:
             let radius: CGFloat = configuration.blursWallpaper ? 26 : 0
             wallpaperLayer.opacity = 1.0
-            // Keep a very light translucent scrim above the wallpaper. This
-            // preserves the wallpaper-first composition while preventing the
-            // background from reading as an unmodulated opaque image behind
-            // the content. It is deliberately much lighter than glass mode.
             scrimLayer.opacity = 0.14
             sheenLayer.opacity = 0
             if reloadWallpaper {
@@ -252,11 +233,6 @@ final class LauncherBackgroundView: NSView {
         }
     }
 
-    /// Live-updates the background to match new Settings values — used by
-    /// `LauncherWindowController.updateBackgroundSettings(mode:materialIntensity:blursWallpaper:)`
-    /// so moving the material slider or flipping the mode picker takes
-    /// effect immediately, matching every other Settings control's
-    /// live-apply behavior.
     func update(configuration: Configuration) {
         self.configuration = configuration
         configurationGeneration &+= 1
@@ -374,10 +350,6 @@ final class LauncherBackgroundView: NSView {
         CATransaction.commit()
     }
 
-    /// Matches the reference's own `bloomDrift` CSS keyframe animation
-    /// (the reference mockup's `@keyframes bloomDrift`, 26s ease-in-out loop) —
-    /// a slow, subtle wander so the background doesn't read as a static
-    /// image.
     private func addBloomDrift(to layer: CALayer) {
         let animation = CAKeyframeAnimation(keyPath: "transform")
         animation.values = [
