@@ -10,8 +10,12 @@
 "settings.about.designcredit" = "macOS向け · Liquid Glass";
 "settings.grid.columns" = "列数: %d";
 "settings.grid.rows" = "行数: %d";
+"settings.grid.spacing.horizontal" = "横間隔: %d pt";
+"settings.grid.spacing.vertical" = "縦間隔: %d pt";
+"settings.grid.margins" = "ページ余白: %d pt";
 "settings.grid.layout.paged" = "ページ形式";
 "launcher.quickmenu.accessibility" = "表示オプション";
+"launcher.search.clear.accessibility" = "検索をクリア";
 "launcher.quickmenu.opensettings" = "設定を開く…";
 "panel.close.accessibility" = "閉じる";
 "settings.accessibility.selected" = "選択中";

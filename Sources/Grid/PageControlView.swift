@@ -2,12 +2,7 @@ import AppKit
 import DesignSystem
 import Localization
 
-/// Page-dot indicator plus explicit prev/next chevron buttons. The dots remain
-/// visually small, but each has a larger hit target; the chevrons provide an
-/// additional unambiguous control that does not depend on precise dot aim.
-/// Full gesture-driven paging physics (rubber-band/velocity projection per
-/// apple-design) remains a follow-up polish pass — see PagedGridLayout's
-/// doc comment.
+/// Page dots with explicit previous/next controls.
 public final class PageControlView: NSView {
     public var onSelectPage: ((Int) -> Void)?
     public var onPrevious: (() -> Void)?
@@ -15,10 +10,6 @@ public final class PageControlView: NSView {
 
     public var numberOfPages: Int = 1 {
         didSet {
-            // `GridViewController.reload()` reassigns this on every model
-            // change, and `rebuildDots()` tears down and recreates every dot
-            // button with fresh constraints — so without this guard, moving a
-            // single icon rebuilt the whole control for an unchanged count.
             guard numberOfPages != oldValue else { return }
             rebuildDots()
             updateChevronEnabledState()
@@ -33,8 +24,7 @@ public final class PageControlView: NSView {
     }
 
     private var dotButtons: [NSButton] = []
-    /// Test hook: dots are rebuilt from a private setter, so a test asserting
-    /// "a single-page grid still shows one dot" has no other way to observe it.
+    /// Test-only dot count.
     var dotButtonCountForTesting: Int { dotButtons.count }
     private let dotStack = NSStackView()
     private let previousButton = NSButton()
@@ -82,11 +72,6 @@ public final class PageControlView: NSView {
             nextButton.heightAnchor.constraint(equalToConstant: 32)
         ])
 
-        // Build the initial dot for the default `numberOfPages` of 1. Swift
-        // does not run `didSet` for a property's initial value, and that
-        // setter is the only other thing that builds dots — so a single-page
-        // grid, which assigns the same value 1, would otherwise leave the
-        // control permanently empty.
         rebuildDots()
         updateChevronEnabledState()
     }
@@ -132,24 +117,7 @@ public final class PageControlView: NSView {
         updateDotStates()
     }
 
-    /// Best-effort defensive fix for an intermittent, not-reliably-reproduced
-    /// symptom seen once on cold launch where the page dots rendered
-    /// invisible until the next page change. `labelColor`/`tertiaryLabelColor`
-    /// are dynamic, appearance-dependent colors; taking `.cgColor` resolves
-    /// against whatever appearance is "current" at that instant, which could
-    /// be wrong if this runs before the view is actually attached to a
-    /// window with a settled effective appearance. Resolving explicitly
-    /// against `effectiveAppearance` here, plus re-running on
-    /// `viewDidMoveToWindow`/`viewDidChangeEffectiveAppearance` below, is a
-    /// plausible mitigation — it is not confirmed to be the actual root
-    /// cause of the original symptom.
     private func updateDotStates() {
-        // `NSColor` has no `resolvedColor(with:)` API — the correct way to
-        // force a dynamic color's `.cgColor` snapshot to resolve against a
-        // specific appearance is running the read inside
-        // `NSAppearance.performAsCurrentDrawingAppearance`, which sets
-        // `NSAppearance.currentDrawingAppearance` for the duration of the
-        // closure.
         effectiveAppearance.performAsCurrentDrawingAppearance { [weak self] in
             guard let self else { return }
             for (index, button) in dotButtons.enumerated() {
@@ -157,8 +125,6 @@ public final class PageControlView: NSView {
                 button.contentTintColor = isCurrentPage
                     ? NSColor.labelColor
                     : NSColor.tertiaryLabelColor
-                // The selected state is the semantic source of truth for
-                // VoiceOver; the dot color remains a visual supplement.
                 if button.isAccessibilitySelected() != isCurrentPage {
                     button.setAccessibilitySelected(isCurrentPage)
                     button.setAccessibilityValue(isCurrentPage ? L10n.selectedAccessibilityValue : nil)
@@ -177,8 +143,6 @@ public final class PageControlView: NSView {
         updateDotStates()
     }
 
-    /// Keep disabled chevrons visible enough against the dark glass instead
-    /// of applying the former 0.3-alpha treatment, which read as vanished.
     private func updateChevronEnabledState() {
         let hasMultiplePages = numberOfPages > 1
         previousButton.isHidden = !hasMultiplePages

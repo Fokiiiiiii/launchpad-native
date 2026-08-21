@@ -1,15 +1,6 @@
 import Foundation
 
-/// All user-facing strings across the app, routed through this one
-/// namespace so every target shares one `Localizable.xcstrings` catalog
-/// instead of duplicating resource bundles per target. Uses the classic
-/// `Bundle.localizedString(forKey:value:table:)` lookup (not the newer
-/// string-interpolation-based `String(localized:)` key auto-generation)
-/// deliberately — that API's key is whatever the compiler derives from the
-/// interpolated literal, which is easy to get subtly wrong when hand-
-/// authoring the `.xcstrings` file's keys to match. An explicit key we
-/// choose ourselves, with the English text as the `value` fallback, is
-/// unambiguous in both directions.
+/// User-facing strings shared by all targets.
 public enum L10n {
     private static func string(_ key: String, _ value: String) -> String {
         LocalizationBundle.bundle.localizedString(forKey: key, value: value, table: nil)
@@ -40,6 +31,15 @@ public enum L10n {
     }
     public static func rowsLabel(_ n: Int) -> String {
         String(format: string("settings.grid.rows", "Rows: %d"), n)
+    }
+    public static func horizontalSpacingLabel(_ n: Int) -> String {
+        String(format: string("settings.grid.spacing.horizontal", "Horizontal gap: %d pt"), n)
+    }
+    public static func verticalSpacingLabel(_ n: Int) -> String {
+        String(format: string("settings.grid.spacing.vertical", "Vertical gap: %d pt"), n)
+    }
+    public static func pageMarginsLabel(_ n: Int) -> String {
+        String(format: string("settings.grid.margins", "Page margins: %d pt"), n)
     }
     public static var layoutModePaged: String { string("settings.grid.layout.paged", "Paged") }
     public static var sortByLabel: String { string("settings.grid.sortby", "Sort By") }
@@ -83,6 +83,7 @@ public enum L10n {
     public static var appIconStyleDiagonal: String { string("settings.appicon.style.diagonal", "Diagonal") }
 
     public static var quickMenuAccessibilityLabel: String { string("launcher.quickmenu.accessibility", "View options") }
+    public static var clearSearchAccessibilityLabel: String { string("launcher.search.clear.accessibility", "Clear search") }
     public static var openSettingsMenuItem: String { string("launcher.quickmenu.opensettings", "Open Settings…") }
     public static var closePanelAccessibilityLabel: String { string("panel.close.accessibility", "Close") }
     public static var selectedAccessibilityValue: String { string("settings.accessibility.selected", "Selected") }

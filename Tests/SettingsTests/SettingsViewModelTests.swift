@@ -4,6 +4,27 @@ import Persistence
 import Testing
 @testable import Settings
 
+@Test @MainActor func layoutSpacingControlsUpdateTheGridImmediately() {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("launchpad-settings-layout-test-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let model = GridModel(layoutStore: LayoutStore(directory: directory))
+    let viewModel = SettingsViewModel(
+        model: model,
+        onTriggerSettingsChanged: { _ in .failed },
+        onDockVisibilityChanged: { _ in }
+    )
+
+    viewModel.horizontalSpacing = 18
+    viewModel.verticalSpacing = 36
+    viewModel.pageMargins = 54
+
+    #expect(model.gridSettings.horizontalSpacing == 18)
+    #expect(model.gridSettings.verticalSpacing == 36)
+    #expect(model.gridSettings.pageMargins == 54)
+}
+
 @Test @MainActor func failedTriggerTransactionRestoresEveryControl() async {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("launchpad-settings-test-\(UUID().uuidString)", isDirectory: true)

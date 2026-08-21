@@ -23,6 +23,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     private let searchField = NSTextField()
     private let searchIcon = NSImageView()
+    private let clearSearchButton = NSButton()
     private let quickMenuButton = NSButton()
     private let searchResultsCollectionView = SearchResultsCollectionView()
     private let searchResultsScrollView = NSScrollView()
@@ -178,6 +179,18 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         quickMenuButton.target = self
         quickMenuButton.action = #selector(quickMenuButtonTapped)
 
+        clearSearchButton.translatesAutoresizingMaskIntoConstraints = false
+        clearSearchButton.bezelStyle = .circular
+        clearSearchButton.isBordered = false
+        clearSearchButton.image = NSImage(
+            systemSymbolName: "xmark.circle.fill",
+            accessibilityDescription: L10n.clearSearchAccessibilityLabel
+        )?.withSymbolConfiguration(.init(pointSize: 13, weight: .medium))
+        clearSearchButton.contentTintColor = NSColor.white.withAlphaComponent(0.62)
+        clearSearchButton.target = self
+        clearSearchButton.action = #selector(clearSearchButtonTapped)
+        clearSearchButton.isHidden = true
+
         applySearchResultsLayoutMetrics()
 
         searchResultsCollectionView.collectionViewLayout = searchResultsLayout
@@ -262,6 +275,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchBar.addSubview(searchBarGlass)
         searchBar.addSubview(searchIcon)
         searchBar.addSubview(searchField)
+        searchBar.addSubview(clearSearchButton)
         searchBar.addSubview(quickMenuButton)
 
         root.addSubview(searchBar)
@@ -294,8 +308,13 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
             // 8pt gap — the reference's `HStack(spacing: 8)`.
             searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 8),
-            searchField.trailingAnchor.constraint(equalTo: quickMenuButton.leadingAnchor, constant: -8),
+            searchField.trailingAnchor.constraint(equalTo: clearSearchButton.leadingAnchor, constant: -6),
             searchField.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+
+            clearSearchButton.trailingAnchor.constraint(equalTo: quickMenuButton.leadingAnchor, constant: -6),
+            clearSearchButton.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+            clearSearchButton.widthAnchor.constraint(equalToConstant: 20),
+            clearSearchButton.heightAnchor.constraint(equalToConstant: 20),
 
             // 20x20 circle, 8pt trailing inset — the reference's own
             // `.frame(width: 20, height: 20)` button + `.padding(.trailing, 8)`.
@@ -601,6 +620,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     }
 
     private func updateSearchResultsPresentation() {
+        clearSearchButton.isHidden = viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         emptySearchResultsView.isHidden = viewModel.query.isEmpty || !viewModel.filteredRecords.isEmpty
         searchPageControl.isHidden = viewModel.query.isEmpty || viewModel.filteredRecords.isEmpty
     }
@@ -643,6 +663,11 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         if let event = NSApp.currentEvent {
             NSMenu.popUpContextMenu(menu, with: event, for: quickMenuButton)
         }
+    }
+
+    @objc private func clearSearchButtonTapped() {
+        resetSearch()
+        view.window?.makeFirstResponder(searchField)
     }
 
     @objc private func selectPagedLayoutMode() { applyLayoutMode(.paged) }
@@ -764,10 +789,19 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             }
             return true
         case #selector(NSResponder.cancelOperation(_:)):
-            onDidCancel()
+            cancelSearchOrDismiss()
             return true
         default:
             return false
+        }
+    }
+
+    func cancelSearchOrDismiss() {
+        if !searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            resetSearch()
+            view.window?.makeFirstResponder(searchField)
+        } else {
+            onDidCancel()
         }
     }
 

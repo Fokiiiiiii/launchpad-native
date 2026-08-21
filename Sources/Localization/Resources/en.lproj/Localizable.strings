@@ -10,8 +10,12 @@
 "settings.about.designcredit" = "Designed for macOS · Liquid Glass";
 "settings.grid.columns" = "Columns: %d";
 "settings.grid.rows" = "Rows: %d";
+"settings.grid.spacing.horizontal" = "Horizontal gap: %d pt";
+"settings.grid.spacing.vertical" = "Vertical gap: %d pt";
+"settings.grid.margins" = "Page margins: %d pt";
 "settings.grid.layout.paged" = "Paged";
 "launcher.quickmenu.accessibility" = "View options";
+"launcher.search.clear.accessibility" = "Clear search";
 "launcher.quickmenu.opensettings" = "Open Settings…";
 "panel.close.accessibility" = "Close";
 "settings.accessibility.selected" = "Selected";

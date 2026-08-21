@@ -5,14 +5,6 @@ import Grid
 import Persistence
 import ServiceManagement
 
-/// Renamed/regrouped to mirror a reference app's General/Screen/Apps/
-/// Advanced/About tab structure: `general` holds what used to be the
-/// standalone Triggers tab (launch methods), `screen` holds what used to
-/// be the Grid tab (layout/sizing) plus newer display-related controls,
-/// `apps` holds what used to be the Hidden tab, and `advanced` now shows
-/// only the custom-sources form (the Uninstall feature that used to share
-/// this tab behind a segmented sub-picker was removed at the user's
-/// explicit request — Settings should not surface file deletion).
 public enum SettingsTab: Hashable, Sendable {
     case general, screen, apps, advanced, about
 }
@@ -54,14 +46,7 @@ public struct TriggerSettingsApplyResult: Sendable, Equatable {
     )
 }
 
-/// Bridges `GridModel` (a plain `@MainActor` class, not `ObservableObject`)
-/// into SwiftUI's `@Published` world. Every control applies live — no
-/// "Apply" button anywhere (removed at the user's request: staged edit
-/// buffers behind two separate Apply buttons meant most controls looked
-/// inert until pressed, which read as "changing icon size does nothing").
-/// Each property's `didSet` writes straight through to `GridModel` and
-/// persists immediately, the same pattern this file already used for
-/// `sortMode`/`hideDockWhileLauncherOpen` before this round.
+/// SwiftUI settings bridge for the main-actor grid model.
 @MainActor
 public final class SettingsViewModel: ObservableObject {
     private let model: GridModel
@@ -73,28 +58,16 @@ public final class SettingsViewModel: ObservableObject {
     private let onMenuBarApplicationsChanged: () -> Void
     private let onBackgroundSettingsChanged: () -> Void
     private let onCustomSourcesChanged: () -> Void
-    /// Prevents a failed ServiceManagement write from recursively trying the
-    /// same operation while restoring the UI state to the OS-backed value.
     private var isRollingBackLaunchAtLogin = false
-    /// Guards the read-only refresh that runs when the kept-alive Settings
-    /// window is shown again; it must not re-apply callbacks while merely
-    /// reflecting the model's current state.
     private var isRefreshing = false
-    /// Trigger application includes an async durable-save phase. Coalesce
-    /// rapid didSet callbacks into the newest candidate before starting the
-    /// serialized external transaction.
     private var triggerApplyTask: Task<Void, Never>?
-    /// Identifies the task that currently owns the handle. A refresh may
-    /// replace an apply task while its callback is awaiting; the old task must
-    /// not clear the newer task's handle when it completes.
     private var triggerApplyOwnerGeneration: UInt?
     private var triggerApplyGeneration: UInt = 0
     private var pendingTriggerSettings: TriggerSettings?
-    /// Background sliders emit several values during one drag. Keep the live
-    /// preview responsive and write only the latest value once the main-actor
-    /// event turn settles instead of queueing an atomic layout write per tick.
     private var backgroundPersistTask: Task<Void, Never>?
     private var backgroundPersistGeneration: UInt = 0
+    private var gridPersistTask: Task<Void, Never>?
+    private var gridPersistGeneration: UInt = 0
     private var isEditingGlassMaterial = false
 
     @Published public var selectedTab: SettingsTab = .general
@@ -103,7 +76,7 @@ public final class SettingsViewModel: ObservableObject {
             guard columns != oldValue else { return }
             guard !isRefreshing else { return }
             applyGridDimensions()
-            persist()
+            persistGrid()
         }
     }
     @Published public var rows: Int {
@@ -111,7 +84,31 @@ public final class SettingsViewModel: ObservableObject {
             guard rows != oldValue else { return }
             guard !isRefreshing else { return }
             applyGridDimensions()
-            persist()
+            persistGrid()
+        }
+    }
+    @Published public var horizontalSpacing: Double {
+        didSet {
+            guard horizontalSpacing != oldValue else { return }
+            guard !isRefreshing else { return }
+            applyGridDimensions()
+            persistGrid()
+        }
+    }
+    @Published public var verticalSpacing: Double {
+        didSet {
+            guard verticalSpacing != oldValue else { return }
+            guard !isRefreshing else { return }
+            applyGridDimensions()
+            persistGrid()
+        }
+    }
+    @Published public var pageMargins: Double {
+        didSet {
+            guard pageMargins != oldValue else { return }
+            guard !isRefreshing else { return }
+            applyGridDimensions()
+            persistGrid()
         }
     }
     /// Persisted icon multiplier, intentionally independent from columns and
@@ -372,6 +369,9 @@ public final class SettingsViewModel: ObservableObject {
         let grid = model.gridSettings
         columns = grid.columns
         rows = grid.rows
+        horizontalSpacing = grid.horizontalSpacing
+        verticalSpacing = grid.verticalSpacing
+        pageMargins = grid.pageMargins
         iconScale = grid.iconScale
         iconScalePreset = GridIconScalePreset.matching(grid)
         layoutMode = model.layoutMode == .verticalScroll ? .paged : model.layoutMode
@@ -414,9 +414,10 @@ public final class SettingsViewModel: ObservableObject {
         var grid = model.gridSettings
         grid.columns = columns
         grid.rows = rows
+        grid.horizontalSpacing = horizontalSpacing
+        grid.verticalSpacing = verticalSpacing
+        grid.pageMargins = pageMargins
 
-        // Smart follows the current capacity. Explicit choices remain
-        // explicit, while a manually edited scale stays custom.
         let selectedIconScalePreset = iconScalePreset
         if selectedIconScalePreset == .smart,
            let recommendedScale = GridIconScalePreset.smart.scale(
@@ -621,15 +622,10 @@ public final class SettingsViewModel: ObservableObject {
     public func unhide(_ identifier: StableAppIdentifier) {
         model.unhideApplication(identifier)
         hiddenApps.removeAll { $0.identifier == identifier }
-        // Keep the launcher's flattened search snapshot in sync even when
-        // the user unhides from Settings while a query is active.
         onShowsHiddenAppsInSearchChanged()
         persist()
     }
 
-    /// Re-reads the model and OS-backed values whenever the kept-alive
-    /// Settings window is shown again. Refresh is display-only: didSet hooks
-    /// are guarded so opening Settings never writes stale values back.
     public func refresh() {
         isRefreshing = true
         defer { isRefreshing = false }
@@ -637,6 +633,9 @@ public final class SettingsViewModel: ObservableObject {
         let grid = model.gridSettings
         columns = grid.columns
         rows = grid.rows
+        horizontalSpacing = grid.horizontalSpacing
+        verticalSpacing = grid.verticalSpacing
+        pageMargins = grid.pageMargins
         iconScale = grid.iconScale
         iconScalePreset = GridIconScalePreset.matching(grid)
 
@@ -685,8 +684,6 @@ public final class SettingsViewModel: ObservableObject {
                 self.multitouchEventArbitrationActive = result.multitouchEventArbitrationActive
                 self.gestureConflictStatus = result.gestureConflictStatus
             }
-            // See refreshF4Status: never leave a finished refresh task installed
-            // when a didSet queued a newer candidate during the await.
             guard self.triggerApplyOwnerGeneration == generation else { return }
             self.triggerApplyTask = nil
             self.triggerApplyOwnerGeneration = nil
@@ -708,6 +705,22 @@ public final class SettingsViewModel: ObservableObject {
 
     private func persist() {
         Task { await model.save() }
+    }
+
+    private func persistGrid() {
+        gridPersistGeneration &+= 1
+        let generation = gridPersistGeneration
+        gridPersistTask?.cancel()
+        gridPersistTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self,
+                  !Task.isCancelled,
+                  self.gridPersistGeneration == generation else { return }
+            _ = await self.model.save()
+            if self.gridPersistGeneration == generation {
+                self.gridPersistTask = nil
+            }
+        }
     }
 
     private func persistBackgroundSettings() {

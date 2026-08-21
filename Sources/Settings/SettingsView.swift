@@ -337,6 +337,24 @@ public struct SettingsView: View {
                             .accessibilityLabel(Text(L10n.rowsLabel(viewModel.rows)))
                         }
                     }
+                    SettingsCardDivider()
+                    layoutSliderRow(
+                        label: L10n.horizontalSpacingLabel(Int(viewModel.horizontalSpacing)),
+                        value: $viewModel.horizontalSpacing,
+                        range: 8...64
+                    )
+                    SettingsCardDivider()
+                    layoutSliderRow(
+                        label: L10n.verticalSpacingLabel(Int(viewModel.verticalSpacing)),
+                        value: $viewModel.verticalSpacing,
+                        range: 8...64
+                    )
+                    SettingsCardDivider()
+                    layoutSliderRow(
+                        label: L10n.pageMarginsLabel(Int(viewModel.pageMargins)),
+                        value: $viewModel.pageMargins,
+                        range: 24...96
+                    )
                 }
                 }
 
@@ -491,6 +509,22 @@ public struct SettingsView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(Text(iconScalePresetName(preset)))
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func layoutSliderRow(
+        label: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>
+    ) -> some View {
+        SettingsCardRow(minHeight: 34) {
+            HStack(spacing: 10) {
+                Text(label)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+                Slider(value: value, in: range, step: 1)
+                    .accessibilityLabel(Text(label))
+            }
+        }
     }
 
     private func iconScalePresetName(_ preset: GridIconScalePreset) -> String {
