@@ -1,27 +1,6 @@
 import AppKit
 import Diagnostics
 
-/// Routes right-clicks to a per-item context menu, and trackpad 2-finger
-/// horizontal swipes to page navigation.
-///
-/// The swipe is a real user requirement, not a nice-to-have: a 2-finger
-/// horizontal swipe is the same gesture Safari/Photos use for content
-/// paging and does not collide with Mission Control's own Space-switching
-/// gesture, which macOS binds to 3/4-finger swipes by default — a different
-/// finger count, so there's no shared-gesture conflict here.
-///
-/// History: a first continuous, drag-tracked version of this swipe fired
-/// an overlay takeover on the very first `.changed` sample that looked
-/// even slightly more horizontal than vertical, with no minimum-distance
-/// gate — incidental trackpad motion could trigger it, and combined with a
-/// stuck-overlay failure mode this produced a real regression (the grid
-/// going permanently blank, requiring a force-quit). This version keeps
-/// continuous tracking (the user's explicit ask, tried a third time with
-/// the user's informed consent after two prior failures in this exact
-/// area) but requires the cumulative delta to cross `minimumEngageDistance`
-/// before engaging at all — see `GridViewController`'s drag methods for
-/// the other structural fix: the live grid is never hidden, so a stuck
-/// drag state can no longer make content disappear.
 final class GridCollectionView: NSCollectionView {
     var menuProvider: ((IndexPath) -> NSMenu?)?
     /// Fires with `-1` (previous) or `+1` (next) for a *discrete* mouse-wheel
@@ -83,12 +62,6 @@ final class GridCollectionView: NSCollectionView {
     var onItemMouseDragged: ((NSEvent) -> Void)?
     var onItemMouseUp: ((NSEvent) -> Void)?
 
-    /// Only recognizes a press on a cell's rendered icon/label — not just
-    /// anywhere in its much larger bounding box. A margin of a few points is
-    /// added around the content so clicking right at an icon's edge still
-    /// registers. Deliberately never calls `super.mouseDown` for a content
-    /// press: NSCollectionView's own selection/drag-session machinery is
-    /// bypassed entirely in favor of the custom state machine above.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let indexPath = indexPathForItem(at: point),

@@ -4,13 +4,6 @@ import Diagnostics
 import Foundation
 import Uninstall
 
-/// Front-end-only categorization + bundle-row synthesis for the new
-/// floating Uninstall panel (Round 12 §6). The restored `Sources/Uninstall/*`
-/// files stay byte-for-byte unchanged from before Round 11's removal —
-/// `RemovalItem` carries no category and no size, and `RemovalPlanner` never
-/// emits an item for the app's own `.app` bundle (only for its related
-/// files/launch agents/receipts). Both gaps are filled here, in the view
-/// model, rather than by touching the restored backend.
 @MainActor
 public final class UninstallPanelViewModel: ObservableObject {
     public enum SectionKind: CaseIterable {
@@ -21,14 +14,6 @@ public final class UninstallPanelViewModel: ObservableObject {
         public let id = UUID()
         public let removalItem: RemovalItem
         public var sizeInBytes: Int64?
-        /// Real, confirmed report ("中身のフォルダのアイコンが見えない"):
-        /// every non-app-bundle row (caches, preferences, receipts — mostly
-        /// folders, not applications) rendered as a flat gray placeholder
-        /// square forever, since only the app bundle row had an icon to
-        /// show. Populated asynchronously alongside `sizeInBytes` via
-        /// `NSWorkspace.icon(forFile:)` — the same API Finder itself uses,
-        /// so a folder gets the real folder icon, a plist gets the real
-        /// plist icon, etc., instead of a placeholder.
         public var icon: NSImage?
         public var isChecked: Bool
         /// sharedRisk/unknown/requiresPrivilegedHelper items are always

@@ -143,30 +143,6 @@ final class FolderOverlayPresenter {
             backdrop.bottomAnchor.constraint(equalTo: hostView.bottomAnchor)
         ])
 
-        // `panel` is positioned via a direct, one-time frame assignment —
-        // not Auto Layout constraints — see `FolderContentsViewController
-        // .loadView()`'s doc comment for why (a real, confirmed regression
-        // where AppKit's own `preferredContentSize`-mirrored width
-        // constraint intermittently won over an explicit Auto Layout
-        // constraint of equal or higher priority). `backdrop`'s eventual
-        // size is already known here without waiting for its own Auto
-        // Layout resolution: it's pinned 1:1 to `hostView`'s edges above, so
-        // its size always equals `hostView.bounds.size` (already read into
-        // `panelWidth`). 96pt side insets match the reference's own
-        // `.padding(.horizontal, TSLayout.folderPanelInsetH)` exactly.
-        //
-        // Vertically centered on screen rather than the reference's own
-        // literal fixed `.padding(.top, 196)` — a real, confirmed complaint
-        // ("画面の中央からずれてる"): the reference's fixed offset assumes a
-        // card tall enough to roughly fill the remaining space below it,
-        // but for a folder with only a couple of rows the card ends up far
-        // short of the 480pt height cap, leaving a much bigger gap below
-        // the card than above it — reading as pushed toward the top rather
-        // than centered. True vertical centering keeps the composition
-        // balanced regardless of how many rows the folder actually has,
-        // and matches the broader macOS convention of centering modal-style
-        // overlays (Quick Look, alerts, About panels) rather than pinning
-        // them to a fixed offset tuned for one specific content size.
         let backdropSize = hostView.bounds.size
         panel.frame = Self.panelFrame(size: size, in: backdropSize)
         // Forces `root`'s internal Auto Layout children to resolve against that

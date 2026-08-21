@@ -2,20 +2,6 @@ import AppKit
 import Localization
 import SwiftUI
 
-/// Floating panel shown from the grid's "Uninstall…" context menu item.
-/// Adapted directly from the user-supplied design reference's
-/// `UninstallSheet` (`Dialogs.swift`) — same header (icon/name/total size),
-/// same collapsible-group-with-checkbox layout, same per-row "show in
-/// Finder" magnifying-glass button and monospaced path text — wired to
-/// this app's real `UninstallPanelViewModel` data instead of the
-/// reference's placeholder `UninstallItem`/`UninstallGroup` model.
-///
-/// Two deliberate departures from the reference, both safety-motivated and
-/// already present in this project before this pass: "Move to Trash" has
-/// no `.keyboardShortcut(.defaultAction)` (the reference's own button does)
-/// so an accidental Return keypress can never trigger a destructive
-/// action, and it's tinted red rather than the reference's default accent
-/// color to visually set a destructive action apart from "Cancel."
 struct UninstallPanelView: View {
     @ObservedObject var viewModel: UninstallPanelViewModel
     let appIcon: NSImage?
@@ -30,19 +16,6 @@ struct UninstallPanelView: View {
     var onContentHeightChange: (CGFloat) -> Void = { _ in }
 
     @State private var expandedSections: Set<UninstallPanelViewModel.SectionKind> = Set(UninstallPanelViewModel.SectionKind.allCases)
-    /// Real, confirmed bug (a real screenshot showed a large blank gap
-    /// between the last visible row and the footer buttons, reported as
-    /// "消去uiの上のデッドスペース"): `ScrollView` doesn't size itself to
-    /// its content the way `VStack` does — `.frame(maxHeight: 296)` alone
-    /// makes it greedily claim up to 296pt of the fixed 500pt-tall window
-    /// regardless of whether the sections/rows inside it actually need
-    /// that much space. With only a couple of sections expanded (a common
-    /// case — most apps have few cache/preference files), real content is
-    /// often well under 296pt, and the difference showed up as dead space
-    /// sitting directly above the Divider/footer. Measured via this
-    /// preference-key height report instead of guessing a smaller fixed
-    /// constant, so it stays correct as sections expand/collapse and as
-    /// real apps' actual file counts vary.
     @State private var sectionsContentHeight: CGFloat = 0
     private static let maxSectionsHeight: CGFloat = 296
 
@@ -51,29 +24,6 @@ struct UninstallPanelView: View {
             VStack(spacing: 0) {
                 header
                 Divider()
-                // Real, confirmed bug ("消去uiに中身のコンポーネントなど
-                // の情報が出ない"): this used to be a `LazyVStack` sized via
-                // `GeometryReader` + `PreferenceKey`. Two bugs stacked here:
-                // (1) `LazyVStack` only materializes children within its
-                // containing scroll view's *current viewport*, which was
-                // driven by `sectionsContentHeight` starting at `0` — a
-                // self-reinforcing loop with no path to a nonzero height.
-                // Switching to `VStack` (which measures every row up front
-                // regardless of the enclosing scroll view's size) broke that
-                // loop. (2) Even after that fix, real device logs showed
-                // `GeometryReader`'s `.preference`-reported height staying
-                // stuck at `0` on every layout pass — while a diagnostic
-                // `.onAppear` on the very same `GeometryReader` observed a
-                // real, nonzero size. The `.background(GeometryReader{...})`
-                // + `PreferenceKey` combination is evidently unreliable
-                // inside a `ScrollView` hosted via `NSHostingController` in
-                // this app (a known class of SwiftUI footgun — `.preference`
-                // updates can silently lag or stick to a stale layout pass).
-                // `onGeometryChange(for:of:action:)` (macOS 14+, this app
-                // targets macOS 15) reports the same geometry via a direct
-                // callback instead of the preference-propagation machinery,
-                // and was confirmed via the same real-device logging to
-                // report the correct nonzero height immediately.
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(UninstallPanelViewModel.SectionKind.allCases, id: \.self) { kind in

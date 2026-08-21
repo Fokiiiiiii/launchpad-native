@@ -28,30 +28,6 @@ final class SwipePageRecognizer {
 
     var callbacks = Callbacks()
 
-    /// Which axis a 2-finger swipe engaged on — horizontal was the only
-    /// supported axis originally; vertical was added so up/down swipes page
-    /// too (a real user ask: the grid has no vertical scroll content of its
-    /// own to preserve, so this axis was free to repurpose).
-    ///
-    /// History: a first version picked "whichever axis's cumulative
-    /// magnitude is currently larger" as the engage candidate, re-evaluated
-    /// every sample. That was a real regression for the *existing*,
-    /// long-working horizontal gesture: real fingers landing on a trackpad
-    /// almost always produce a brief vertical blip before a horizontal
-    /// swipe's sweep takes over, and if that blip alone crossed
-    /// `minimumEngageDistance` in Y before X caught up, the axis locked as
-    /// vertical for the *entire* gesture — the subsequent, clearly
-    /// intentional horizontal motion kept accumulating into
-    /// `swipeAccumulatedDeltaX` but was never read again, since the locked
-    /// axis was already vertical. Confirmed via user report ("horizontal
-    /// swipe stopped paging"). Fixed by giving horizontal unconditional
-    /// priority — it engages the instant its own cumulative distance
-    /// clears the threshold, exactly like before vertical support existed,
-    /// with zero dependency on the concurrent Y value. Vertical only
-    /// engages when it clearly dominates (more than double X's magnitude)
-    /// *and* horizontal hasn't already claimed the gesture — a conservative
-    /// bar specifically so it can't misfire on the same kind of incidental
-    /// blip in the other direction.
     private enum SwipeAxis { case horizontal, vertical }
 
     private var swipeAccumulatedDeltaX: CGFloat = 0
@@ -76,13 +52,6 @@ final class SwipePageRecognizer {
     /// this gate exists to reject (see doc comment above).
     private let minimumEngageDistance: CGFloat = 10
 
-    /// A plain scroll-wheel mouse (non-Apple, or any mouse without a
-    /// touch-sensitive surface) sends discrete wheel ticks with no
-    /// `NSEvent.Phase` at all — previously swallowed by the trackpad-only
-    /// guard below, so such mice couldn't page the grid at all. These ticks
-    /// carry no phase to key a `.began`/`.changed`/`.ended` state machine
-    /// off of, so a wall-clock cooldown replaces the phase-driven
-    /// `swipeEngaged` latch used for trackpad gestures.
     private var lastDiscreteWheelPageChange: CFTimeInterval = 0
     private let discreteWheelCooldown: CFTimeInterval = 0.35
 
