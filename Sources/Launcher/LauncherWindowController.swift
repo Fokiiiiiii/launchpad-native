@@ -516,6 +516,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         let window = LauncherWindow(contentRect: screen.frame, hideDock: gridModel.hideDockWhileLauncherOpen)
         window.delegate = self
         window.onCancel = { [weak self] in self?.viewController?.cancelSearchOrDismiss() }
+        window.onCloseWindow = { [weak self] in self?.hide() }
         window.onOpenSettings = { [weak self] in self?.onOpenSettings?() }
         window.onFocusSearch = { [weak self] in self?.viewController?.focusSearch() }
 

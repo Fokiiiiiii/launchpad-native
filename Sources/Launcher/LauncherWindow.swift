@@ -6,6 +6,7 @@ import Diagnostics
 /// desktop instead of entering AppKit's dedicated full-screen Space.
 final class LauncherWindow: NSWindow {
     var onCancel: (() -> Void)?
+    var onCloseWindow: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onFocusSearch: (() -> Void)?
 
@@ -85,6 +86,9 @@ final class LauncherWindow: NSWindow {
             return super.performKeyEquivalent(with: event)
         }
         switch key {
+        case "w":
+            onCloseWindow?()
+            return true
         case ",":
             onOpenSettings?()
             return true

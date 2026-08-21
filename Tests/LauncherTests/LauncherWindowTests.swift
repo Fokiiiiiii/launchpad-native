@@ -72,8 +72,10 @@ func searchSurfaceUsesPagingWithoutScrollbars() {
     let window = LauncherWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100))
     var openedSettings = false
     var focusedSearch = false
+    var closed = false
     window.onOpenSettings = { openedSettings = true }
     window.onFocusSearch = { focusedSearch = true }
+    window.onCloseWindow = { closed = true }
 
     let settingsEvent = NSEvent.keyEvent(
         with: .keyDown,
@@ -99,11 +101,25 @@ func searchSurfaceUsesPagingWithoutScrollbars() {
         isARepeat: false,
         keyCode: 3
     )
+    let closeEvent = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: .command,
+        timestamp: 0,
+        windowNumber: window.windowNumber,
+        context: nil,
+        characters: "w",
+        charactersIgnoringModifiers: "w",
+        isARepeat: false,
+        keyCode: 13
+    )
 
     #expect(settingsEvent.map(window.performKeyEquivalent) == true)
     #expect(searchEvent.map(window.performKeyEquivalent) == true)
+    #expect(closeEvent.map(window.performKeyEquivalent) == true)
     #expect(openedSettings)
     #expect(focusedSearch)
+    #expect(closed)
 }
 
 @Test @MainActor func launcherWindowStaysOnTheCurrentDesktop() {
