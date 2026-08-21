@@ -7,12 +7,14 @@ private func record(
     _ name: String,
     id: String,
     backgroundOnly: Bool = false,
-    menuBarApp: Bool = false
+    menuBarApp: Bool = false,
+    fileName: String? = nil
 ) -> ApplicationRecord {
-    ApplicationRecord(
-        id: StableAppID(bundleURL: URL(fileURLWithPath: "/tmp/\(name).app"), bundleIdentifier: id, teamIdentifier: nil),
+    let bundleURL = URL(fileURLWithPath: "/tmp/\(fileName ?? name).app")
+    return ApplicationRecord(
+        id: StableAppID(bundleURL: bundleURL, bundleIdentifier: id, teamIdentifier: nil),
         bundleIdentifier: id,
-        bundleURL: URL(fileURLWithPath: "/tmp/\(name).app"),
+        bundleURL: bundleURL,
         executableURL: nil,
         displayName: name,
         originalDisplayName: name,
@@ -77,6 +79,16 @@ private func record(
     let records = [record("Xcode", id: "x")]
     let result = LauncherFiltering.filter(records, query: "XCO")
     #expect(result.count == 1)
+}
+
+@Test func searchesBundleIdentifierAndApplicationFileNameAfterDisplayNameMatches() {
+    let records = [
+        record("Safari", id: "com.apple.Safari"),
+        record("Utilities", id: "org.example.tool", fileName: "Browser")
+    ]
+
+    #expect(LauncherFiltering.filter(records, query: "apple.safari").map(\.displayName) == ["Safari"])
+    #expect(LauncherFiltering.filter(records, query: "browser").map(\.displayName) == ["Utilities"])
 }
 
 /// Phase 9 performance target: filtering must stay well under one frame

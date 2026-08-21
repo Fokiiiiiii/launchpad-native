@@ -33,25 +33,27 @@ enum LauncherFiltering {
         // Prefix matches remain first, while each group keeps the caller's
         // order so search follows the main grid instead of a second sort.
         let loweredQuery = trimmed.lowercased()
-        let ranked = base.enumerated().compactMap { offset, record -> (record: ApplicationRecord, isPrefixMatch: Bool, order: Int)? in
-            // Case folding via `lowercased()` rather than
-            // `localizedCaseInsensitiveContains`. Measured on this machine at
-            // 1,000 records: the localized call costs 25.5ms for the two
-            // lookups per record that matching needs, versus 2.5ms folding
-            // once and using plain `contains` — it was the entire budget of a
-            // filter that runs synchronously on every keystroke. Both treat
-            // diacritics as distinct, so for app names this only changes
-            // locale-specific casing edge cases (Turkish dotless i and the
-            // like), never the ASCII/Japanese names in a real catalog.
+        let ranked = base.enumerated().compactMap { offset, record -> (record: ApplicationRecord, rank: Int, order: Int)? in
             let loweredDisplay = record.displayName.lowercased()
-            guard loweredDisplay.contains(loweredQuery)
-                || record.originalDisplayName.lowercased().contains(loweredQuery) else { return nil }
-            return (record, loweredDisplay.hasPrefix(loweredQuery), offset)
+            let loweredOriginal = record.originalDisplayName.lowercased()
+            let loweredBundleID = record.bundleIdentifier.lowercased()
+            let loweredFileName = record.bundleURL.deletingPathExtension().lastPathComponent.lowercased()
+            let loweredCategory = record.category?.lowercased() ?? ""
+
+            let displayPrefix = loweredDisplay.hasPrefix(loweredQuery)
+                || loweredOriginal.hasPrefix(loweredQuery)
+            let displayMatch = loweredDisplay.contains(loweredQuery)
+                || loweredOriginal.contains(loweredQuery)
+            let metadataMatch = loweredBundleID.contains(loweredQuery)
+                || loweredFileName.contains(loweredQuery)
+                || loweredCategory.contains(loweredQuery)
+            guard displayMatch || metadataMatch else { return nil }
+            return (record, displayPrefix ? 0 : (displayMatch ? 1 : 2), offset)
         }
 
         return ranked
             .sorted { lhs, rhs in
-                if lhs.isPrefixMatch != rhs.isPrefixMatch { return lhs.isPrefixMatch }
+                if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
                 return lhs.order < rhs.order
             }
             .map(\.record)
