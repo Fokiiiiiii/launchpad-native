@@ -41,6 +41,9 @@ public enum L10n {
     public static func pageMarginsLabel(_ n: Int) -> String {
         String(format: string("settings.grid.margins", "Page margins: %d pt"), n)
     }
+    public static var resetGridLayoutButton: String { string("settings.grid.reset", "Reset Grid Layout") }
+    public static var resetGridLayoutTitle: String { string("settings.grid.reset.title", "Reset grid layout?") }
+    public static var resetGridLayoutMessage: String { string("settings.grid.reset.message", "Columns, rows, spacing, margins, and icon size will return to their defaults.") }
     public static var layoutModePaged: String { string("settings.grid.layout.paged", "Paged") }
     public static var sortByLabel: String { string("settings.grid.sortby", "Sort By") }
     /// Neutral section header for the group containing Sort By, Reorganize,

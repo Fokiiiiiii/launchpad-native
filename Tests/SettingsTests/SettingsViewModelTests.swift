@@ -25,6 +25,38 @@ import Testing
     #expect(model.gridSettings.pageMargins == 54)
 }
 
+@Test @MainActor func resetGridLayoutRestoresGeometryWithoutChangingSortMode() {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("launchpad-settings-reset-test-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let model = GridModel(layoutStore: LayoutStore(directory: directory))
+    var custom = model.gridSettings
+    custom.columns = 4
+    custom.rows = 3
+    custom.horizontalSpacing = 52
+    custom.verticalSpacing = 48
+    custom.pageMargins = 72
+    custom.iconScale = 1.18
+    custom.sortMode = .lastUsed
+    model.updateGridSettings(custom)
+
+    let viewModel = SettingsViewModel(
+        model: model,
+        onTriggerSettingsChanged: { _ in .failed },
+        onDockVisibilityChanged: { _ in }
+    )
+    viewModel.resetGridLayout()
+
+    #expect(model.gridSettings.columns == GridSettings.default.columns)
+    #expect(model.gridSettings.rows == GridSettings.default.rows)
+    #expect(model.gridSettings.horizontalSpacing == GridSettings.default.horizontalSpacing)
+    #expect(model.gridSettings.verticalSpacing == GridSettings.default.verticalSpacing)
+    #expect(model.gridSettings.pageMargins == GridSettings.default.pageMargins)
+    #expect(model.gridSettings.iconScale == GridSettings.default.iconScale)
+    #expect(model.gridSettings.sortMode == .lastUsed)
+}
+
 @Test @MainActor func failedTriggerTransactionRestoresEveryControl() async {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("launchpad-settings-test-\(UUID().uuidString)", isDirectory: true)

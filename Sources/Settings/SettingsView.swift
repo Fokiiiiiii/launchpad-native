@@ -9,6 +9,7 @@ public struct SettingsView: View {
 
     @ScaledMetric(relativeTo: .body) private var tabIconSize: CGFloat = 15
     @ScaledMetric(relativeTo: .caption) private var tabItemHeight: CGFloat = 34
+    @State private var showResetGridConfirmation = false
 
     private enum Metrics {
         static let sectionSpacing: CGFloat = 13
@@ -355,6 +356,18 @@ public struct SettingsView: View {
                         value: $viewModel.pageMargins,
                         range: 24...96
                     )
+                    SettingsCardDivider()
+                    SettingsCardRow(minHeight: 34) {
+                        HStack {
+                            Spacer()
+                            Button(role: .destructive) {
+                                showResetGridConfirmation = true
+                            } label: {
+                                Text(L10n.resetGridLayoutButton)
+                            }
+                            .controlSize(.small)
+                        }
+                    }
                 }
                 }
 
@@ -467,6 +480,18 @@ public struct SettingsView: View {
             .padding(.horizontal, Metrics.contentHorizontalPadding)
             .padding(.top, Metrics.contentTopPadding)
             .padding(.bottom, Metrics.contentBottomPadding)
+        }
+        .confirmationDialog(
+            L10n.resetGridLayoutTitle,
+            isPresented: $showResetGridConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.resetGridLayoutButton, role: .destructive) {
+                viewModel.resetGridLayout()
+            }
+            Button(L10n.cancelButton, role: .cancel) {}
+        } message: {
+            Text(L10n.resetGridLayoutMessage)
         }
     }
 

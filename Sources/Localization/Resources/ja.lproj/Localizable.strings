@@ -13,6 +13,9 @@
 "settings.grid.spacing.horizontal" = "横間隔: %d pt";
 "settings.grid.spacing.vertical" = "縦間隔: %d pt";
 "settings.grid.margins" = "ページ余白: %d pt";
+"settings.grid.reset" = "グリッドを初期化";
+"settings.grid.reset.title" = "グリッドを初期化しますか？";
+"settings.grid.reset.message" = "列数、行数、間隔、余白、アイコンサイズを初期値へ戻します。アプリの並び順は保持されます。";
 "settings.grid.layout.paged" = "ページ形式";
 "launcher.quickmenu.accessibility" = "表示オプション";
 "launcher.search.clear.accessibility" = "検索をクリア";

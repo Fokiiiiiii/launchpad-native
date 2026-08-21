@@ -459,6 +459,23 @@ public final class SettingsViewModel: ObservableObject {
         persist()
     }
 
+    public func resetGridLayout() {
+        var grid = GridSettings.default
+        grid.sortMode = model.gridSettings.sortMode
+        model.updateGridSettings(grid)
+
+        isRefreshing = true
+        columns = grid.columns
+        rows = grid.rows
+        horizontalSpacing = grid.horizontalSpacing
+        verticalSpacing = grid.verticalSpacing
+        pageMargins = grid.pageMargins
+        iconScale = grid.iconScale
+        isRefreshing = false
+        iconScalePreset = .smart
+        persistGrid()
+    }
+
     private func applyTriggerSettings() {
         pendingTriggerSettings = triggerSettingsFromControls()
         triggerApplyGeneration &+= 1

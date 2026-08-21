@@ -13,6 +13,9 @@
 "settings.grid.spacing.horizontal" = "Horizontal gap: %d pt";
 "settings.grid.spacing.vertical" = "Vertical gap: %d pt";
 "settings.grid.margins" = "Page margins: %d pt";
+"settings.grid.reset" = "Reset Grid Layout";
+"settings.grid.reset.title" = "Reset grid layout?";
+"settings.grid.reset.message" = "Columns, rows, spacing, margins, and icon size will return to their defaults.";
 "settings.grid.layout.paged" = "Paged";
 "launcher.quickmenu.accessibility" = "View options";
 "launcher.search.clear.accessibility" = "Clear search";
