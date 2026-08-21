@@ -176,10 +176,7 @@ func searchSurfaceUsesPagingWithoutScrollbars() {
     window.applyDockVisibilityPreference(hideDock: false)
 
     #expect(window.level.rawValue < dockLevel)
-    // Below the Dock, but still above ordinary application windows (`.normal`)
-    // — a full-display overlay sharing `.normal` has no guaranteed ordering
-    // against other apps' windows.
-    #expect(window.level.rawValue > NSWindow.Level.normal.rawValue)
+    #expect(window.level == .floating)
 }
 
 @Test @MainActor func launcherStaysAboveDockOnlyWhenDockIsExplicitlyHidden() {

@@ -64,7 +64,7 @@ final class LauncherWindow: NSWindow {
         screenFrame: NSRect? = nil
     ) {
         let dockLevel = Int(CGWindowLevelForKey(.dockWindow))
-        level = NSWindow.Level(rawValue: hideDock ? dockLevel + 1 : dockLevel - 1)
+        level = hideDock ? NSWindow.Level(rawValue: dockLevel + 1) : .floating
         if let displayFrame = screenFrame ?? screen?.frame {
             setFrame(displayFrame, display: true)
         }
