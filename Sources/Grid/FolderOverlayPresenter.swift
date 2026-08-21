@@ -81,15 +81,16 @@ final class FolderOverlayPresenter {
             itemCount: itemCount,
             configuredColumns: configuredColumns
         )
-        // The panel is the same width whatever the folder holds — a folder
-        // with two apps in it is the same shape as one with eighteen, just
-        // shorter. Only the height follows the contents.
-        let panelWidth = max(hostView.bounds.width - 2 * Self.panelSideInset, 320)
         let rows = max(Int(ceil(Double(itemCount) / Double(folderColumns))), 1)
         let iconSize = FolderContentsViewController.folderIconSize(
             gridIconSize: metrics.iconSize,
             rows: rows,
             availableHeight: hostView.bounds.height
+        )
+        let panelWidth = FolderContentsViewController.panelWidth(
+            availableWidth: hostView.bounds.width - 2 * Self.panelSideInset,
+            columns: folderColumns,
+            iconSize: CGFloat(iconSize)
         )
 
         let folderVC = FolderContentsViewController(
