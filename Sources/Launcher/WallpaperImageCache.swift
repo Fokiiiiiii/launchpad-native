@@ -88,8 +88,8 @@ enum WallpaperSourceResolver {
         return .unavailable
     }
 
-    /// Resolves only the display's file-backed wallpaper. A regular window is
-    /// never a valid wallpaper fallback.
+    /// Resolves a file-backed wallpaper first, then uses WindowServer only
+    /// when macOS exposes no usable file source.
     static func resolve(
         desktopURL: URL?,
         configuredURL: URL?,
@@ -97,11 +97,33 @@ enum WallpaperSourceResolver {
         targetBounds: CGRect?,
         isUsableFile: (URL) -> Bool
     ) -> WallpaperSource {
-        resolve(
+        let fileSource = resolve(
             desktopURL: desktopURL,
             configuredURL: configuredURL,
             isUsableFile: isUsableFile
         )
+        guard fileSource.kind == .unavailable else { return fileSource }
+
+        if let candidate = selectWallpaperWindow(
+            candidates: windowCandidates,
+            targetBounds: targetBounds
+        ) {
+            let captureBounds: CGRect
+            if let targetBounds,
+               candidate.bounds.intersects(targetBounds) {
+                captureBounds = candidate.bounds.intersection(targetBounds)
+            } else {
+                captureBounds = candidate.bounds
+            }
+            return WallpaperSource(
+                kind: .windowCapture,
+                url: nil,
+                windowID: candidate.windowID,
+                captureBounds: captureBounds
+            )
+        }
+
+        return fileSource
     }
 
     static func resolve(
