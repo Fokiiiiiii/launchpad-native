@@ -154,7 +154,7 @@ func wallpaperWindowSelectionDoesNotBorrowAnotherDisplay() {
 }
 
 @Test
-func resolverPrefersWindowCaptureBeforeWorkspaceAndConfiguredSources() {
+func resolverPrefersFileWallpaperBeforeWindowCapture() {
     let desktopURL = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")
     let configuredURL = URL(fileURLWithPath: "/Library/Application Support/com.apple.idleassetsd/Customer/Aerial.mov")
     let candidate = WallpaperWindowCandidate(
@@ -175,10 +175,34 @@ func resolverPrefersWindowCaptureBeforeWorkspaceAndConfiguredSources() {
         isUsableFile: { _ in true }
     )
 
+    #expect(source.kind == .aerialVideo)
+    #expect(source.url == configuredURL)
+}
+
+@Test
+func resolverUsesWindowCaptureOnlyWhenFileSourcesAreUnavailable() {
+    let desktopURL = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")
+    let configuredURL = URL(fileURLWithPath: "/Library/Application Support/com.apple.idleassetsd/Customer/Missing.mov")
+    let candidate = WallpaperWindowCandidate(
+        windowID: 1545,
+        ownerName: "Dock",
+        windowName: "Wallpaper-1",
+        layer: -2_147_483_624,
+        bounds: CGRect(x: 0, y: 0, width: 1_920, height: 1_080),
+        isOnscreen: true,
+        alpha: 1
+    )
+
+    let source = WallpaperSourceResolver.resolve(
+        desktopURL: desktopURL,
+        configuredURL: configuredURL,
+        windowCandidates: [candidate],
+        targetBounds: candidate.bounds,
+        isUsableFile: { _ in false }
+    )
+
     #expect(source.kind == .windowCapture)
     #expect(source.windowID == candidate.windowID)
-    #expect(source.url == nil)
-    #expect(source.captureBounds == candidate.bounds)
 }
 
 @Test

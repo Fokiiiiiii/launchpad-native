@@ -88,9 +88,8 @@ enum WallpaperSourceResolver {
         return .unavailable
     }
 
-    /// Selects a WindowServer wallpaper before consulting file-backed sources.
-    /// The overload without `windowCandidates` remains the compatibility path
-    /// used by existing resolver callers and tests.
+    /// Resolves a file-backed wallpaper first, then uses WindowServer only
+    /// when macOS exposes no usable file source.
     static func resolve(
         desktopURL: URL?,
         configuredURL: URL?,
@@ -98,6 +97,13 @@ enum WallpaperSourceResolver {
         targetBounds: CGRect?,
         isUsableFile: (URL) -> Bool
     ) -> WallpaperSource {
+        let fileSource = resolve(
+            desktopURL: desktopURL,
+            configuredURL: configuredURL,
+            isUsableFile: isUsableFile
+        )
+        guard fileSource.kind == .unavailable else { return fileSource }
+
         if let candidate = selectWallpaperWindow(
             candidates: windowCandidates,
             targetBounds: targetBounds
@@ -117,11 +123,7 @@ enum WallpaperSourceResolver {
             )
         }
 
-        return resolve(
-            desktopURL: desktopURL,
-            configuredURL: configuredURL,
-            isUsableFile: isUsableFile
-        )
+        return fileSource
     }
 
     static func resolve(
