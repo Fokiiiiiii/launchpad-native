@@ -180,7 +180,7 @@ func resolverPrefersFileWallpaperBeforeWindowCapture() {
 }
 
 @Test
-func resolverUsesWindowCaptureOnlyWhenFileSourcesAreUnavailable() {
+func resolverDoesNotUseAWindowAsWallpaperFallback() {
     let desktopURL = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")
     let configuredURL = URL(fileURLWithPath: "/Library/Application Support/com.apple.idleassetsd/Customer/Missing.mov")
     let candidate = WallpaperWindowCandidate(
@@ -201,8 +201,7 @@ func resolverUsesWindowCaptureOnlyWhenFileSourcesAreUnavailable() {
         isUsableFile: { _ in false }
     )
 
-    #expect(source.kind == .windowCapture)
-    #expect(source.windowID == candidate.windowID)
+    #expect(source == .unavailable)
 }
 
 @Test
