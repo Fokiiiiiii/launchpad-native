@@ -516,6 +516,8 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         let window = LauncherWindow(contentRect: screen.frame, hideDock: gridModel.hideDockWhileLauncherOpen)
         window.delegate = self
         window.onCancel = { [weak self] in self?.viewController?.cancelSearchOrDismiss() }
+        window.onOpenSettings = { [weak self] in self?.onOpenSettings?() }
+        window.onFocusSearch = { [weak self] in self?.viewController?.focusSearch() }
 
         // Hidden-app mutations can originate from the grid's context menu,
         // not only Settings. Attach a dedicated observer so an active search

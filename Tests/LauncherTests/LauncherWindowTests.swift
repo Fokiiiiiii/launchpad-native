@@ -68,6 +68,44 @@ func searchSurfaceUsesPagingWithoutScrollbars() {
     #expect(window.acceptsMouseMovedEvents)
 }
 
+@Test @MainActor func launcherWindowRoutesCommonCommandShortcuts() {
+    let window = LauncherWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100))
+    var openedSettings = false
+    var focusedSearch = false
+    window.onOpenSettings = { openedSettings = true }
+    window.onFocusSearch = { focusedSearch = true }
+
+    let settingsEvent = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: .command,
+        timestamp: 0,
+        windowNumber: window.windowNumber,
+        context: nil,
+        characters: ",",
+        charactersIgnoringModifiers: ",",
+        isARepeat: false,
+        keyCode: 41
+    )
+    let searchEvent = NSEvent.keyEvent(
+        with: .keyDown,
+        location: .zero,
+        modifierFlags: .command,
+        timestamp: 0,
+        windowNumber: window.windowNumber,
+        context: nil,
+        characters: "f",
+        charactersIgnoringModifiers: "f",
+        isARepeat: false,
+        keyCode: 3
+    )
+
+    #expect(settingsEvent.map(window.performKeyEquivalent) == true)
+    #expect(searchEvent.map(window.performKeyEquivalent) == true)
+    #expect(openedSettings)
+    #expect(focusedSearch)
+}
+
 @Test @MainActor func launcherWindowStaysOnTheCurrentDesktop() {
     let window = LauncherWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100))
 

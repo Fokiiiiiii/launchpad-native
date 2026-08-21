@@ -320,6 +320,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         gridViewController.setGridContentHidden(false)
     }
 
+    func focusSearch() {
+        view.window?.makeFirstResponder(searchField)
+    }
+
     func debugSetSearchQuery(_ query: String) {
         searchField.stringValue = query
         applyQuery(query)

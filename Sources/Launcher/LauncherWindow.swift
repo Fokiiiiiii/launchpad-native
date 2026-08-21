@@ -6,6 +6,8 @@ import Diagnostics
 /// desktop instead of entering AppKit's dedicated full-screen Space.
 final class LauncherWindow: NSWindow {
     var onCancel: (() -> Void)?
+    var onOpenSettings: (() -> Void)?
+    var onFocusSearch: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -75,5 +77,22 @@ final class LauncherWindow: NSWindow {
     /// surfaces "the user pressed Escape" without a raw keyDown override.
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command),
+              let key = event.charactersIgnoringModifiers?.lowercased() else {
+            return super.performKeyEquivalent(with: event)
+        }
+        switch key {
+        case ",":
+            onOpenSettings?()
+            return true
+        case "f":
+            onFocusSearch?()
+            return true
+        default:
+            return super.performKeyEquivalent(with: event)
+        }
     }
 }
