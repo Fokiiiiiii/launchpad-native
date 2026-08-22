@@ -509,7 +509,9 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     private func updateSearchResultsPresentation() {
         clearSearchButton.isHidden = viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        emptySearchResultsView.isHidden = viewModel.query.isEmpty || !viewModel.filteredRecords.isEmpty
+        let showsEmptyState = !viewModel.query.isEmpty && viewModel.filteredRecords.isEmpty
+        emptySearchResultsView.isHidden = !showsEmptyState
+        emptySearchResultsView.setAccessibilityElement(showsEmptyState)
         searchPageControl.isHidden = viewModel.query.isEmpty || viewModel.filteredRecords.isEmpty
     }
 

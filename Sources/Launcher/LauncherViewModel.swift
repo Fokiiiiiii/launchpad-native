@@ -37,6 +37,7 @@ public final class LauncherViewModel {
 
     public func setQuery(_ query: String) {
         self.query = query
+        selectedIndex = nil
         refilter()
     }
 

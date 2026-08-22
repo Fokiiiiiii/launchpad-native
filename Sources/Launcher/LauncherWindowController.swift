@@ -381,11 +381,13 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // can never leave the window at alpha 0 (the previous black-screen
         // failure mode).
         refreshOverlayLayout(reason: "show overlay")
-        // refreshOverlayLayout() has already synchronously settled the Dock
-        // constraint and custom grid layout. Run the parent pass once more so
-        // the search surface and grid share the same final viewport before the
-        // alpha transition starts.
+        // Materialize the first cells while the window is still transparent,
+        // then rebuild them with the settled layout metrics.
         viewController?.view.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        viewController?.reloadGrid()
+        viewController?.view.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
         // Do not rely on CA's animator to perform the first visibility
         // transition. If the window was ordered while the app was changing
         // activation policy, the animation transaction can be deferred and

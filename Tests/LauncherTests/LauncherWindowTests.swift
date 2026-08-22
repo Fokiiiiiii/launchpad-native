@@ -62,6 +62,42 @@ func searchSurfaceUsesPagingWithoutScrollbars() {
     #expect(!scrollView.hasHorizontalScroller)
 }
 
+@Test @MainActor
+func searchEmptyStateOnlyParticipatesInAccessibilityWhenVisible() {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("launchpad-search-accessibility-test-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = GridModel(layoutStore: LayoutStore(directory: directory))
+    let viewModel = LauncherViewModel()
+    let viewController = LauncherViewController(
+        viewModel: viewModel,
+        gridModel: model,
+        iconCache: IconCache(cacheDirectory: directory.appendingPathComponent("icons", isDirectory: true)),
+        onDidLaunch: {},
+        onDidCancel: {},
+        onOpenSettings: {}
+    )
+    viewController.loadViewIfNeeded()
+
+    func searchCollection(in view: NSView) -> SearchResultsCollectionView? {
+        if let collection = view as? SearchResultsCollectionView { return collection }
+        return view.subviews.lazy.compactMap(searchCollection).first
+    }
+
+    guard let emptyState = searchCollection(in: viewController.view)?.backgroundView else {
+        Issue.record("search empty state was not installed")
+        return
+    }
+    viewModel.setRecords([record("Alpha", id: "alpha")])
+    viewController.debugSetSearchQuery("Alpha")
+    #expect(emptyState.isHidden)
+    #expect(!emptyState.isAccessibilityElement())
+
+    viewController.debugSetSearchQuery("missing")
+    #expect(!emptyState.isHidden)
+    #expect(emptyState.isAccessibilityElement())
+}
+
 @Test @MainActor func launcherWindowAcceptsMouseMovedEvents() {
     let window = LauncherWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100))
 

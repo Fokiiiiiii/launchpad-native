@@ -19,4 +19,13 @@ final class DismissableWindow: NSWindow {
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
     }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command),
+              event.charactersIgnoringModifiers?.lowercased() == "w" else {
+            return super.performKeyEquivalent(with: event)
+        }
+        onCancel?()
+        return true
+    }
 }

@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import Launcher
 
-private func record(
+func record(
     _ name: String,
     id: String,
     backgroundOnly: Bool = false,
@@ -60,12 +60,13 @@ private func record(
     #expect(vm.selectedIndex == 1)
 }
 
-@Test @MainActor func selectionSurvivesQueryChangeWhenStillPresent() {
+@Test @MainActor func queryChangeStartsFromTheBestMatch() {
     let vm = LauncherViewModel()
     vm.setRecords([record("Alpha", id: "a"), record("Beta", id: "b")])
     vm.select(index: 1) // Beta
-    vm.setQuery("Beta")
-    #expect(vm.selectedRecord?.displayName == "Beta")
+    vm.setQuery("a")
+    #expect(vm.selectedIndex == 0)
+    #expect(vm.selectedRecord?.displayName == "Alpha")
 }
 
 @Test @MainActor func selectionResetsWhenFilteredListBecomesEmpty() {
