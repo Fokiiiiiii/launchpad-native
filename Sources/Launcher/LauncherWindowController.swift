@@ -388,8 +388,8 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         viewController?.view.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
         // Do not rely on CA's animator to perform the first visibility
-        // transition. If the window was ordered while the app was changing
-        // activation policy, the animation transaction can be deferred and
+        // transition. If window ordering and app activation land in the same
+        // event turn, the animation transaction can be deferred and
         // leave the whole-screen window at alpha 0. Make the visible state
         // authoritative first, then add the cosmetic animation.
         window.alphaValue = 1

@@ -178,9 +178,8 @@ func searchEmptyStateOnlyParticipatesInAccessibilityWhenVisible() {
     #expect(window.collectionBehavior.contains(.canJoinAllSpaces))
     #expect(window.collectionBehavior.contains(.fullScreenAuxiliary))
     #expect(!window.collectionBehavior.contains(.fullScreenPrimary))
-    // Must stay false: `show()` toggles the activation policy on every open,
-    // and AppKit's blanket hide-on-deactivate ordered the overlay out mid-open.
-    // Dismissal on another app activating is the controller's observer's job.
+    // AppKit must not order the overlay out independently; dismissal on
+    // another app activating is the controller's observer's job.
     #expect(!window.hidesOnDeactivate)
 }
 
