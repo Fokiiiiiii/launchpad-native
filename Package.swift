@@ -10,7 +10,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AppHost",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "Launcher", "Localization", "Grid", "Triggers", "Settings", "WindowBrowser", "Onboarding", "WhatsNew"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "Launcher", "Localization", "Triggers", "Settings", "Onboarding", "WhatsNew"],
             path: "Sources/AppHost"
         ),
         .target(
@@ -64,12 +64,12 @@ let package = Package(
         ),
         .target(
             name: "Uninstall",
-            dependencies: ["Diagnostics", "Catalog", "Persistence"],
+            dependencies: ["Diagnostics", "Catalog"],
             path: "Sources/Uninstall"
         ),
         .target(
             name: "Onboarding",
-            dependencies: ["Diagnostics", "Localization", "DesignSystem"],
+            dependencies: ["Localization", "DesignSystem"],
             path: "Sources/Onboarding"
         ),
         .target(
