@@ -1,5 +1,6 @@
 import AppKit
 import Catalog
+import DesignSystem
 import Diagnostics
 import Persistence
 import SwiftUI
@@ -225,7 +226,7 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         pageControl.onPrevious = { [weak self] in self?.goToAdjacentPage(-1) }
         pageControl.onNext = { [weak self] in self?.goToAdjacentPage(1) }
 
-        let background = GlassBackgroundHelper.makeFolderCardBackground(
+        let background = GlassSurfaceFactory.makeCardBackground(
             cornerRadius: 26,
             tint: NSColor.white.withAlphaComponent(0.08),
             borderAlpha: 0.16,

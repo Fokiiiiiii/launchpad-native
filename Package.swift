@@ -54,7 +54,7 @@ let package = Package(
         ),
         .target(
             name: "Settings",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Uninstall", "Localization"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Uninstall", "Localization", "DesignSystem"],
             path: "Sources/Settings"
         ),
         .target(

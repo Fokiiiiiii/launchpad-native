@@ -1,6 +1,7 @@
 import AppKit
 import Catalog
 import CoreGraphics
+import DesignSystem
 import Diagnostics
 import Foundation
 import Grid
@@ -76,7 +77,7 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
         // `currentHostingView`) because the icon-fetch completion below must
         // replace only the hosting view, not this whole hierarchy.
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 586, height: 500))
-        let background = GlassBackgroundHelper.makeFolderCardBackground(
+        let background = GlassSurfaceFactory.makeCardBackground(
             cornerRadius: 13,
             tint: NSColor(srgbRed: 30 / 255, green: 30 / 255, blue: 32 / 255, alpha: 0.90),
             borderAlpha: 0.13,
