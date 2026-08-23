@@ -24,7 +24,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private let searchResultsScrollView = NSScrollView()
     private let searchResultsLayout = NSCollectionViewFlowLayout()
     private let searchPageControl = PageControlView(frame: .zero)
-    private let emptySearchResultsView = NSStackView()
+    private let emptySearchResultsView = NSView()
     private var searchPageControlBottomConstraint: NSLayoutConstraint?
     private var currentDockInset: CGFloat = 0
     private var searchCurrentPage = 0
@@ -153,19 +153,19 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         emptyIcon.image = NSImage(
             systemSymbolName: "magnifyingglass",
             accessibilityDescription: nil
-        )?.withSymbolConfiguration(.init(pointSize: 18, weight: .regular))
-        emptyIcon.contentTintColor = .tertiaryLabelColor
+        )?.withSymbolConfiguration(.init(pointSize: 24, weight: .medium))
+        emptyIcon.contentTintColor = .secondaryLabelColor
         emptyIcon.setAccessibilityElement(false)
 
         let emptyTitle = NSTextField(labelWithString: L10n.searchNoResultsTitle)
-        emptyTitle.font = .systemFont(ofSize: 14, weight: .medium)
-        emptyTitle.textColor = .secondaryLabelColor
+        emptyTitle.font = .systemFont(ofSize: 15, weight: .semibold)
+        emptyTitle.textColor = .labelColor
         emptyTitle.alignment = .center
         emptyTitle.setAccessibilityElement(false)
 
         let emptyMessage = NSTextField(labelWithString: L10n.searchNoResultsMessage)
-        emptyMessage.font = .systemFont(ofSize: 12)
-        emptyMessage.textColor = .tertiaryLabelColor
+        emptyMessage.font = .systemFont(ofSize: 12.5)
+        emptyMessage.textColor = .secondaryLabelColor
         emptyMessage.alignment = .center
         emptyMessage.setAccessibilityElement(false)
 
@@ -173,13 +173,19 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // so it has no common ancestor with the collection view while
         // `loadView()` is building the hierarchy. Use a frame/autoresizing
         // contract instead of cross-view Auto Layout constraints.
+        let emptyContent = NSStackView(views: [emptyIcon, emptyTitle, emptyMessage])
+        emptyContent.translatesAutoresizingMaskIntoConstraints = false
+        emptyContent.orientation = .vertical
+        emptyContent.alignment = .centerX
+        emptyContent.spacing = 6
         emptySearchResultsView.translatesAutoresizingMaskIntoConstraints = true
-        emptySearchResultsView.orientation = .vertical
-        emptySearchResultsView.alignment = .centerX
-        emptySearchResultsView.spacing = 4
-        emptySearchResultsView.addArrangedSubview(emptyIcon)
-        emptySearchResultsView.addArrangedSubview(emptyTitle)
-        emptySearchResultsView.addArrangedSubview(emptyMessage)
+        emptySearchResultsView.addSubview(emptyContent)
+        NSLayoutConstraint.activate([
+            emptyContent.centerXAnchor.constraint(equalTo: emptySearchResultsView.centerXAnchor),
+            emptyContent.centerYAnchor.constraint(equalTo: emptySearchResultsView.centerYAnchor),
+            emptyContent.leadingAnchor.constraint(greaterThanOrEqualTo: emptySearchResultsView.leadingAnchor, constant: 20),
+            emptyContent.trailingAnchor.constraint(lessThanOrEqualTo: emptySearchResultsView.trailingAnchor, constant: -20)
+        ])
         emptySearchResultsView.setAccessibilityElement(true)
         emptySearchResultsView.setAccessibilityRole(.group)
         emptySearchResultsView.setAccessibilityLabel(L10n.searchNoResultsTitle)

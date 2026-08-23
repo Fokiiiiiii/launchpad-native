@@ -96,6 +96,14 @@ func searchEmptyStateOnlyParticipatesInAccessibilityWhenVisible() {
     viewController.debugSetSearchQuery("missing")
     #expect(!emptyState.isHidden)
     #expect(emptyState.isAccessibilityElement())
+    viewController.view.frame = NSRect(x: 0, y: 0, width: 1_200, height: 800)
+    viewController.view.layoutSubtreeIfNeeded()
+    emptyState.layoutSubtreeIfNeeded()
+    guard let content = emptyState.subviews.first else {
+        Issue.record("search empty-state content was not installed")
+        return
+    }
+    #expect(abs(content.frame.midY - emptyState.bounds.midY) < 1)
 }
 
 @Test @MainActor func launcherWindowAcceptsMouseMovedEvents() {
