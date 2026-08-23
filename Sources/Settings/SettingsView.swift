@@ -1,7 +1,9 @@
 import AppKit
+import Diagnostics
 import Localization
 import Persistence
 import SwiftUI
+import UniformTypeIdentifiers
 
 public struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
@@ -735,10 +737,51 @@ public struct SettingsView: View {
                     }
                 }
                 }
+
+                VStack(alignment: .leading, spacing: Metrics.sectionHeaderSpacing) {
+                    SettingsSectionHeader(L10n.diagnosticsHeader, systemImage: "stethoscope", tint: .purple)
+                    SettingsCard {
+                        SettingsCardRow(minHeight: 34) {
+                            HStack {
+                                Text(L10n.diagnosticsHint)
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 8)
+                                Button {
+                                    saveDiagnosticsReport()
+                                } label: {
+                                    Label(L10n.diagnosticsSaveReport, systemImage: "square.and.arrow.down")
+                                }
+                                .controlSize(.small)
+                            }
+                        }
+                    }
+                }
             }
             .padding(.horizontal, Metrics.contentHorizontalPadding)
             .padding(.top, Metrics.contentTopPadding)
             .padding(.bottom, Metrics.contentBottomPadding)
+        }
+    }
+
+    /// Writes the report wherever the user chooses. Deliberately a save panel
+    /// rather than a fixed location: the file is meant to be attached to
+    /// something, so it should land where the user will look for it.
+    private func saveDiagnosticsReport() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "LaunchpadNative-diagnostics.txt"
+        panel.allowedContentTypes = [.plainText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try DiagnosticsReport.current().write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            DiagnosticsLog.settings.error("Diagnostics report save failed: \(error.localizedDescription, privacy: .public)")
+            let alert = NSAlert()
+            alert.messageText = L10n.diagnosticsSaveFailed
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: L10n.cancelButton)
+            alert.runModal()
         }
     }
 

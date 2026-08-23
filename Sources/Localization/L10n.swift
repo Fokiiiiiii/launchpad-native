@@ -213,6 +213,13 @@ public enum L10n {
 
     // MARK: What's New
 
+    // MARK: Settings — Diagnostics
+
+    public static var diagnosticsHeader: String { string("settings.diagnostics.header", "Diagnostics") }
+    public static var diagnosticsSaveReport: String { string("settings.diagnostics.savereport", "Save Diagnostics Report…") }
+    public static var diagnosticsHint: String { string("settings.diagnostics.hint", "Saves this session's log plus version and system details, for attaching to a bug report.") }
+    public static var diagnosticsSaveFailed: String { string("settings.diagnostics.savefailed", "The diagnostics report could not be saved.") }
+
     public static var whatsNewTitle: String { string("whatsnew.title", "What's New") }
     /// Deliberately not routed through the catalog: a version number reads the
     /// same in every language, and looking it up would mean a stray

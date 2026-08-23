@@ -138,3 +138,7 @@
 "whatsnew.feature.gestureconflict.body" = "Die App kann jetzt automatisch verhindern, dass die eigene Trackpad-Geste von macOS mit der des Launchers konkurriert.";
 "whatsnew.feature.folderfullscreen.title" = "Größere Ordnerfenster";
 "whatsnew.feature.folderfullscreen.body" = "Geöffnete Ordner skalieren mit dem Bildschirm, sodass große Ordner mehr Platz haben.";
+"settings.diagnostics.header" = "Diagnose";
+"settings.diagnostics.savereport" = "Diagnosebericht sichern…";
+"settings.diagnostics.hint" = "Sichert das Protokoll dieser Sitzung samt Version und Systemangaben, zum Anhängen an eine Fehlermeldung.";
+"settings.diagnostics.savefailed" = "Der Diagnosebericht konnte nicht gesichert werden.";

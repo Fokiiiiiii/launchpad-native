@@ -138,3 +138,7 @@
 "whatsnew.feature.gestureconflict.body" = "现在可以自动阻止 macOS 自带的触控板手势与启动器的手势相互干扰。";
 "whatsnew.feature.folderfullscreen.title" = "更大的文件夹窗口";
 "whatsnew.feature.folderfullscreen.body" = "打开的文件夹会根据屏幕大小缩放，内容较多的文件夹也更加宽敞。";
+"settings.diagnostics.header" = "诊断";
+"settings.diagnostics.savereport" = "存储诊断报告…";
+"settings.diagnostics.hint" = "保存本次运行的日志以及版本和系统信息，便于附在问题反馈中。";
+"settings.diagnostics.savefailed" = "无法存储诊断报告。";

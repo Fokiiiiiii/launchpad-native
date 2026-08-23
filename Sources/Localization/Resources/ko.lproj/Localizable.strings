@@ -138,3 +138,7 @@
 "whatsnew.feature.gestureconflict.body" = "이제 macOS 자체 트랙패드 제스처가 실행기의 제스처와 충돌하지 않도록 자동으로 막을 수 있습니다.";
 "whatsnew.feature.folderfullscreen.title" = "더 커진 폴더 윈도우";
 "whatsnew.feature.folderfullscreen.body" = "열린 폴더가 화면 크기에 맞춰 확대되어 항목이 많은 폴더도 여유롭게 보입니다.";
+"settings.diagnostics.header" = "진단";
+"settings.diagnostics.savereport" = "진단 리포트 저장…";
+"settings.diagnostics.hint" = "이번 실행의 로그와 버전·시스템 정보를 함께 저장합니다. 버그 신고에 첨부하세요.";
+"settings.diagnostics.savefailed" = "진단 리포트를 저장하지 못했습니다.";

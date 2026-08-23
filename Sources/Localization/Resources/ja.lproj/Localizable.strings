@@ -138,3 +138,7 @@
 "whatsnew.feature.gestureconflict.body" = "macOS標準のトラックパッドジェスチャーがランチャーのジェスチャーと競合しないよう、自動的に無効化できるようになりました。";
 "whatsnew.feature.folderfullscreen.title" = "フォルダウインドウが大きく";
 "whatsnew.feature.folderfullscreen.body" = "開いたフォルダが画面サイズに合わせて拡大し、中身が多いフォルダも見やすくなりました。";
+"settings.diagnostics.header" = "診断";
+"settings.diagnostics.savereport" = "診断レポートを保存…";
+"settings.diagnostics.hint" = "今回の起動中のログとバージョン・システム情報をまとめて保存します。不具合の報告に添付してください。";
+"settings.diagnostics.savefailed" = "診断レポートを保存できませんでした。";

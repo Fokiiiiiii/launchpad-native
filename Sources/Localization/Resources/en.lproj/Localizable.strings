@@ -138,3 +138,7 @@
 "whatsnew.feature.gestureconflict.body" = "The app can now automatically prevent macOS's own trackpad gesture from competing with the launcher's.";
 "whatsnew.feature.folderfullscreen.title" = "Bigger Folder Windows";
 "whatsnew.feature.folderfullscreen.body" = "Opened folders now scale to the screen, so large folders have more room to breathe.";
+"settings.diagnostics.header" = "Diagnostics";
+"settings.diagnostics.savereport" = "Save Diagnostics Report…";
+"settings.diagnostics.hint" = "Saves this session's log plus version and system details, for attaching to a bug report.";
+"settings.diagnostics.savefailed" = "The diagnostics report could not be saved.";

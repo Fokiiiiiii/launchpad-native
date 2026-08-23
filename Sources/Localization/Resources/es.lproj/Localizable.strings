@@ -138,3 +138,7 @@
 "whatsnew.feature.gestureconflict.body" = "Ahora la app puede evitar automáticamente que el gesto de trackpad de macOS compita con el del lanzador.";
 "whatsnew.feature.folderfullscreen.title" = "Ventanas de carpeta más grandes";
 "whatsnew.feature.folderfullscreen.body" = "Las carpetas abiertas se ajustan a la pantalla, de modo que las carpetas grandes tienen más espacio.";
+"settings.diagnostics.header" = "Diagnóstico";
+"settings.diagnostics.savereport" = "Guardar informe de diagnóstico…";
+"settings.diagnostics.hint" = "Guarda el registro de esta sesión junto con la versión y los datos del sistema, para adjuntarlo a un informe de error.";
+"settings.diagnostics.savefailed" = "No se pudo guardar el informe de diagnóstico.";
