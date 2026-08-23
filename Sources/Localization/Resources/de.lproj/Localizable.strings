@@ -139,6 +139,6 @@
 "whatsnew.feature.folderfullscreen.title" = "Größere Ordnerfenster";
 "whatsnew.feature.folderfullscreen.body" = "Geöffnete Ordner skalieren mit dem Bildschirm, sodass große Ordner mehr Platz haben.";
 "settings.diagnostics.header" = "Diagnose";
-"settings.diagnostics.savereport" = "Diagnosebericht sichern…";
-"settings.diagnostics.hint" = "Sichert das Protokoll dieser Sitzung samt Version und Systemangaben, zum Anhängen an eine Fehlermeldung.";
-"settings.diagnostics.savefailed" = "Der Diagnosebericht konnte nicht gesichert werden.";
+"settings.diagnostics.savereport" = "Protokolle exportieren…";
+"settings.diagnostics.hint" = "Sichert bis zu 30 Tage Protokolle als ZIP, eine Datei pro Tag. Vor dem Export wird nichts auf der Festplatte abgelegt.";
+"settings.diagnostics.savefailed" = "Die Protokolle konnten nicht exportiert werden.";

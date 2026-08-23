@@ -765,18 +765,27 @@ public struct SettingsView: View {
         }
     }
 
-    /// Writes the report wherever the user chooses. Deliberately a save panel
-    /// rather than a fixed location: the file is meant to be attached to
+    /// Writes the log archive wherever the user chooses. Deliberately a save
+    /// panel rather than a fixed location: the file is meant to be attached to
     /// something, so it should land where the user will look for it.
     private func saveDiagnosticsReport() {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "LaunchpadNative-diagnostics.txt"
-        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "LaunchpadNative-logs-\(formatter.string(from: Date())).zip"
+        panel.allowedContentTypes = [.zip]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try DiagnosticsReport.current().write(to: url, atomically: true, encoding: .utf8)
+            let summary = try DiagnosticsArchive.write(to: url)
+            DiagnosticsLog.settings.notice(
+                "Exported logs: \(summary.dayCount, privacy: .public) day(s), \(summary.entryCount, privacy: .public) entries, \(summary.byteCount, privacy: .public) bytes"
+            )
+            // The point of the file is to hand it to someone, so end by showing
+            // where it landed rather than leaving the user to find it.
+            NSWorkspace.shared.activateFileViewerSelecting([url])
         } catch {
-            DiagnosticsLog.settings.error("Diagnostics report save failed: \(error.localizedDescription, privacy: .public)")
+            DiagnosticsLog.settings.error("Log export failed: \(error.localizedDescription, privacy: .public)")
             let alert = NSAlert()
             alert.messageText = L10n.diagnosticsSaveFailed
             alert.informativeText = error.localizedDescription

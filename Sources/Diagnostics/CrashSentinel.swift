@@ -13,7 +13,7 @@ import Foundation
 /// nothing is safe to call, and a wrong one turns a crash into a hang. This
 /// records the *fact* of an unclean exit rather than trying to describe it.
 public enum CrashSentinel {
-    public enum PreviousOutcome: Equatable {
+    public enum PreviousOutcome: Equatable, Sendable {
         /// No previous run recorded — a first launch, or a fresh preferences store.
         case firstRun
         /// The previous run shut down through `applicationWillTerminate`.
@@ -22,6 +22,11 @@ public enum CrashSentinel {
         /// which is what makes the report actionable — "it crashes on 1.2, not 1.1".
         case unexpectedTermination(version: String)
     }
+
+    /// What `beginSession` saw at launch, kept so a diagnostics report written
+    /// later in the run can state it. Reading the flag again would be useless —
+    /// by then this session has already set it.
+    public private(set) nonisolated(unsafe) static var lastObservedOutcome: PreviousOutcome?
 
     static let sessionKey = "com.launchpadnative.app.sessionInProgress"
     static let versionKey = "com.launchpadnative.app.sessionVersion"
@@ -41,6 +46,7 @@ public enum CrashSentinel {
             outcome = .cleanExit
         }
 
+        lastObservedOutcome = outcome
         defaults.set(true, forKey: sessionKey)
         defaults.set(version, forKey: versionKey)
 

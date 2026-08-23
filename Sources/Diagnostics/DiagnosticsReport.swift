@@ -19,16 +19,32 @@ public enum DiagnosticsReport {
         public let osVersion: String
         public let model: String
         public let generatedAt: Date
+        /// How the run *before* this one ended. The single most useful line in
+        /// a report about an app that "just disappears" — and it is not in the
+        /// log, because the run that could have logged it is the one that died.
+        public let previousSession: CrashSentinel.PreviousOutcome?
 
-        public init(appVersion: String, appBuild: String, osVersion: String, model: String, generatedAt: Date) {
+        public init(
+            appVersion: String,
+            appBuild: String,
+            osVersion: String,
+            model: String,
+            generatedAt: Date,
+            previousSession: CrashSentinel.PreviousOutcome? = nil
+        ) {
             self.appVersion = appVersion
             self.appBuild = appBuild
             self.osVersion = osVersion
             self.model = model
             self.generatedAt = generatedAt
+            self.previousSession = previousSession
         }
 
-        public static func current(bundle: Bundle = .main, now: Date = Date()) -> Environment {
+        public static func current(
+            bundle: Bundle = .main,
+            now: Date = Date(),
+            previousSession: CrashSentinel.PreviousOutcome? = CrashSentinel.lastObservedOutcome
+        ) -> Environment {
             let info = bundle.infoDictionary
             var systemInfo = utsname()
             uname(&systemInfo)
@@ -40,7 +56,8 @@ public enum DiagnosticsReport {
                 appBuild: info?["CFBundleVersion"] as? String ?? "unknown",
                 osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
                 model: model,
-                generatedAt: now
+                generatedAt: now,
+                previousSession: previousSession
             )
         }
     }
@@ -55,8 +72,20 @@ public enum DiagnosticsReport {
         App: \(environment.appVersion) (\(environment.appBuild))
         macOS: \(environment.osVersion)
         Model: \(environment.model)
+        Previous session: \(describe(environment.previousSession))
 
         """
+
+        // Errors first, because that is what anyone reading this looks for. The
+        // full log follows for context; without the summary a real failure is
+        // one line among hundreds of routine ones.
+        let problems = logLines.filter { $0.contains("[error]") || $0.contains("[fault]") }
+        if !problems.isEmpty {
+            report += "\n— Errors and faults (\(problems.count)) —\n"
+            report += problems.joined(separator: "\n")
+            report += "\n"
+        }
+
         if logLines.isEmpty {
             report += "\n— No log entries were available for this session —\n"
         } else {
@@ -65,6 +94,16 @@ public enum DiagnosticsReport {
             report += "\n"
         }
         return report
+    }
+
+    private static func describe(_ outcome: CrashSentinel.PreviousOutcome?) -> String {
+        switch outcome {
+        case .none: return "not recorded"
+        case .firstRun: return "none — this is the first recorded run"
+        case .cleanExit: return "exited normally"
+        case .unexpectedTermination(let version):
+            return "DID NOT SHUT DOWN CLEANLY (was running \(version))"
+        }
     }
 
     /// This process's own log entries, oldest first, capped so a long-running
@@ -78,12 +117,24 @@ public enum DiagnosticsReport {
             for entry in try store.getEntries(at: position) {
                 guard let logEntry = entry as? OSLogEntryLog,
                       logEntry.subsystem == DiagnosticsLog.subsystem else { continue }
-                lines.append("\(formatter.string(from: logEntry.date)) [\(logEntry.category)] \(logEntry.composedMessage)")
+                lines.append("\(formatter.string(from: logEntry.date)) [\(logEntry.category)] [\(levelName(logEntry.level))] \(logEntry.composedMessage)")
             }
             return Array(lines.suffix(limit))
         } catch {
             DiagnosticsLog.appHost.error("Diagnostics report could not read the log store: \(error.localizedDescription, privacy: .public)")
             return []
+        }
+    }
+
+    private static func levelName(_ level: OSLogEntryLog.Level) -> String {
+        switch level {
+        case .debug: return "debug"
+        case .info: return "info"
+        case .notice: return "notice"
+        case .error: return "error"
+        case .fault: return "fault"
+        case .undefined: return "undefined"
+        @unknown default: return "unknown"
         }
     }
 

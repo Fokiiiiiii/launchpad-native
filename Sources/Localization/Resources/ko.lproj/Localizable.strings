@@ -139,6 +139,6 @@
 "whatsnew.feature.folderfullscreen.title" = "더 커진 폴더 윈도우";
 "whatsnew.feature.folderfullscreen.body" = "열린 폴더가 화면 크기에 맞춰 확대되어 항목이 많은 폴더도 여유롭게 보입니다.";
 "settings.diagnostics.header" = "진단";
-"settings.diagnostics.savereport" = "진단 리포트 저장…";
-"settings.diagnostics.hint" = "이번 실행의 로그와 버전·시스템 정보를 함께 저장합니다. 버그 신고에 첨부하세요.";
-"settings.diagnostics.savefailed" = "진단 리포트를 저장하지 못했습니다.";
+"settings.diagnostics.savereport" = "로그 내보내기…";
+"settings.diagnostics.hint" = "최대 30일치 로그를 하루에 한 파일씩 zip으로 저장합니다. 내보내기 전에는 디스크에 아무것도 저장하지 않습니다.";
+"settings.diagnostics.savefailed" = "로그를 내보내지 못했습니다.";

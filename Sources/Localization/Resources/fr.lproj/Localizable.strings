@@ -139,6 +139,6 @@
 "whatsnew.feature.folderfullscreen.title" = "Fenêtres de dossier plus grandes";
 "whatsnew.feature.folderfullscreen.body" = "Les dossiers ouverts s'adaptent à l'écran, laissant plus de place aux dossiers bien remplis.";
 "settings.diagnostics.header" = "Diagnostic";
-"settings.diagnostics.savereport" = "Enregistrer le rapport de diagnostic…";
-"settings.diagnostics.hint" = "Enregistre le journal de cette session ainsi que la version et les informations système, à joindre à un signalement.";
-"settings.diagnostics.savefailed" = "Le rapport de diagnostic n'a pas pu être enregistré.";
+"settings.diagnostics.savereport" = "Exporter les journaux…";
+"settings.diagnostics.hint" = "Enregistre jusqu'à 30 jours de journaux dans un zip, un fichier par jour. Rien n'est stocké sur le disque avant l'export.";
+"settings.diagnostics.savefailed" = "Les journaux n'ont pas pu être exportés.";

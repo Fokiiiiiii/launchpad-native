@@ -139,6 +139,6 @@
 "whatsnew.feature.folderfullscreen.title" = "更大的文件夹窗口";
 "whatsnew.feature.folderfullscreen.body" = "打开的文件夹会根据屏幕大小缩放，内容较多的文件夹也更加宽敞。";
 "settings.diagnostics.header" = "诊断";
-"settings.diagnostics.savereport" = "存储诊断报告…";
-"settings.diagnostics.hint" = "保存本次运行的日志以及版本和系统信息，便于附在问题反馈中。";
-"settings.diagnostics.savefailed" = "无法存储诊断报告。";
+"settings.diagnostics.savereport" = "导出日志…";
+"settings.diagnostics.hint" = "将最多30天的日志按每天一个文件保存为zip。导出前不会在磁盘上保存任何内容。";
+"settings.diagnostics.savefailed" = "无法导出日志。";
