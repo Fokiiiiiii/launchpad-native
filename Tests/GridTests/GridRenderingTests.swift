@@ -171,3 +171,54 @@ private final class GridHarness {
     #expect(!cells.isEmpty)
     #expect(harness.drawnIconCount() == cells.count, "a recycled cell was left without an icon")
 }
+
+// MARK: - Page snapshot cache
+
+/// Rendering a neighbour page costs 320-375ms of blocked main thread — it
+/// builds a throwaway collection view, every cell in it, and draws the result.
+/// That ran on every swipe, which made paging quickly unusable. The same page
+/// renders identically until the model changes, so it is cached.
+@Test @MainActor func aPageSnapshotIsRenderedOnceAndReused() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    // Enough apps for several pages.
+    let harness = await GridHarness(appCount: 60, directory: dir)
+    defer { harness.teardown() }
+    try await harness.waitForIcons(1)
+
+    let size = NSSize(width: 800, height: 600)
+    let first = harness.controller.pageSnapshotForTesting(page: 1, size: size)
+    #expect(first != nil, "the grid should have a second page to snapshot")
+
+    let second = harness.controller.pageSnapshotForTesting(page: 1, size: size)
+    // Identity, not equality: a cache hit returns the very same image.
+    #expect(first === second, "the second request re-rendered instead of reusing")
+}
+
+/// A cached snapshot must not outlive the arrangement it depicts.
+@Test @MainActor func changingTheModelInvalidatesCachedSnapshots() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 60, directory: dir)
+    defer { harness.teardown() }
+    try await harness.waitForIcons(1)
+
+    let size = NSSize(width: 800, height: 600)
+    let before = harness.controller.pageSnapshotForTesting(page: 1, size: size)
+    harness.controller.reload()
+    let after = harness.controller.pageSnapshotForTesting(page: 1, size: size)
+    #expect(before !== after, "a stale snapshot survived a model change")
+}
+
+/// A different size is a different picture, so it cannot reuse the entry.
+@Test @MainActor func aDifferentSizeRendersItsOwnSnapshot() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 60, directory: dir)
+    defer { harness.teardown() }
+    try await harness.waitForIcons(1)
+
+    let small = harness.controller.pageSnapshotForTesting(page: 1, size: NSSize(width: 800, height: 600))
+    let large = harness.controller.pageSnapshotForTesting(page: 1, size: NSSize(width: 1_000, height: 700))
+    #expect(small !== large)
+}

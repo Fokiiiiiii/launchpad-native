@@ -222,6 +222,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     public func reload() {
+        invalidatePageSnapshots()
         layout.settings = model.gridSettings
         if currentPage >= model.pages.count {
             currentPage = max(model.pages.count - 1, 0)
@@ -377,6 +378,13 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private static let pageSlideOffset: CGFloat = 18
     private var pageTransitionGeneration = 0
 
+    /// How long to let a page-change spring run before swapping the data
+    /// source under it. A critically damped spring has visually arrived after
+    /// roughly one `response`; the small margin covers the last of the ease.
+    static func pageSwapDelay(response: CGFloat) -> TimeInterval {
+        TimeInterval(min(max(response * 1.15, 0.12), 0.42))
+    }
+
     private func jumpToPage(_ index: Int) {
         guard model.pages.indices.contains(index), index != currentPage || collectionView.numberOfSections == 0 else { return }
         let start = DispatchTime.now()
@@ -408,7 +416,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         layer?.setValue(exitTarget, forKeyPath: "transform.translation.x")
         CATransaction.commit()
 
-        let settleDelay = min(max(exitSpring.settlingDuration, 0.12), 0.42)
+        let settleDelay = Self.pageSwapDelay(response: 0.22)
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) { [weak self] in
             Task { @MainActor in
                 guard let self, self.pageTransitionGeneration == generation else { return }
@@ -558,10 +566,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let targetTranslation: CGFloat = commit ? (dragDirection > 0 ? -width : width) : 0
         let distanceRemaining = targetTranslation - deltaX
 
-        // Keep the same restrained spring for click and swipe paths. The
-        // old 0.86/0.45 commit spring produced a visible overshoot at the
-        // page edge and made a normal swipe feel like a second gesture.
-        let (damping, response): (CGFloat, CGFloat) = commit ? (0.97, 0.30) : (1.0, 0.24)
+        // Critically damped both ways: at 0.97 the commit spring kept easing
+        // for a long tail after it had visually arrived, and the swap waited on
+        // that tail. No overshoot also means the page does not drift back at the
+        // edge, which read as the transition catching.
+        let (damping, response): (CGFloat, CGFloat) = commit ? (1.0, 0.24) : (1.0, 0.22)
         let boundedVelocity = min(max(velocity, -1600), 1600)
         let relativeVelocity = abs(distanceRemaining) > 1 ? boundedVelocity / distanceRemaining : 0
 
@@ -584,9 +593,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let targetPage = commit ? currentPage + dragDirection : currentPage
         pendingPageDragTargetPage = targetPage
         let generation = dragGeneration
-        // The safety-net timer is still the failure recovery; this bound only
-        // keeps a pathological spring from delaying the data-source swap.
-        let settleDuration = min(max(spring.settlingDuration, 0), 1.0)
+        // Timed off `response`, not `settlingDuration`. The latter is when the
+        // spring stops *moving*, which is well past when it has visually
+        // arrived — measured 417ms for a page that looked settled in about
+        // half that, and the data swap sat waiting for all of it. That wait was
+        // the lag: the swap itself takes ~7ms.
+        let settleDuration = Self.pageSwapDelay(response: response)
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) { [weak self] in
             Task { @MainActor in
                 guard let self, self.dragGeneration == generation else { return }
@@ -653,9 +665,44 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     /// Binds the controller's current geometry to `PageSnapshotRenderer`, which
     /// holds the rendering itself (and the offscreen host window it needs).
+    /// Rendered neighbour pages, keyed by page and size.
+    ///
+    /// Rendering one costs 320-375ms of blocked main thread — it builds a whole
+    /// throwaway collection view, every cell in it, and draws the result. That
+    /// ran on *every* swipe, so paging quickly was unusable. The same page
+    /// renders identically until the model or the metrics change, so the work
+    /// only has to happen once.
+    private var pageSnapshotCache: [PageSnapshotKey: NSImage] = [:]
+
+    struct PageSnapshotKey: Hashable {
+        let page: Int
+        let width: Int
+        let height: Int
+        let iconSize: Int
+    }
+
+    /// Called wherever the rendered result would no longer match.
+    private func invalidatePageSnapshots() {
+        pageSnapshotCache.removeAll(keepingCapacity: true)
+    }
+
+    /// Test hook: the cache is the whole point of this path, and a re-render
+    /// costs a third of a second of blocked main thread.
+    public func pageSnapshotForTesting(page: Int, size: NSSize) -> NSImage? {
+        renderPageSnapshot(forPage: page, size: size)
+    }
+
     private func renderPageSnapshot(forPage page: Int, size: NSSize) -> NSImage? {
         guard model.pages.indices.contains(page) else { return nil }
-        return PageSnapshotRenderer.render(
+        let key = PageSnapshotKey(
+            page: page,
+            width: Int(size.width.rounded()),
+            height: Int(size.height.rounded()),
+            iconSize: Int((currentIconSize * currentEffectiveIconScale).rounded())
+        )
+        if let cached = pageSnapshotCache[key] { return cached }
+
+        let image = PageSnapshotRenderer.render(
             items: model.pages[page],
             model: model,
             iconCache: iconCache,
@@ -664,6 +711,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             visualScale: currentEffectiveIconScale,
             size: size
         )
+        if let image {
+            // Bounded: a neighbour peek only ever needs the pages either side
+            // of the current one, and the grid is not usually deep enough for
+            // this to grow, but a stale entry is dead weight either way.
+            if pageSnapshotCache.count >= 6 { pageSnapshotCache.removeAll(keepingCapacity: true) }
+            pageSnapshotCache[key] = image
+        }
+        return image
     }
 
     public func debugSimulatePageDrag(commit: Bool) {
