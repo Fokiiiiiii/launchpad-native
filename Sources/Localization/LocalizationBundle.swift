@@ -12,8 +12,8 @@ import Foundation
 /// (`Contents/Resources/`, the correct location for a real `.app`) first,
 /// and only falls back to `Bundle.module` for `swift run`/`swift test`
 /// contexts where there is no `.app` bundle at all.
-enum LocalizationBundle {
-    static let bundle: Bundle = {
+public enum LocalizationBundle {
+    public static let bundle: Bundle = {
         if let url = Bundle.main.resourceURL?.appendingPathComponent("LaunchpadNative_Localization.bundle"),
            let bundle = Bundle(url: url) {
             return bundle

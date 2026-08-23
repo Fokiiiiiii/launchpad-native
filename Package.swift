@@ -133,6 +133,11 @@ let package = Package(
             path: "Tests/LauncherTests"
         ),
         .testTarget(
+            name: "LocalizationTests",
+            dependencies: ["Localization"],
+            path: "Tests/LocalizationTests"
+        ),
+        .testTarget(
             name: "AppHostTests",
             dependencies: ["AppHost", "Persistence"],
             path: "Tests/AppHostTests"

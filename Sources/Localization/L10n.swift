@@ -214,8 +214,11 @@ public enum L10n {
     // MARK: What's New
 
     public static var whatsNewTitle: String { string("whatsnew.title", "What's New") }
+    /// Deliberately not routed through the catalog: a version number reads the
+    /// same in every language, and looking it up would mean a stray
+    /// `whatsnew.badge` entry could replace the actual version with fixed text.
     public static func whatsNewVersionBadge(_ version: String) -> String {
-        string("whatsnew.badge", version)
+        version
     }
     public static var whatsNewContinueButton: String { string("whatsnew.continue", "Continue") }
     public static var whatsNewFeatureFolderReorderTitle: String { string("whatsnew.feature.folderreorder.title", "Reorder Apps Inside Folders") }
