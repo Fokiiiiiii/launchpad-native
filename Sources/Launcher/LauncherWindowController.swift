@@ -63,14 +63,19 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     }
 
     private func setLauncherPresentation(active: Bool) {
-        let menuBarStatus = menuBarVisibility.setHidden(active)
-        let menuBarHiddenPrivately = menuBarStatus == 0
         NSApp.presentationOptions = active
             ? Self.launcherPresentationOptions(
                 hideDock: gridModel.hideDockWhileLauncherOpen,
-                menuBarHiddenPrivately: menuBarHiddenPrivately
+                menuBarHiddenPrivately: menuBarVisibility.isAvailable
             )
             : []
+        let menuBarStatus = menuBarVisibility.setHidden(active)
+        if active, let menuBarStatus, menuBarStatus != 0 {
+            NSApp.presentationOptions = Self.launcherPresentationOptions(
+                hideDock: gridModel.hideDockWhileLauncherOpen,
+                menuBarHiddenPrivately: false
+            )
+        }
         if menuBarStatus == nil {
             DiagnosticsLog.launcher.error(
                 "system menu-bar visibility API unavailable; using presentation-options fallback"

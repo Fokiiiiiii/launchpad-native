@@ -121,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
+        ProcessInfo.processInfo.disableAutomaticTermination("LaunchpadNative handles global triggers while hidden")
         DiagnosticsLog.appHost.info("LaunchpadNative resident host started")
         installCrashReporting()
 
