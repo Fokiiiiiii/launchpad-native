@@ -347,12 +347,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // closed pays the eviction.
         iconEvictionTask?.cancel()
         iconEvictionTask = nil
-        // The resident helper becomes regular only while the overlay is
-        // visible; it returns to accessory after the overlay is ordered out.
-        guard NSApp.setActivationPolicy(.regular) else {
-            DiagnosticsLog.launcher.error("show(): could not switch activation policy to regular")
-            return
-        }
         // Apply the valid menu-bar/Dock pair before ordering the overlay front.
         setLauncherPresentation(active: true)
         window.setFrame(screen.frame, display: true)
@@ -410,7 +404,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     public func hide() {
         guard let window, window.isVisible else {
             setLauncherPresentation(active: false)
-            _ = NSApp.setActivationPolicy(.accessory)
             return
         }
         onDidHide?()
@@ -459,7 +452,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         guard animationGeneration == generation else { return }
         window.orderOut(nil)
         setLauncherPresentation(active: false)
-        _ = NSApp.setActivationPolicy(.accessory)
         window.alphaValue = 1
         if let layer = rootContentView?.layer {
             CATransaction.begin()

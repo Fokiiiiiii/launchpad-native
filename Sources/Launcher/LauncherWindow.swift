@@ -33,17 +33,9 @@ final class LauncherWindow: NSWindow {
         // existing fullscreen app instead of becoming a new fullscreen app.
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
         isMovable = false
-        // Deliberately `false`, despite the goal of never leaving the overlay
-        // above the app the user just opened. `show()` flips the process
-        // between `.accessory` and `.regular` on every open; AppKit re-evaluates
-        // activation across that switch, and `hidesOnDeactivate` reacts to a
-        // momentary resign by ordering the window out with no way to opt out —
-        // producing exactly the "opens, then vanishes immediately" symptom this
-        // file's own `show()` comment already records from a prior ordering bug.
-        // It also orders out behind the controller's back, stranding the
-        // activation policy at `.regular`. `LauncherWindowController`'s
-        // `appActivationObserver` covers the real case (another app activating)
-        // with an `isThisApp` guard that AppKit's blanket behavior lacks.
+        // The controller owns deactivation through its workspace observer.
+        // Letting AppKit order the window out independently would bypass the
+        // matching menu-bar and cache cleanup.
         hidesOnDeactivate = false
         // Preserve mouse-move delivery for AppKit's normal window handling;
         // the controller intentionally does not install a global mouse-move
