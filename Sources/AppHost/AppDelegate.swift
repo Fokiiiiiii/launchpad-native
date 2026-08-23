@@ -122,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         DiagnosticsLog.appHost.info("LaunchpadNative resident host started")
+        installCrashReporting()
 
         launcherWindowController.setOnOpenSettings { [weak self] in
             guard let self, launcherWindowController.isVisible else { return }
@@ -522,6 +523,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         launcherWindowController.prepareForTermination()
         triggerCoordinator.stopAll()
+        // Last thing: anything that skips this leaves the session flag set, and
+        // the next launch reports the run as having ended unexpectedly.
+        CrashSentinel.endSession()
+    }
+
+    /// Two cheap signals that something went wrong, neither of which needs a
+    /// third-party service or a signal handler.
+    ///
+    /// macOS writes its own crash reports, but nothing in them reaches the app:
+    /// a build that crashes for some users looks the same from the inside as
+    /// one that does not. This records that a run failed to shut down, and logs
+    /// uncaught Objective-C exceptions — the AppKit-originated failures that
+    /// would otherwise vanish with the process.
+    private func installCrashReporting() {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        CrashSentinel.beginSession(version: version)
+        NSSetUncaughtExceptionHandler { exception in
+            // Deliberately minimal: this runs while the process is already on
+            // its way down, so it logs and does nothing else.
+            DiagnosticsLog.appHost.fault(
+                "Uncaught exception \(exception.name.rawValue, privacy: .public): \(exception.reason ?? "no reason", privacy: .public)"
+            )
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
