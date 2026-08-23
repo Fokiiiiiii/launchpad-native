@@ -56,6 +56,12 @@ final class LauncherBackgroundView: NSView {
     /// decide when the wallpaper pixels themselves need to change.
     private var lastWallpaperMode: LauncherBackgroundMode?
     private var lastWallpaperBlur: Bool?
+    /// `init` requests the wallpaper for the screen it is handed, and
+    /// `LauncherWindowController.show()` then calls `update(screen:)` on the
+    /// view it just built. Resolving the source is not free — it enumerates
+    /// every window on the system, on the main thread — so the first update
+    /// after construction skips the reload when the screen has not changed.
+    private var isFirstScreenUpdateAfterInit = true
 
     init(screen: NSScreen, viewportOrigin: CGPoint = .zero, configuration: Configuration = .init()) {
         self.fullScreenSize = screen.frame.size
@@ -286,7 +292,9 @@ final class LauncherBackgroundView: NSView {
         configurationTask?.cancel()
         configurationTask = nil
         configurationGeneration &+= 1
-        applyConfiguration(clearWallpaper: displayChanged)
+        let isRedundantFirstUpdate = isFirstScreenUpdateAfterInit && !displayChanged
+        isFirstScreenUpdateAfterInit = false
+        applyConfiguration(clearWallpaper: displayChanged, reloadWallpaper: !isRedundantFirstUpdate)
         updateLayerFrames()
     }
 

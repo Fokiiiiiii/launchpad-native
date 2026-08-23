@@ -160,8 +160,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private func refreshVisibleIconSizes() {
         let cellSize = layout.currentCellSize
         guard cellSize.width > 0, cellSize.height > 0 else { return }
-        let iconSize = currentIconSize
-        let visualScale = currentEffectiveIconScale
+        let metrics = currentIconLayoutMetrics
+        let iconSize = metrics.baseSize
+        let visualScale = metrics.visualScale
         var changed = false
         for case let cell as GridCellItem in collectionView.visibleItems() {
             if cell.refreshIconSize(iconSize, visualScale: visualScale) {
@@ -254,6 +255,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         func append(_ record: ApplicationRecord, to cohort: inout [ApplicationRecord]) {
             guard records.count < Self.maxPrefetchIcons,
                   seenIconKeys.insert(record.iconCacheKey).inserted else { return }
+            // An icon already in memory needs no prefetch. `reload()` runs on
+            // every model mutation — an icon moved, a folder renamed, a
+            // catalog reconcile — so without this the warm case rebuilt a
+            // task group of ~100 awaits that each resolved to a cache hit.
+            guard iconCache.cachedIconIfAvailable(for: record) == nil else { return }
             records.append(record)
             cohort.append(record)
         }
@@ -321,6 +327,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 guard !Task.isCancelled else { return }
                 await withTaskGroup(of: Void.self) { group in
                     for record in cohort {
+                        // An earlier cohort — or a cell that scrolled into
+                        // view while this one waited — may have warmed it
+                        // since the list was built.
+                        guard cache.cachedIconIfAvailable(for: record) == nil else { continue }
                         group.addTask {
                             _ = await cache.icon(for: record)
                         }
@@ -694,11 +704,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private func renderPageSnapshot(forPage page: Int, size: NSSize) -> NSImage? {
         guard model.pages.indices.contains(page) else { return nil }
+        let metrics = currentIconLayoutMetrics
         let key = PageSnapshotKey(
             page: page,
             width: Int(size.width.rounded()),
             height: Int(size.height.rounded()),
-            iconSize: Int((currentIconSize * currentEffectiveIconScale).rounded())
+            iconSize: Int((metrics.baseSize * metrics.visualScale).rounded())
         )
         if let cached = pageSnapshotCache[key] { return cached }
 
@@ -707,8 +718,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             model: model,
             iconCache: iconCache,
             itemIdentifier: itemIdentifier,
-            iconSize: currentIconSize,
-            visualScale: currentEffectiveIconScale,
+            iconSize: metrics.baseSize,
+            visualScale: metrics.visualScale,
             size: size
         )
         if let image {
@@ -896,6 +907,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     private func openFolder(_ folderID: FolderID) {
+        let metrics = currentIconLayoutMetrics
         // Whatever a previous open left behind, start from visible.
         collectionView.alphaValue = 1
         pageControl.alphaValue = 1
@@ -904,7 +916,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             folderID,
             in: host,
             metrics: FolderOverlayPresenter.Metrics(
-                iconSize: currentIconSize * currentEffectiveIconScale,
+                iconSize: metrics.baseSize * metrics.visualScale,
                 configuredColumns: model.gridSettings.columns
             ),
             onLaunch: { [weak self] record in self?.onLaunch(record) },
@@ -1081,22 +1093,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         prefetchAdjacentPageIcons()
     }
 
-    /// The safe base size for an icon in the current grid slot. The effective
-    /// multiplier is applied by `GridCellItem` to the real icon constraint, so
-    /// its centered icon+label group and hit region use the same geometry.
-    public var currentIconSize: Double {
-        currentIconLayoutMetrics.baseSize
-    }
-
-    /// The effective visual multiplier after the current inter-cell gap has
-    /// supplied its safe expansion budget. The budget is intentionally
-    /// derived here, beside `currentIconSize`, so every cell and snapshot uses
-    /// the same value without changing `PagedGridLayout` or Settings APIs.
-    public var currentEffectiveIconScale: Double {
-        currentIconLayoutMetrics.visualScale
-    }
-
-    private var currentIconLayoutMetrics: (baseSize: Double, visualScale: Double) {
+    /// The icon geometry for the current grid slot: `baseSize` is the safe
+    /// size for the slot, `visualScale` the multiplier the inter-cell gap can
+    /// still afford. `GridCellItem` applies the multiplier to the real icon
+    /// constraint, so its centered icon+label group and hit region share this
+    /// geometry, as do the page snapshots.
+    ///
+    /// Returned together, not as two properties: every caller needs both, and
+    /// two properties meant deriving the same metrics twice per cell.
+    public var currentIconLayoutMetrics: (baseSize: Double, visualScale: Double) {
         let cellSize = layout.currentCellSize
         guard cellSize.width > 0, cellSize.height > 0 else { return (96, 1) }
 
@@ -1140,8 +1145,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             return NSCollectionViewItem()
         }
         let isSelected = keyboardSelectionActive && collectionView.selectionIndexPaths.contains(indexPath)
-        let iconSize = currentIconSize
-        let visualScale = currentEffectiveIconScale
+        let metrics = currentIconLayoutMetrics
+        let iconSize = metrics.baseSize
+        let visualScale = metrics.visualScale
         switch model.pages[currentPage][indexPath.item] {
         case .app(let id):
             guard let record = model.record(for: id) else { return cell }
@@ -1178,7 +1184,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             // arrive moments later via the async fetch below.
             let warmIcons = previews.compactMap { iconCache.cachedIconIfAvailable(for: $0) }
             cell.configureAsFolder(name: name, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, icons: warmIcons, requestKey: key)
-            if !previews.isEmpty {
+            // Every warm icon is already on the tile. Re-fetching them would
+            // rebuild the same thumbnail from the same images — and this runs
+            // for every folder cell on every `reloadData()`.
+            if warmIcons.count < previews.count {
                 let cache = iconCache
                 Task { @MainActor in
                     var icons: [NSImage] = []

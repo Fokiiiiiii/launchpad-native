@@ -285,10 +285,19 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
         view = root
         viewModel.onChange = { [weak self] in
-            self?.syncSearchPage()
-            self?.searchResultsCollectionView.reloadData()
-            self?.updateSearchResultsPresentation()
-            self?.applySearchResultsLayoutMetrics()
+            guard let self else { return }
+            self.syncSearchPage()
+            // Hiding the scroll view does not stop AppKit from realizing the
+            // collection view's items, and each realized cell kicks off an
+            // icon load. Every catalog reconcile therefore paid for a screen
+            // worth of icon reads for results nobody was looking at. Entering
+            // search mode reloads (see `setSearchMode`), so the visible case
+            // still sees fresh data.
+            if !self.searchResultsScrollView.isHidden {
+                self.searchResultsCollectionView.reloadData()
+            }
+            self.updateSearchResultsPresentation()
+            self.applySearchResultsLayoutMetrics()
         }
     }
 
@@ -428,6 +437,13 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     }
 
     private func searchRecordsOnCurrentPage() -> [ApplicationRecord] {
+        // With no query the view model keeps every record — that list is what
+        // the *grid* is built from, not a search result. Returning it here
+        // gave the hidden results collection view a non-empty data source, and
+        // AppKit realizes items regardless of `isHidden`, so a screen worth of
+        // cells (and their icon loads) was built for a view nobody had opened.
+        // Search mode is only ever entered with a non-empty query.
+        guard !viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         let start = min(searchCurrentPage * searchPageSize, viewModel.filteredRecords.count)
         let end = min(start + searchPageSize, viewModel.filteredRecords.count)
         return Array(viewModel.filteredRecords[start..<end])
@@ -581,8 +597,15 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     }
 
     private func setSearchMode(active: Bool) {
+        let wasHidden = searchResultsScrollView.isHidden
         searchResultsScrollView.isHidden = !active
         gridViewController.view.isHidden = active
+        if active, wasHidden {
+            // Catches up on whatever `viewModel.onChange` skipped while the
+            // results were hidden.
+            searchResultsCollectionView.reloadData()
+            applySearchResultsLayoutMetrics()
+        }
         updateSearchResultsPresentation()
     }
 
@@ -715,8 +738,9 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         let record = pageRecords[indexPath.item]
         let globalIndex = searchCurrentPage * searchPageSize + indexPath.item
         let isSelected = viewModel.selectedIndex == globalIndex
-        let iconSize = gridViewController.currentIconSize
-        let visualScale = gridViewController.currentEffectiveIconScale
+        let metrics = gridViewController.currentIconLayoutMetrics
+        let iconSize = metrics.baseSize
+        let visualScale = metrics.visualScale
         let cache = iconCache
         let expectedKey = record.iconCacheKey
         // Settle synchronously on a cache hit. Results reload on *every*
