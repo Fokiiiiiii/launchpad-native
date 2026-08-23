@@ -484,13 +484,16 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             } catch {
                 return
             }
-            guard let self, !self.isVisible else { return }
+            guard let self, !Task.isCancelled else { return }
             self.iconCache.evictMemoryCache()
-            // Same reasoning, same timer: the blurred wallpapers are
-            // full-screen-derived images kept in `static` storage with no
-            // release path of their own.
             WallpaperImageCache.evictAll()
-            DiagnosticsLog.launcher.info("icon and wallpaper memory caches evicted after idle")
+            self.window?.contentViewController = nil
+            self.window?.delegate = nil
+            self.window = nil
+            self.viewController = nil
+            self.rootContentView = nil
+            self.backgroundView = nil
+            DiagnosticsLog.launcher.info("hidden launcher UI and image caches released after idle")
             self.iconEvictionTask = nil
         }
     }
