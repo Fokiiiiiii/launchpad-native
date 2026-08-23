@@ -2230,6 +2230,56 @@ page changes rebuild their contents in an animation completion handler, so a
 flat wait fails the moment the machine is busy. One did, the moment these
 window-rendering tests started running alongside it.
 
+## Coverage and operational readiness (2026-08-23)
+
+Following the UI-rendering tests above, the remaining untested areas were
+closed and the pieces a shipped app needs for its own upkeep were added.
+
+**Settings** had 30-odd controls and five tests, none of which checked that a
+setting survives a relaunch. That wiring is mechanical — `didSet` pushes into
+`GridModel`, then persists — and getting it subtly wrong is invisible until
+someone changes a setting and reopens the app. Each control now goes through the
+whole path in a test: change it, reload the document from disk, check it came
+back. Writing those tests surfaced a real crash: `AppIconStyleApplier`
+force-unwrapped `NSApp`, which is nil until the application object exists.
+
+**AppHost** had no tests at all. Three pure decisions were extracted from
+`AppDelegate` into `TriggerSettingsPolicy` — normalization, finger-count
+switching, and what to persist when a rollback fails. The last is the one that
+matters: erasing the restore point after a failed rollback leaves nothing to
+retry from, and mistakes whatever is currently on the system for the user's
+original preference. It stays invisible until the day it matters.
+
+**Localization** went from two languages to seven (adding Simplified Chinese,
+Korean, German, French, Spanish). The catalogs are now checked against each
+other rather than trusted: identical key sets, matching format specifiers, no
+empty values, and — reading the keys straight out of `L10n.swift` — every key
+the code resolves actually exists. That last check found `whatsnew.badge`,
+referenced in code but present in no catalog. A second check compares the
+shipped `.lproj` directories against `CFBundleLocalizations`, which is what
+macOS reads to decide the app's language: the five new catalogs were shipping
+but not declared, so every affected user would have seen English while the
+translations sat unused inside the bundle.
+
+*The translations have not been reviewed by native speakers.* Terminology
+follows Apple's own localized macOS wording; how natural they read in practice
+is unverified.
+
+**Knowing something went wrong.** macOS writes crash reports, but nothing in
+them reaches the app: a build that crashes for some users looks identical from
+the inside to one that does not. `CrashSentinel` is a flag set while running and
+cleared on a clean exit — still set at the next launch means the previous run
+never finished, logged with the version it was running. Deliberately not a
+signal handler; those run where almost nothing is safe to call, and a wrong one
+turns a crash into a hang. Uncaught Objective-C exceptions are logged
+separately. `DiagnosticsReport` (Settings → Advanced) saves version, OS, model
+and this session's log as text to attach to a report.
+
+**Not done: auto-update.** It needs a signed build to verify what it downloads,
+and there is no signing here by choice. Shipping an updater that cannot verify
+its payload would add a path to running arbitrary code, which is worse than
+having no updater.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
