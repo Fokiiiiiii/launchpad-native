@@ -2186,6 +2186,50 @@ that previously could only be checked by hand on a trackpad. The
 horizontal-priority test was confirmed to fail when the axis choice is reverted
 to the version that once regressed it.
 
+## Testing the UI, not just the math (2026-08-23)
+
+Most of this project's user-visible bugs have been found by running the app and
+looking at it. The tests covered layout arithmetic thoroughly and the views
+themselves not at all, which meant a change could pass everything and still ship
+a blank screen — and did: mid-refactor, the line holding the opened folder's
+panel controller was deleted, every async icon load resolved against a
+deallocated `self`, and the folder rendered as empty placeholders. 273 tests
+passed. A screenshot caught it.
+
+The gap is now covered by tests that host real views in a real (offscreen)
+window and inspect what came out:
+
+- `RenderProbe` renders a live view with `cacheDisplay` and reports, per region,
+  how much drew (opaque coverage) and how varied it is (colour spread).
+  Coverage alone cannot separate a row of real icons from a row of blank
+  placeholders — both fill their boxes — so variation is what actually
+  distinguishes "drew a picture" from "drew a wash".
+- `FolderOverlayPresentationTests` opens a folder through the real presenter and
+  asserts the panel stays alive, every tile receives an icon, the panel lands
+  inside its host, and closing removes it and reports back.
+- `GridRenderingTests` does the same for the main grid, including the case that
+  produced the "icons are briefly large on first launch" bug: cells built before
+  the layout settles must follow the icon size when it changes under them.
+
+Each of these was confirmed to fail when the defect it describes is reintroduced
+— deleting the panel-retaining line fails two of them; replacing icon drawing
+with a placeholder drops colour variation from 0.42 to 0.078; removing the
+icon-size refresh leaves cells 56.75pt out.
+
+Two things worth knowing before writing more of these. A programmatically
+created `NSWindow` frees itself on `close()`, so several tests each closing
+their own window segfaults the run — passing individually, failing together;
+set `isReleasedWhenClosed = false` and `orderOut` instead. And
+`NSGlassEffectView` is a live compositing effect that does not appear in a
+`cacheDisplay` bitmap at all, so a glass-backed panel reads as mostly
+transparent no matter how it looks on screen — assert on the content, not the
+surface.
+
+Waiting is polled, never slept on a fixed delay: icons arrive asynchronously and
+page changes rebuild their contents in an animation completion handler, so a
+flat wait fails the moment the machine is busy. One did, the moment these
+window-rendering tests started running alongside it.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
