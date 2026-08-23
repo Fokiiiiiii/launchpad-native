@@ -38,8 +38,12 @@ private func specifiers(in value: String) -> [String] {
             let character = value[cursor]
             token.append(character)
             cursor = value.index(after: cursor)
-            // A specifier ends at its conversion character.
-            if character.isLetter || character == "%" { break }
+            // A specifier ends at its conversion character. `@` is one of them
+            // (Foundation's object specifier) and is not a letter, so leaving it
+            // out swallowed whatever followed — which made a translation using
+            // full-width parentheses after `%@` look like a mismatched
+            // specifier when it was perfectly correct.
+            if character.isLetter || character == "@" || character == "%" { break }
         }
         if token != "%%" { found.append(token) }
         iterator = cursor
@@ -128,4 +132,33 @@ private func specifiers(in value: String) -> [String] {
     // for is dead weight translators are still paying to translate.
     let unused = english.keys.subtracting(requested).sorted()
     #expect(unused.isEmpty, "these keys are shipped but never resolved: \(unused)")
+}
+
+/// The catalogs shipping and the system *knowing* they ship are separate
+/// things: `CFBundleLocalizations` in `Info.plist` is what macOS reads to
+/// decide which language to run the app in. Adding five catalogs without
+/// updating it left the app English-only for every user whose Mac was set to
+/// one of them, with the translations sitting unused inside the bundle.
+@Test func infoPlistDeclaresEveryLanguageThatShips() throws {
+    let sourceRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+
+    let resources = sourceRoot.appendingPathComponent("Sources/Localization/Resources")
+    let shipped = Set(
+        try FileManager.default.contentsOfDirectory(atPath: resources.path)
+            .filter { $0.hasSuffix(".lproj") }
+            .map { String($0.dropLast(".lproj".count)).lowercased() }
+    )
+
+    let plist = sourceRoot.appendingPathComponent("Resources/Info.plist")
+    let data = try Data(contentsOf: plist)
+    let info = try #require(
+        try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+    )
+    let declared = Set((info["CFBundleLocalizations"] as? [String] ?? []).map { $0.lowercased() })
+
+    #expect(shipped.subtracting(declared).isEmpty, "shipped but not declared: \(shipped.subtracting(declared).sorted())")
+    #expect(declared.subtracting(shipped).isEmpty, "declared but not shipped: \(declared.subtracting(shipped).sorted())")
 }

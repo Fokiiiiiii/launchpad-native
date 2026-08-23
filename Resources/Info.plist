@@ -24,6 +24,11 @@
     <array>
         <string>en</string>
         <string>ja</string>
+        <string>zh-Hans</string>
+        <string>ko</string>
+        <string>de</string>
+        <string>fr</string>
+        <string>es</string>
     </array>
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
