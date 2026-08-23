@@ -140,5 +140,4 @@
 "whatsnew.feature.folderfullscreen.body" = "開いたフォルダが画面サイズに合わせて拡大し、中身が多いフォルダも見やすくなりました。";
 "settings.diagnostics.header" = "診断";
 "settings.diagnostics.savereport" = "ログを書き出す…";
-"settings.diagnostics.hint" = "最大30日分のログを1日1ファイルのzipとして保存します。書き出すまでディスクには何も保存されません。";
 "settings.diagnostics.savefailed" = "ログを書き出せませんでした。";

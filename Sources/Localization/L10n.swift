@@ -217,7 +217,6 @@ public enum L10n {
 
     public static var diagnosticsHeader: String { string("settings.diagnostics.header", "Diagnostics") }
     public static var diagnosticsSaveReport: String { string("settings.diagnostics.savereport", "Export Logs…") }
-    public static var diagnosticsHint: String { string("settings.diagnostics.hint", "Saves up to 30 days of logs as a zip, one file per day. Nothing is stored on disk until you export.") }
     public static var diagnosticsSaveFailed: String { string("settings.diagnostics.savefailed", "The diagnostics report could not be saved.") }
 
     public static var whatsNewTitle: String { string("whatsnew.title", "What's New") }

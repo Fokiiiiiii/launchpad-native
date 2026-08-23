@@ -131,3 +131,28 @@ private func entry(_ day: String, _ hour: Int, _ text: String) -> (date: Date, l
         "the app should not be accumulating its own log directory"
     )
 }
+
+/// The failure this floor exists for, reproduced: a day with more errors than
+/// the cap kept every error and *zero* routine entries, so the exported file
+/// showed what failed with no trace of what the app was doing at the time.
+/// An archive like that cannot be used to fix anything.
+@Test func anErrorHeavyDayStillKeepsItsContext() {
+    var entries = (0..<800).map { entry("2026-08-20", 9, "[error] failure \($0)") }
+    entries += (0..<800).map { entry("2026-08-20", 10, "[notice] what the app was doing \($0)") }
+
+    let kept = DiagnosticsArchive.groupByDay(entries, calendar: calendar, entriesPerDay: 600)[0].lines
+    let errors = kept.filter { $0.contains("[error]") }
+    let routine = kept.filter { $0.contains("[notice]") }
+
+    #expect(errors.count == 800, "errors must never be dropped")
+    #expect(routine.count > 0, "an archive of errors with no context is unusable")
+    #expect(routine.count >= 300, "kept only \(routine.count) routine entries")
+}
+
+/// A normal day is not trimmed at all — the cap is a backstop, not a budget.
+@Test func aNormalDayIsNotTrimmed() {
+    let entries = (0..<3_000).map { entry("2026-08-20", 9, "[notice] line \($0)") }
+    let grouped = DiagnosticsArchive.groupByDay(entries, calendar: calendar)
+    #expect(grouped[0].truncated == 0)
+    #expect(grouped[0].lines.count == 3_000)
+}

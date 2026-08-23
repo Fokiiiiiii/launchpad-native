@@ -140,5 +140,4 @@
 "whatsnew.feature.folderfullscreen.body" = "Les dossiers ouverts s'adaptent à l'écran, laissant plus de place aux dossiers bien remplis.";
 "settings.diagnostics.header" = "Diagnostic";
 "settings.diagnostics.savereport" = "Exporter les journaux…";
-"settings.diagnostics.hint" = "Enregistre jusqu'à 30 jours de journaux dans un zip, un fichier par jour. Rien n'est stocké sur le disque avant l'export.";
 "settings.diagnostics.savefailed" = "Les journaux n'ont pas pu être exportés.";

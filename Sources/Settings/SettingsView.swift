@@ -743,11 +743,7 @@ public struct SettingsView: View {
                     SettingsCard {
                         SettingsCardRow(minHeight: 34) {
                             HStack {
-                                Text(L10n.diagnosticsHint)
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Spacer(minLength: 8)
+                                Spacer()
                                 Button {
                                     saveDiagnosticsReport()
                                 } label: {

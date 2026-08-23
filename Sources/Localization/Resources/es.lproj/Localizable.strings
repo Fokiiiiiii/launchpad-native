@@ -140,5 +140,4 @@
 "whatsnew.feature.folderfullscreen.body" = "Las carpetas abiertas se ajustan a la pantalla, de modo que las carpetas grandes tienen más espacio.";
 "settings.diagnostics.header" = "Diagnóstico";
 "settings.diagnostics.savereport" = "Exportar registros…";
-"settings.diagnostics.hint" = "Guarda hasta 30 días de registros en un zip, un archivo por día. No se almacena nada en el disco hasta que exportas.";
 "settings.diagnostics.savefailed" = "No se pudieron exportar los registros.";

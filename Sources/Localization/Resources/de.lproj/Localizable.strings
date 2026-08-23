@@ -140,5 +140,4 @@
 "whatsnew.feature.folderfullscreen.body" = "Geöffnete Ordner skalieren mit dem Bildschirm, sodass große Ordner mehr Platz haben.";
 "settings.diagnostics.header" = "Diagnose";
 "settings.diagnostics.savereport" = "Protokolle exportieren…";
-"settings.diagnostics.hint" = "Sichert bis zu 30 Tage Protokolle als ZIP, eine Datei pro Tag. Vor dem Export wird nichts auf der Festplatte abgelegt.";
 "settings.diagnostics.savefailed" = "Die Protokolle konnten nicht exportiert werden.";

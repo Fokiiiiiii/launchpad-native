@@ -23,14 +23,21 @@ public enum DiagnosticsArchive {
 
     /// Days of history to request.
     public static let defaultDayCount = 30
-    /// Per-day cap. Keeps a pathological day (a crash loop writing thousands of
-    /// lines) from turning a report meant to be a few kilobytes into megabytes.
-    /// Truncation is recorded in the file itself rather than hidden.
+    /// Per-day cap. High enough that a normal day is never trimmed at all —
+    /// this is a backstop against a pathological day (a crash loop writing
+    /// tens of thousands of lines), not a size target.
     ///
-    /// Errors and faults are exempt: they are the reason anyone opens the
-    /// archive, and dropping them to stay under a size target would defeat the
-    /// point of the export. The cap applies to the routine entries around them.
-    public static let defaultEntriesPerDay = 600
+    /// It started at 600 to keep exports to a few kilobytes, and that produced
+    /// an archive that could not be used: a day with 736 errors in it kept all
+    /// of them and *none* of the surrounding notices, so the file showed what
+    /// failed with no trace of what the app was doing at the time. Errors
+    /// without their context are not a log. Compression makes the difference
+    /// cheap — the same day is tens of kilobytes zipped either way.
+    public static let defaultEntriesPerDay = 20_000
+    /// Share of the cap held for routine entries even when errors alone would
+    /// fill it. Errors are still never dropped; this stops them from crowding
+    /// out the context that makes them readable.
+    static let routineFloorFraction = 0.5
 
     /// Groups entries by calendar day in the local time zone — the day a user
     /// would name when saying "it broke on Tuesday".
@@ -61,7 +68,10 @@ public enum DiagnosticsArchive {
                     routine.append(index)
                 }
             }
-            let budget = max(entriesPerDay - keep.count, 0)
+            // Errors are all kept, but never at the price of every routine
+            // entry: the floor guarantees context survives an error-heavy day.
+            let routineFloor = Int(Double(entriesPerDay) * routineFloorFraction)
+            let budget = max(entriesPerDay - keep.count, routineFloor)
             keep.formUnion(routine.suffix(budget))
             let kept = lines.enumerated().filter { keep.contains($0.offset) }.map(\.element)
             return (day, kept, lines.count - kept.count)
