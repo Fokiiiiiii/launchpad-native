@@ -33,6 +33,11 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
         label.textColor = .labelColor
         label.lineBreakMode = .byTruncatingTail
         label.maximumNumberOfLines = 1
+        label.wantsLayer = true
+        label.layer?.shadowColor = NSColor.black.cgColor
+        label.layer?.shadowOpacity = 0.55
+        label.layer?.shadowRadius = 2
+        label.layer?.shadowOffset = CGSize(width: 0, height: -1)
 
         // highlightView goes in first so it renders *behind* the icon/label
         // — see `applySelection`'s doc comment for why it hugs the icon
@@ -134,12 +139,13 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     /// smaller icon — a large, mostly-empty highlighted rectangle. Fixed
     /// the same way as `GridCellItem`: see its `applySelection` doc comment.
     private func applySelection(_ isSelected: Bool) {
-        highlightView.layer?.cornerRadius = 12
+        highlightView.layer?.cornerRadius = 16
+        highlightView.layer?.cornerCurve = .continuous
         highlightView.layer?.backgroundColor = isSelected
-            ? NSColor.white.withAlphaComponent(0.14).cgColor
+            ? NSColor.white.withAlphaComponent(0.10).cgColor
             : NSColor.clear.cgColor
         highlightView.layer?.borderWidth = isSelected ? 1 : 0
-        highlightView.layer?.borderColor = NSColor.white.withAlphaComponent(0.28).cgColor
+        highlightView.layer?.borderColor = NSColor.white.withAlphaComponent(0.20).cgColor
     }
 
     private var renderedIconFrame: NSRect {
