@@ -302,17 +302,29 @@ public final class MultitouchGestureTrigger {
     /// when a gesture actually fires.
     nonisolated private func handleFrame(deviceID: Int32, samples: [TouchSample]) {
         lock.lock()
-        let ids = Set(samples.map(\.id))
         guard deviceRouter.accepts(
             deviceID: deviceID,
             sampleCount: samples.count,
-            hasUniqueIDs: ids.count == samples.count
+            hasUniqueIDs: Self.hasUniqueIDs(samples)
         ) else {
             lock.unlock()
             return
         }
         recognizer.ingest(samples)
         lock.unlock()
+    }
+
+    /// A frame carries at most a handful of contacts, so comparing them
+    /// pairwise beats building a `Set` — this runs for every frame the
+    /// trackpad reports, and the set was allocated purely to be counted and
+    /// thrown away.
+    nonisolated private static func hasUniqueIDs(_ samples: [TouchSample]) -> Bool {
+        for i in samples.indices {
+            for j in samples.index(after: i)..<samples.endIndex where samples[i].id == samples[j].id {
+                return false
+            }
+        }
+        return true
     }
 
     private static let frameCallback: MTContactCallbackFunction = { deviceID, rawData, nFingers, _, _ in

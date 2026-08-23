@@ -104,12 +104,20 @@ public final class PinchGestureRecognizer {
             phase = .idle
             return
         }
+        // A mismatched frame must terminate the old gesture. Keeping the
+        // old baseline after a 4↔5 or contact-ID transition can otherwise
+        // fire on the first frame of an unrelated gesture.
+        //
+        // The contact count is checked before the ID set is built: this runs
+        // on the multitouch callback thread for every frame the trackpad
+        // produces, and ordinary one- to three-finger use never reaches the
+        // set at all.
+        guard acceptedContactCounts.contains(touches.count) else {
+            phase = .idle
+            return
+        }
         let ids = Set(touches.map(\.id))
-        guard acceptedContactCounts.contains(touches.count),
-              ids.count == touches.count else {
-            // A mismatched frame must terminate the old gesture. Keeping the
-            // old baseline after a 4↔5 or contact-ID transition can otherwise
-            // fire on the first frame of an unrelated gesture.
+        guard ids.count == touches.count else {
             phase = .idle
             return
         }

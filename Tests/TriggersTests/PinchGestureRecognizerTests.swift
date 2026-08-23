@@ -271,3 +271,39 @@ private func pair(spread: Float) -> [TouchSample] {
     #expect(activeAfterInvalid == nil)
     #expect(reclaim)
 }
+
+/// The multitouch framework can report a frame whose contacts share an
+/// identifier — a device hiccup, or two devices' frames interleaved. Four
+/// contacts that are really two fingers say nothing about how far apart four
+/// fingers are, so such frames must not establish a baseline or fire off one.
+///
+/// The identifier *set* is compared frame to frame elsewhere, which already
+/// rejects a single bad frame in the middle of a clean gesture. What only the
+/// uniqueness check catches is a run of consistently duplicated frames: the
+/// set matches itself every time, so the gesture would otherwise proceed
+/// normally on half as many fingers as it thinks it has.
+@Test func framesWithDuplicateContactIDsNeverFire() {
+    func duplicated(spread: Float) -> [TouchSample] {
+        [
+            TouchSample(id: 1, x: 0, y: 0, size: 1),
+            TouchSample(id: 1, x: 0, y: 0, size: 1),
+            TouchSample(id: 2, x: spread, y: spread, size: 1),
+            TouchSample(id: 2, x: spread, y: spread, size: 1)
+        ]
+    }
+
+    let recognizer = PinchGestureRecognizer(closingRatio: 0.6, openingRatio: 1.4)
+    var pinchCount = 0
+    var spreadCount = 0
+    recognizer.onPinchDetected = { pinchCount += 1 }
+    recognizer.onSpreadDetected = { spreadCount += 1 }
+
+    recognizer.ingest(duplicated(spread: 1.0))
+    recognizer.ingest(duplicated(spread: 1.0))
+    recognizer.ingest(duplicated(spread: 1.0))
+    recognizer.ingest(duplicated(spread: 0.3))
+    #expect(pinchCount == 0, "a run of duplicate-ID frames was treated as a real pinch")
+
+    recognizer.ingest(duplicated(spread: 3.0))
+    #expect(spreadCount == 0, "a run of duplicate-ID frames was treated as a real spread")
+}
