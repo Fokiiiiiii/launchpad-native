@@ -135,14 +135,14 @@ private final class GridHarness {
     defer { harness.teardown() }
     try await harness.waitForIcons(1)
 
-    let sizeBefore = harness.controller.currentIconSize * harness.controller.currentEffectiveIconScale
+    let sizeBefore = harness.controller.currentIconLayoutMetrics.baseSize * harness.controller.currentIconLayoutMetrics.visualScale
 
     // Shrink the grid the way settling the bottom inset does, without rebuilding
     // any cells: exactly the situation the real bug happens in.
     harness.controller.view.frame = NSRect(x: 0, y: 0, width: 1_680, height: 780)
     harness.controller.view.layoutSubtreeIfNeeded()
 
-    let sizeAfter = harness.controller.currentIconSize * harness.controller.currentEffectiveIconScale
+    let sizeAfter = harness.controller.currentIconLayoutMetrics.baseSize * harness.controller.currentIconLayoutMetrics.visualScale
     #expect(sizeAfter < sizeBefore, "the test did not actually change the layout")
 
     for cell in harness.visibleCells() {

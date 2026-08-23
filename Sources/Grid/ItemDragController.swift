@@ -844,7 +844,11 @@ final class ItemDragController {
             collectionView.reloadData()
             return
         }
-        collectionView.reloadData()
+        // `model.moveItem`/`createOrJoinFolder` above already routed through
+        // `GridModel.onChange` -> `GridViewController.reload()`, which called
+        // `reloadData()`. Only the layout pass is still owed before reading a
+        // layout attribute below; reloading again rebuilt every cell on the
+        // page a second time for identical content.
         collectionView.layoutSubtreeIfNeeded()
 
         let targetOriginalIndex = min(session.candidateSlot, model.pages.indices.contains(currentPage) ? max(model.pages[currentPage].count - 1, 0) : 0)
@@ -861,10 +865,15 @@ final class ItemDragController {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             Task { @MainActor in
+                // Only the floating view is left to clean up. The source
+                // cell's `opacity = 0` did not survive the reload above —
+                // `GridCellItem.prepareForReuse` restores it — so neither the
+                // opacity write nor a third full `reloadData()` changed
+                // anything on screen. Both are gone; what remains is removing
+                // the view the drag was carrying.
+                _ = self
                 floatingView.removeFromSuperview()
                 session.floatingViewHost = nil
-                self?.collectionView.item(at: IndexPath(item: targetOriginalIndex, section: 0))?.view.layer?.opacity = 1
-                self?.collectionView.reloadData()
             }
         }
     }

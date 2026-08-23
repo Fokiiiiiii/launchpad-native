@@ -11,7 +11,11 @@ import Persistence
 /// scrolling and the page-jump API below is what Phase 4 requires).
 final class PagedGridLayout: NSCollectionViewLayout {
     var settings: GridSettings = .default {
-        didSet { invalidateLayout() }
+        // `GridViewController.reload()` assigns this on every model change —
+        // an icon moved, a folder renamed, a catalog reconcile — and almost
+        // none of those touch the grid geometry. Invalidating anyway threw
+        // away every cached attribute and recomputed the page for nothing.
+        didSet { if settings != oldValue { invalidateLayout() } }
     }
 
     private(set) var pageSize: NSSize = .zero

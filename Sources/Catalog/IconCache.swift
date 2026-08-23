@@ -26,8 +26,17 @@ public final class IconCache: @unchecked Sendable {
     }()
     private let writeQueue = DispatchQueue(label: "com.launchpadnative.iconcache.write")
     private let memoryLock = NSLock()
-    private var memory: [String: NSImage] = [:]
-    private var memoryOrder: [String] = []
+    /// LRU bookkeeping is a monotonic counter per entry rather than an
+    /// order array. Reads outnumber writes by a wide margin here (a cache hit
+    /// happens for every cell of every `reloadData()`), and moving a key to
+    /// the back of a 192-element array of strings made each *read* linear.
+    private struct MemoryEntry {
+        let image: NSImage
+        var tick: UInt64
+    }
+
+    private var memory: [String: MemoryEntry] = [:]
+    private var memoryTick: UInt64 = 0
     /// Keeps the usual current plus adjacent/target working set resident. At
     /// 128pt requests this is roughly 48 MiB of 2x RGBA pixels before NSImage
     /// overhead; custom page sizes may exceed it, but the LRU bound prevents
@@ -91,7 +100,6 @@ public final class IconCache: @unchecked Sendable {
     public func evictMemoryCache() {
         memoryLock.lock()
         memory.removeAll()
-        memoryOrder.removeAll()
         memoryLock.unlock()
     }
 
@@ -253,20 +261,20 @@ public final class IconCache: @unchecked Sendable {
     private func readMemory(_ key: String) -> NSImage? {
         memoryLock.lock()
         defer { memoryLock.unlock() }
-        guard let image = memory[key] else { return nil }
-        memoryOrder.removeAll { $0 == key }
-        memoryOrder.append(key)
-        return image
+        guard let entry = memory[key] else { return nil }
+        memoryTick &+= 1
+        memory[key]?.tick = memoryTick
+        return entry.image
     }
 
     private func writeMemory(_ key: String, _ image: NSImage) {
         memoryLock.lock()
-        memory[key] = image
-        memoryOrder.removeAll { $0 == key }
-        memoryOrder.append(key)
-        while memoryOrder.count > memoryLimit {
-            let evictedKey = memoryOrder.removeFirst()
-            memory.removeValue(forKey: evictedKey)
+        memoryTick &+= 1
+        memory[key] = MemoryEntry(image: image, tick: memoryTick)
+        // Only the write path scans, and only once the cache is full.
+        while memory.count > memoryLimit {
+            guard let oldest = memory.min(by: { $0.value.tick < $1.value.tick })?.key else { break }
+            memory.removeValue(forKey: oldest)
         }
         memoryLock.unlock()
     }

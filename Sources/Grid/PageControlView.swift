@@ -18,6 +18,7 @@ public final class PageControlView: NSView {
 
     public var currentPage: Int = 0 {
         didSet {
+            guard currentPage != oldValue else { return }
             updateDotStates()
             updateChevronEnabledState()
         }
