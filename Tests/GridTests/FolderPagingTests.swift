@@ -135,13 +135,21 @@ private func makePanel(model: GridModel, folderID: FolderID, columns: Int = 3) -
     let panel = makePanel(model: model, folderID: folderID)
     #expect(panel.visibleTileCountForTesting == 9)
 
+    // Polled rather than slept on a fixed delay: the rebuild happens in the
+    // page animation's completion handler, and a flat wait fails the moment the
+    // machine is busy — this test did exactly that once other tests started
+    // rendering real windows alongside it.
     _ = panel.handleArrowKey(delta: 1)
-    try await Task.sleep(for: .milliseconds(500))
+    for _ in 0..<60 where panel.visibleTileCountForTesting != 5 {
+        try await Task.sleep(for: .milliseconds(25))
+    }
     #expect(panel.currentPageForTesting == 1)
     #expect(panel.visibleTileCountForTesting == 5)
 
     _ = panel.handleArrowKey(delta: -1)
-    try await Task.sleep(for: .milliseconds(500))
+    for _ in 0..<60 where panel.visibleTileCountForTesting != 9 {
+        try await Task.sleep(for: .milliseconds(25))
+    }
     #expect(panel.visibleTileCountForTesting == 9)
 }
 
