@@ -262,18 +262,13 @@ enum WallpaperImageCache {
     private static let maxConcurrentLoads = 2
     private static let maxVideoFrameWaitNanoseconds: UInt64 = 750_000_000
 
-    /// Returns the source selected for a screen without loading or decoding it.
-    static func source(for screen: NSScreen) -> WallpaperSource {
-        resolveSources(for: screen).source
-    }
-
     /// Reads and blurs the wallpaper in a utility task. Only the cheap
     /// display/source metadata and bounded cache mutation run on MainActor.
     static func blurredWallpaperAsync(
         for screen: NSScreen,
         radius: CGFloat = 44
     ) async -> CGImage? {
-        let descriptor = descriptor(for: screen, radius: radius)
+        let descriptor = await descriptor(for: screen, radius: radius)
         if let cached = cache[descriptor.key] {
             markUsed(descriptor.key)
             return cached
@@ -309,7 +304,7 @@ enum WallpaperImageCache {
         return image
     }
 
-    private static func configuredWallpaperURL() -> URL? {
+    nonisolated private static func configuredWallpaperURL() -> URL? {
         let defaults = UserDefaults(suiteName: "com.apple.wallpaper")
         if let value = defaults?.string(forKey: "SystemWallpaperURL") {
             if let url = URL(string: value), url.isFileURL {
@@ -330,14 +325,22 @@ enum WallpaperImageCache {
         let fallbackSource: WallpaperSource?
     }
 
-    private static func resolveSources(for screen: NSScreen) -> ResolvedSources {
-        let desktopURL = NSWorkspace.shared.desktopImageURL(for: screen)
+    /// Takes the AppKit-derived inputs as parameters rather than an
+    /// `NSScreen`, so the expensive part can run off the main thread: the
+    /// resolver enumerates every window on the system through
+    /// `CGWindowListCopyWindowInfo` (measured at 5.5ms) and then stats the
+    /// resolved file. Both are thread-safe; only reading the desktop image URL
+    /// and the display bounds has to happen on the caller's side.
+    nonisolated private static func resolveSources(
+        desktopURL: URL?,
+        targetBounds: CGRect?
+    ) -> ResolvedSources {
         let configuredURL = configuredWallpaperURL()
         let source = WallpaperSourceResolver.resolve(
             desktopURL: desktopURL,
             configuredURL: configuredURL,
             windowCandidates: wallpaperWindowCandidates(),
-            targetBounds: windowServerBounds(for: screen)
+            targetBounds: targetBounds
         )
         let fallbackSource: WallpaperSource?
         if source.kind == .windowCapture {
@@ -354,7 +357,7 @@ enum WallpaperImageCache {
         return ResolvedSources(source: source, fallbackSource: fallbackSource)
     }
 
-    private static func wallpaperWindowCandidates() -> [WallpaperWindowCandidate] {
+    nonisolated private static func wallpaperWindowCandidates() -> [WallpaperWindowCandidate] {
         guard let windowInfo = CGWindowListCopyWindowInfo([], kCGNullWindowID) as? [[String: Any]] else {
             return []
         }
@@ -396,17 +399,27 @@ enum WallpaperImageCache {
         return bounds.width > 1 && bounds.height > 1 ? bounds : nil
     }
 
-    private static func descriptor(for screen: NSScreen, radius: CGFloat) -> Descriptor {
+    private static func descriptor(for screen: NSScreen, radius: CGFloat) async -> Descriptor {
         let displayID = (
             screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
         )?.uint32Value ?? 0
-        let resolved = resolveSources(for: screen)
+        let desktopURL = NSWorkspace.shared.desktopImageURL(for: screen)
+        let targetBounds = windowServerBounds(for: screen)
+        let resolution = await Task.detached(priority: .userInitiated) {
+            let resolved = resolveSources(desktopURL: desktopURL, targetBounds: targetBounds)
+            let attributes = resolved.source.url.flatMap {
+                try? FileManager.default.attributesOfItem(atPath: $0.path)
+            }
+            return (
+                resolved: resolved,
+                modificationDate: attributes?[.modificationDate] as? Date,
+                fileSize: (attributes?[.size] as? NSNumber)?.uint64Value
+            )
+        }.value
+        let resolved = resolution.resolved
         let source = resolved.source
-        let fileAttributes = source.url.flatMap {
-            try? FileManager.default.attributesOfItem(atPath: $0.path)
-        }
-        let modificationDate = fileAttributes?[.modificationDate] as? Date
-        let fileSize = (fileAttributes?[.size] as? NSNumber)?.uint64Value
+        let modificationDate = resolution.modificationDate
+        let fileSize = resolution.fileSize
         let key = CacheKey(
             displayID: displayID,
             sourceKind: source.kind,
