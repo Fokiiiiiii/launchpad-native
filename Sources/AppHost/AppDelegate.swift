@@ -406,29 +406,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         from previous: TriggerSettings,
         to candidate: TriggerSettings
     ) -> Bool {
-        guard previous.multitouchGestureEnabled,
-              candidate.multitouchGestureEnabled,
-              let previousBackup = previous.gestureConflictBackup else {
-            return false
-        }
-        return previousBackup.fingerCount != candidate.multitouchFingerCount
+        TriggerSettingsPolicy.isGestureConflictFingerSwitch(from: previous, to: candidate)
     }
 
     private func normalizedTriggerSettings(_ requested: TriggerSettings) -> TriggerSettings {
-        var settings = requested
-        // Debug-only override so triggers can be forced on for verification
-        // without going through the Settings window.
-        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_ALL_TRIGGERS"] == "1" {
-            settings.f4Enabled = true
-            settings.hotCornersEnabled["bottomRight"] = true
-            settings.multitouchGestureEnabled = true
-        }
-        // The raw MultitouchSupport listener is passive. A multitouch
-        // trigger therefore owns the matching macOS conflict policy as one
-        // transaction; a stale persisted opt-out lets the system consume the
-        // same physical gesture first.
-        settings.gestureConflictPreventionEnabled = settings.multitouchGestureEnabled
-        return settings
+        TriggerSettingsPolicy.normalized(
+            requested,
+            // Debug-only override so triggers can be forced on for verification
+            // without going through the Settings window.
+            forceAllTriggers: ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_ALL_TRIGGERS"] == "1"
+        )
     }
 
     private func openLauncherFromMultitouch() {
@@ -479,15 +466,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DiagnosticsLog.persistence.error("Trigger settings external rollback failed")
         }
         let model = launcherWindowController.model
-        var durableSettings = previous
-        if rollbackFailed {
-            // Never erase the only restore point while CFPreferences is in an
-            // indeterminate/partial state. Keeping it on disk lets the next
-            // apply retry the exact values instead of treating the current
-            // zero as the user's original preference.
-            durableSettings.gestureConflictBackup =
-                candidateBackup ?? model.triggerSettings.gestureConflictBackup ?? previous.gestureConflictBackup
-        }
+        let durableSettings = TriggerSettingsPolicy.durableRollbackSettings(
+            previous: previous,
+            rollbackFailed: rollbackFailed,
+            candidateBackup: candidateBackup,
+            currentBackup: model.triggerSettings.gestureConflictBackup
+        )
         model.updateTriggerSettings(durableSettings)
         guard await model.saveResult() else {
             DiagnosticsLog.persistence.error("Trigger settings model rollback could not be persisted")
