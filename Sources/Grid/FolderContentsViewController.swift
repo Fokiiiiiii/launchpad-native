@@ -401,6 +401,10 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     var pageCountForTesting: Int { folderPages.count }
     var visibleTileCountForTesting: Int { gridModel.tiles.count }
     var currentPageForTesting: Int { currentFolderPage }
+    /// How many visible tiles have actually received an icon. Zero while a
+    /// folder is still loading; zero *forever* is the signature of an icon
+    /// fetch resolving against a controller nothing kept alive.
+    var resolvedIconCountForTesting: Int { gridModel.tiles.filter { $0.icon != nil }.count }
     var titleForTesting: String {
         get { titleField.stringValue }
         set { titleField.stringValue = newValue }

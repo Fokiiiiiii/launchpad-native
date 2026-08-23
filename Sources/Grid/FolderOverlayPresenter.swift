@@ -48,6 +48,11 @@ final class FolderOverlayPresenter {
     private var contentsViewController: FolderContentsViewController?
     private var onDidCloseHandler: (() -> Void)?
 
+    /// Test hook. The panel's lifetime is the thing worth asserting on: it is
+    /// held only by this property, and losing that hold once left every async
+    /// icon load resolving against a dead controller.
+    var presentedPanelForTesting: FolderContentsViewController? { contentsViewController }
+
     init(model: GridModel, iconCache: IconCache) {
         self.model = model
         self.iconCache = iconCache
