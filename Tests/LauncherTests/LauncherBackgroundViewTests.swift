@@ -22,3 +22,9 @@ func glassMaterialIntensityClampsAndChangesAllMaterialParametersMonotonically() 
     #expect(middle.blurRadius == 44)
     #expect(middle.sheenOpacity == 0.35)
 }
+
+@Test @MainActor
+func wallpaperBlurStaysSubtle() {
+    #expect(LauncherBackgroundView.wallpaperBlurRadius(isEnabled: true) == 8)
+    #expect(LauncherBackgroundView.wallpaperBlurRadius(isEnabled: false) == 0)
+}

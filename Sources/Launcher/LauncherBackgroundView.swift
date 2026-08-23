@@ -174,7 +174,7 @@ final class LauncherBackgroundView: NSView {
                 requestWallpaper(radius: material.blurRadius, generation: requestGeneration)
             }
         case .wallpaper:
-            let radius: CGFloat = configuration.blursWallpaper ? 26 : 0
+            let radius = Self.wallpaperBlurRadius(isEnabled: configuration.blursWallpaper)
             wallpaperLayer.opacity = 1.0
             scrimLayer.opacity = 0.14
             sheenLayer.opacity = 0
@@ -195,6 +195,10 @@ final class LauncherBackgroundView: NSView {
             blurRadius: 30 + 40 * CGFloat(intensity),
             sheenOpacity: Float(intensity)
         )
+    }
+
+    static func wallpaperBlurRadius(isEnabled: Bool) -> CGFloat {
+        isEnabled ? 8 : 0
     }
 
     private func requestWallpaper(radius: CGFloat, generation: Int) {
