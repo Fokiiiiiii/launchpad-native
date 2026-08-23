@@ -8,13 +8,13 @@ import Testing
     let store = LayoutStore(directory: dir)
 
     var doc = LayoutDocument.empty
-    doc.lastSelectedPage = 3
+    doc.gridSettings.columns = 3
     doc.aliases[StableAppIdentifier(value: "abc")] = "My Alias"
 
     try await store.save(doc)
     let loaded = await store.load()
 
-    #expect(loaded.lastSelectedPage == 3)
+    #expect(loaded.gridSettings.columns == 3)
     #expect(loaded.aliases[StableAppIdentifier(value: "abc")] == "My Alias")
 }
 
@@ -65,7 +65,7 @@ import Testing
     defer { try? FileManager.default.removeItem(at: dir) }
 
     var doc = LayoutDocument.empty
-    doc.lastSelectedPage = 9
+    doc.gridSettings.columns = 9
     let encoded = try JSONEncoder().encode(doc)
 
     var json = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
@@ -82,7 +82,7 @@ import Testing
     let store = LayoutStore(directory: dir)
     let loaded = await store.load()
 
-    #expect(loaded.lastSelectedPage == 9) // proves the file actually decoded, not a fallback to .empty
+    #expect(loaded.gridSettings.columns == 9) // proves the file actually decoded, not a fallback to .empty
     #expect(loaded.showsMenuBarIcon == true)
     #expect(loaded.showsHiddenAppsInSearch == false)
     #expect(loaded.backgroundMode == .glass)
@@ -97,7 +97,7 @@ import Testing
     let store = LayoutStore(directory: dir)
 
     var doc = LayoutDocument.empty
-    doc.lastSelectedPage = 7
+    doc.gridSettings.columns = 7
     // Save twice so the backup slot (only populated on the *second+* save,
     // once a previous primary exists to promote) actually holds this state.
     try await store.save(doc)
@@ -107,7 +107,7 @@ import Testing
     try Data("not valid json".utf8).write(to: dir.appendingPathComponent("layout.json"))
 
     let loaded = await store.load()
-    #expect(loaded.lastSelectedPage == 7)
+    #expect(loaded.gridSettings.columns == 7)
 }
 
 @Test func loadReturnsEmptyWhenNothingExistsYet() async throws {
@@ -135,7 +135,7 @@ import Testing
     defer { try? FileManager.default.removeItem(at: dir) }
 
     var doc = LayoutDocument.empty
-    doc.lastSelectedPage = 5
+    doc.gridSettings.columns = 5
     let encoded = try JSONEncoder().encode(doc)
 
     var json = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
@@ -160,7 +160,7 @@ import Testing
     let store = LayoutStore(directory: dir)
     let loaded = await store.load()
 
-    #expect(loaded.lastSelectedPage == 5) // proves the file actually decoded, not a fallback to .empty
+    #expect(loaded.gridSettings.columns == 5) // proves the file actually decoded, not a fallback to .empty
     #expect(loaded.hideDockWhileLauncherOpen == false)
     #expect(loaded.showMenuBarApplications == true)
     #expect(loaded.gridSettings.sortMode == .custom)
@@ -178,17 +178,17 @@ import Testing
     let store = LayoutStore(directory: dir)
 
     var first = LayoutDocument.empty
-    first.lastSelectedPage = 1
+    first.gridSettings.columns = 1
     try await store.save(first)
 
     var second = LayoutDocument.empty
-    second.lastSelectedPage = 2
+    second.gridSettings.columns = 2
     try await store.save(second)
 
     // The backup should hold the previous good state after two saves.
     let backupData = try Data(contentsOf: dir.appendingPathComponent("layout.lastknowngood.json"))
     let backupDoc = try JSONDecoder().decode(LayoutDocument.self, from: backupData)
-    #expect(backupDoc.lastSelectedPage == 1)
+    #expect(backupDoc.gridSettings.columns == 1)
 }
 
 @Test func saveReportsDirectoryCreationFailure() async throws {
@@ -217,7 +217,7 @@ import Testing
     let store = LayoutStore(directory: dir)
 
     var first = LayoutDocument.empty
-    first.lastSelectedPage = 1
+    first.gridSettings.columns = 1
     try await store.save(first)
 
     // Removing write permission from the parent makes creation of the
@@ -226,7 +226,7 @@ import Testing
     defer { try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: dir.path) }
 
     var second = LayoutDocument.empty
-    second.lastSelectedPage = 2
+    second.gridSettings.columns = 2
     var didFailWithBackupError = false
     do {
         try await store.save(second)
@@ -237,5 +237,5 @@ import Testing
     }
 
     #expect(didFailWithBackupError)
-    #expect((await store.load()).lastSelectedPage == 1)
+    #expect((await store.load()).gridSettings.columns == 1)
 }

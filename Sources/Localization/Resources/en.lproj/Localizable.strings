@@ -36,7 +36,6 @@
 "settings.grid.iconscale.standard" = "Standard";
 "settings.grid.iconscale.compact" = "Compact";
 "settings.grid.iconscale.manual" = "Manual size";
-"settings.grid.reorganize.hint" = "Moves apps forward to fill empty spaces.";
 "settings.grid.iconscale.hint" = "Smart recommends an icon size for the current grid. Manual changes use Custom. The effective limit adapts to the cell spacing.";
 "settings.grid.reorganize" = "Reorganize";
 "settings.grid.hidedock" = "Hide Dock";

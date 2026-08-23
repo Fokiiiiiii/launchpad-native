@@ -10,7 +10,6 @@ private func settings(columns: Int = 7, rows: Int = 5) -> GridSettings {
         horizontalSpacing: 20,
         verticalSpacing: 20,
         labelVisible: true,
-        labelLineCount: 1,
         pageMargins: 40,
         folderGridSize: 9
     )

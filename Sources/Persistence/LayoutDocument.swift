@@ -90,7 +90,6 @@ public struct GridSettings: Codable, Sendable, Hashable {
     public var horizontalSpacing: Double
     public var verticalSpacing: Double
     public var labelVisible: Bool
-    public var labelLineCount: Int
     public var pageMargins: Double
     public var folderGridSize: Int
     public var sortMode: SortMode
@@ -105,7 +104,6 @@ public struct GridSettings: Codable, Sendable, Hashable {
         horizontalSpacing: Double,
         verticalSpacing: Double,
         labelVisible: Bool,
-        labelLineCount: Int,
         pageMargins: Double,
         folderGridSize: Int,
         sortMode: SortMode = .custom,
@@ -116,7 +114,6 @@ public struct GridSettings: Codable, Sendable, Hashable {
         self.horizontalSpacing = horizontalSpacing
         self.verticalSpacing = verticalSpacing
         self.labelVisible = labelVisible
-        self.labelLineCount = labelLineCount
         self.pageMargins = pageMargins
         self.folderGridSize = folderGridSize
         self.sortMode = sortMode
@@ -124,7 +121,7 @@ public struct GridSettings: Codable, Sendable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case columns, rows, horizontalSpacing, verticalSpacing, labelVisible, labelLineCount, pageMargins, folderGridSize, sortMode, iconScale
+        case columns, rows, horizontalSpacing, verticalSpacing, labelVisible, pageMargins, folderGridSize, sortMode, iconScale
     }
 
     public init(from decoder: Decoder) throws {
@@ -134,7 +131,6 @@ public struct GridSettings: Codable, Sendable, Hashable {
         horizontalSpacing = try container.decode(Double.self, forKey: .horizontalSpacing)
         verticalSpacing = try container.decode(Double.self, forKey: .verticalSpacing)
         labelVisible = try container.decode(Bool.self, forKey: .labelVisible)
-        labelLineCount = try container.decode(Int.self, forKey: .labelLineCount)
         pageMargins = try container.decode(Double.self, forKey: .pageMargins)
         folderGridSize = try container.decode(Int.self, forKey: .folderGridSize)
         sortMode = try container.decodeIfPresent(SortMode.self, forKey: .sortMode) ?? .custom
@@ -147,7 +143,6 @@ public struct GridSettings: Codable, Sendable, Hashable {
         horizontalSpacing: 24,
         verticalSpacing: 24,
         labelVisible: true,
-        labelLineCount: 2,
         pageMargins: 40,
         folderGridSize: 9,
         sortMode: .custom,
@@ -409,13 +404,10 @@ public struct LayoutDocument: Codable, Sendable {
     public var gridSettings: GridSettings
     public var pages: [[LayoutItem]]
     public var folders: [FolderID: Folder]
-    public var itemOrder: [StableAppIdentifier]
     public var aliases: [StableAppIdentifier: String]
     public var hiddenApplicationIDs: Set<StableAppIdentifier>
     public var customSources: [CustomSourceConfig]
     public var triggerSettings: TriggerSettings
-    public var lastSelectedPage: Int
-    public var lastScrollPosition: Double
     /// When on, the launcher paints *over* the real Dock (pre-Phase-14
     /// behavior) instead of sitting one level below it — see
     /// `LauncherWindow`'s level calculation.
@@ -468,13 +460,10 @@ public struct LayoutDocument: Codable, Sendable {
         gridSettings: GridSettings,
         pages: [[LayoutItem]],
         folders: [FolderID: Folder],
-        itemOrder: [StableAppIdentifier],
         aliases: [StableAppIdentifier: String],
         hiddenApplicationIDs: Set<StableAppIdentifier>,
         customSources: [CustomSourceConfig],
         triggerSettings: TriggerSettings,
-        lastSelectedPage: Int,
-        lastScrollPosition: Double,
         hideDockWhileLauncherOpen: Bool = false,
         dateAddedByID: [StableAppIdentifier: Date] = [:],
         lastUsedByID: [StableAppIdentifier: Date] = [:],
@@ -491,13 +480,10 @@ public struct LayoutDocument: Codable, Sendable {
         self.gridSettings = gridSettings
         self.pages = pages
         self.folders = folders
-        self.itemOrder = itemOrder
         self.aliases = aliases
         self.hiddenApplicationIDs = hiddenApplicationIDs
         self.customSources = customSources
         self.triggerSettings = triggerSettings
-        self.lastSelectedPage = lastSelectedPage
-        self.lastScrollPosition = lastScrollPosition
         self.hideDockWhileLauncherOpen = hideDockWhileLauncherOpen
         self.dateAddedByID = dateAddedByID
         self.lastUsedByID = lastUsedByID
@@ -511,7 +497,7 @@ public struct LayoutDocument: Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, layoutMode, gridSettings, pages, folders, itemOrder, aliases, hiddenApplicationIDs, customSources, triggerSettings, lastSelectedPage, lastScrollPosition, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle, showsMenuBarIcon, showMenuBarApplications, showsHiddenAppsInSearch, backgroundMode, glassMaterialIntensity, blursWallpaper
+        case schemaVersion, layoutMode, gridSettings, pages, folders, aliases, hiddenApplicationIDs, customSources, triggerSettings, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle, showsMenuBarIcon, showMenuBarApplications, showsHiddenAppsInSearch, backgroundMode, glassMaterialIntensity, blursWallpaper
     }
 
     public init(from decoder: Decoder) throws {
@@ -521,13 +507,10 @@ public struct LayoutDocument: Codable, Sendable {
         gridSettings = try container.decode(GridSettings.self, forKey: .gridSettings)
         pages = try container.decode([[LayoutItem]].self, forKey: .pages)
         folders = try container.decode([FolderID: Folder].self, forKey: .folders)
-        itemOrder = try container.decode([StableAppIdentifier].self, forKey: .itemOrder)
         aliases = try container.decode([StableAppIdentifier: String].self, forKey: .aliases)
         hiddenApplicationIDs = try container.decode(Set<StableAppIdentifier>.self, forKey: .hiddenApplicationIDs)
         customSources = try container.decode([CustomSourceConfig].self, forKey: .customSources)
         triggerSettings = try container.decode(TriggerSettings.self, forKey: .triggerSettings)
-        lastSelectedPage = try container.decode(Int.self, forKey: .lastSelectedPage)
-        lastScrollPosition = try container.decode(Double.self, forKey: .lastScrollPosition)
         hideDockWhileLauncherOpen = try container.decodeIfPresent(Bool.self, forKey: .hideDockWhileLauncherOpen) ?? false
         dateAddedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .dateAddedByID) ?? [:]
         lastUsedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .lastUsedByID) ?? [:]
@@ -548,13 +531,10 @@ public struct LayoutDocument: Codable, Sendable {
         gridSettings: .default,
         pages: [[]],
         folders: [:],
-        itemOrder: [],
         aliases: [:],
         hiddenApplicationIDs: [],
         customSources: [],
         triggerSettings: .default,
-        lastSelectedPage: 0,
-        lastScrollPosition: 0,
         hideDockWhileLauncherOpen: false,
         dateAddedByID: [:],
         lastUsedByID: [:],

@@ -36,7 +36,6 @@
 "settings.grid.iconscale.standard" = "Standard";
 "settings.grid.iconscale.compact" = "Compacte";
 "settings.grid.iconscale.manual" = "Taille manuelle";
-"settings.grid.reorganize.hint" = "Avance les apps pour combler les espaces vides.";
 "settings.grid.iconscale.hint" = "« Intelligent » propose une taille d'icône adaptée à la grille actuelle. Toute modification manuelle passe en « Personnalisé ». La limite effective s'adapte à l'espacement des cellules.";
 "settings.grid.reorganize" = "Réorganiser";
 "settings.grid.hidedock" = "Masquer le Dock";

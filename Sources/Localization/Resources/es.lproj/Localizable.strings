@@ -36,7 +36,6 @@
 "settings.grid.iconscale.standard" = "Estándar";
 "settings.grid.iconscale.compact" = "Compacto";
 "settings.grid.iconscale.manual" = "Tamaño manual";
-"settings.grid.reorganize.hint" = "Adelanta las apps para llenar los huecos.";
 "settings.grid.iconscale.hint" = "«Inteligente» recomienda un tamaño de icono para la cuadrícula actual. Los cambios manuales pasan a «Personalizado». El límite efectivo se adapta al espaciado entre celdas.";
 "settings.grid.reorganize" = "Reorganizar";
 "settings.grid.hidedock" = "Ocultar el Dock";

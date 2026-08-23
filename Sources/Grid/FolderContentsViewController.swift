@@ -84,9 +84,6 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     /// How far a page slides as it leaves/enters, matching the main grid's own
     /// `pageSlideOffset`.
     private static let pageSlideOffset: CGFloat = 18
-    /// The shape a folder is laid out around — see `displayedColumnCount`.
-    private static let preferredRowCount = 3
-
     static func displayedColumnCount(itemCount: Int, configuredColumns: Int) -> Int {
         min(max(itemCount, 1), max(configuredColumns, 1))
     }

@@ -36,7 +36,6 @@
 "settings.grid.iconscale.standard" = "표준";
 "settings.grid.iconscale.compact" = "작게";
 "settings.grid.iconscale.manual" = "직접 조절";
-"settings.grid.reorganize.hint" = "앱을 앞으로 당겨 빈 자리를 채웁니다.";
 "settings.grid.iconscale.hint" = "스마트는 현재 그리드에 맞는 아이콘 크기를 추천합니다. 직접 조절하면 사용자화로 바뀝니다. 실제 상한은 셀 간격에 따라 조정됩니다.";
 "settings.grid.reorganize" = "정리";
 "settings.grid.hidedock" = "Dock 가리기";

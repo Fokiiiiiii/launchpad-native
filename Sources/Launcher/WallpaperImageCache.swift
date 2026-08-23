@@ -267,24 +267,6 @@ enum WallpaperImageCache {
         resolveSources(for: screen).source
     }
 
-    /// The synchronous entry point remains available for callers/tests that
-    /// explicitly need a blocking result. The launcher background view uses
-    /// `blurredWallpaperAsync` so a cache miss never delays `show()`.
-    static func blurredWallpaper(for screen: NSScreen, radius: CGFloat = 44) -> CGImage? {
-        let descriptor = descriptor(for: screen, radius: radius)
-        if let cached = cache[descriptor.key] {
-            markUsed(descriptor.key)
-            return cached
-        }
-
-        guard let image = loadAndBlurSynchronously(source: descriptor.source, radius: radius) else {
-            logLoadFailure(descriptor)
-            return nil
-        }
-        store(image, for: descriptor.key)
-        return image
-    }
-
     /// Reads and blurs the wallpaper in a utility task. Only the cheap
     /// display/source metadata and bounded cache mutation run on MainActor.
     static func blurredWallpaperAsync(
@@ -473,21 +455,6 @@ enum WallpaperImageCache {
     static func evictAll() {
         cache.removeAll()
         cacheOrder.removeAll()
-    }
-
-    nonisolated private static func loadAndBlurSynchronously(
-        source: WallpaperSource,
-        radius: CGFloat
-    ) -> CGImage? {
-        guard source.kind == .staticImage, let url = source.url else {
-            // Aerial extraction is intentionally available only from the
-            // asynchronous path; the launcher never blocks show() on a movie.
-            return nil
-        }
-        guard let sourceImage = CIImage(contentsOf: url) else {
-            return nil
-        }
-        return blur(sourceImage, radius: radius)
     }
 
     nonisolated private static func loadAndBlur(

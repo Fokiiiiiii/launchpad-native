@@ -36,7 +36,6 @@
 "settings.grid.iconscale.standard" = "Standard";
 "settings.grid.iconscale.compact" = "Kompakt";
 "settings.grid.iconscale.manual" = "Manuell";
-"settings.grid.reorganize.hint" = "Rückt Apps nach vorne und füllt Lücken.";
 "settings.grid.iconscale.hint" = "„Automatisch“ schlägt eine passende Symbolgröße für das aktuelle Raster vor. Manuelle Änderungen gelten als „Eigene“. Die tatsächliche Obergrenze richtet sich nach dem Zellenabstand.";
 "settings.grid.reorganize" = "Neu anordnen";
 "settings.grid.hidedock" = "Dock ausblenden";

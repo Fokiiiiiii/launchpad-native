@@ -36,7 +36,6 @@
 "settings.grid.iconscale.standard" = "标准";
 "settings.grid.iconscale.compact" = "紧凑";
 "settings.grid.iconscale.manual" = "手动调整";
-"settings.grid.reorganize.hint" = "将应用前移以填补空位。";
 "settings.grid.iconscale.hint" = "「智能」会为当前网格推荐合适的图标大小。手动调整后将变为「自定」。实际上限会根据单元格间距自动调整。";
 "settings.grid.reorganize" = "重新排列";
 "settings.grid.hidedock" = "隐藏程序坞";

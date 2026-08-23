@@ -162,3 +162,37 @@ private func specifiers(in value: String) -> [String] {
     #expect(shipped.subtracting(declared).isEmpty, "shipped but not declared: \(shipped.subtracting(declared).sorted())")
     #expect(declared.subtracting(shipped).isEmpty, "declared but not shipped: \(declared.subtracting(shipped).sorted())")
 }
+
+/// `englishResolvesEveryKeyTheCodeUses` above compares the catalog against
+/// what `L10n` asks for, which leaves a gap: an accessor nothing calls keeps
+/// its key alive on both sides of that comparison, so the string still ships
+/// and still gets translated into every language for a screen that never
+/// shows it. This closes the gap from the other end.
+@Test func everyL10nAccessorIsActuallyUsed() throws {
+    let sourceRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let sources = sourceRoot.appendingPathComponent("Sources")
+    let l10nSource = sources.appendingPathComponent("Localization/L10n.swift")
+    let declaration = try String(contentsOf: l10nSource, encoding: .utf8)
+
+    let pattern = try NSRegularExpression(pattern: #"public static (?:var|func) (\w+)"#)
+    let declared = pattern
+        .matches(in: declaration, range: NSRange(declaration.startIndex..., in: declaration))
+        .compactMap { match -> String? in
+            guard let range = Range(match.range(at: 1), in: declaration) else { return nil }
+            return String(declaration[range])
+        }
+    #expect(declared.count > 100, "only found \(declared.count) accessors — the extraction is probably wrong")
+
+    var callSites = ""
+    let enumerator = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+    while let url = enumerator?.nextObject() as? URL {
+        guard url.pathExtension == "swift", url.lastPathComponent != "L10n.swift" else { continue }
+        callSites += (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    }
+
+    let unused = declared.filter { !callSites.contains("L10n.\($0)") }.sorted()
+    #expect(unused.isEmpty, "these L10n accessors are declared but never called: \(unused)")
+}

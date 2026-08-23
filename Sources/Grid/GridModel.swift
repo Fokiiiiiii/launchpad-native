@@ -346,7 +346,6 @@ public final class GridModel {
         let previousRecords = recordsByIDValue
         let previousPages = pages
         let previousFolders = folders
-        let previousItemOrder = document.itemOrder
         let previousDateAdded = document.dateAddedByID
 
         recordsByIDValue = Dictionary(uniqueKeysWithValues: records.map { ($0.id.value, $0) })
@@ -375,7 +374,6 @@ public final class GridModel {
         let changed = previousRecords != recordsByIDValue
             || previousPages != pages
             || previousFolders != folders
-            || previousItemOrder != document.itemOrder
             || previousDateAdded != document.dateAddedByID
         if changed {
             onChange?()

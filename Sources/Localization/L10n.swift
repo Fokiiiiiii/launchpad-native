@@ -59,9 +59,6 @@ public enum L10n {
     public static var iconScalePresetStandard: String { string("settings.grid.iconscale.standard", "Standard") }
     public static var iconScalePresetCompact: String { string("settings.grid.iconscale.compact", "Compact") }
     public static var iconScaleManualLabel: String { string("settings.grid.iconscale.manual", "Manual size") }
-    public static var reorganizeHint: String {
-        string("settings.grid.reorganize.hint", "Moves apps forward to fill empty spaces.")
-    }
     public static var iconScaleHint: String {
         string("settings.grid.iconscale.hint", "Smart recommends an icon size for the current grid. Manual changes use Custom.")
     }

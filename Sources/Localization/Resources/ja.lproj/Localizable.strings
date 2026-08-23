@@ -36,7 +36,6 @@
 "settings.grid.iconscale.standard" = "標準";
 "settings.grid.iconscale.compact" = "コンパクト";
 "settings.grid.iconscale.manual" = "手動サイズ";
-"settings.grid.reorganize.hint" = "空きスペースを詰めてアプリを前方へ移動します。";
 "settings.grid.iconscale.hint" = "スマート推奨は現在のグリッドに合わせてアイコンサイズを決めます。手動変更はカスタムになります。実効上限はセル間隔に合わせて自動調整されます。";
 "settings.grid.reorganize" = "整理する";
 "settings.grid.hidedock" = "Dockを隠す";
