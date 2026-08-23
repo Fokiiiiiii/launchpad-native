@@ -17,6 +17,14 @@ public enum AppIconStyleApplier {
     }
 
     public static func apply(_ style: AppIconStyle) {
-        NSApp.applicationIconImage = previewImage(for: style) // nil falls back to the bundle's own .icns
+        // `NSApp` is an implicitly-unwrapped optional that stays nil until the
+        // application object exists — before `NSApplication.shared` is first
+        // touched, and in any host that never creates one. Force-unwrapping it
+        // here crashed outright the first time this was called outside a
+        // running app. There is also nothing to apply in that case: the icon
+        // being set is the *process's* Dock representation, which only means
+        // anything once there is a process showing one.
+        guard let app = NSApp else { return }
+        app.applicationIconImage = previewImage(for: style) // nil falls back to the bundle's own .icns
     }
 }
