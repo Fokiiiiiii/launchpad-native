@@ -3,16 +3,12 @@ import OSLog
 
 /// Packages the app's recent log history as a zip of one file per day.
 ///
-/// **The app stores nothing of its own.** Entries are read back out of macOS's
-/// own unified log at export time, so there is no log directory growing in the
-/// user's Library, nothing to rotate, and no disk cost between exports. The
-/// thirty-day window is a query bound, not a retention policy this app
-/// implements — the system already ages its store out, and asking for more than
-/// it kept simply returns less.
-///
-/// Reading beyond the current process needs `OSLogStore(scope: .system)`, which
-/// was verified to work from the real app bundle. If it ever stops working the
-/// export degrades to this session only rather than failing.
+/// The app stores nothing of its own: entries are read out of macOS's unified
+/// log at export time, so there is no directory to grow or rotate. The 30-day
+/// window is a query bound, not a retention policy — the system ages its own
+/// store out. Reading past the current process needs
+/// `OSLogStore(scope: .system)`, verified to work from the real bundle; if that
+/// ever fails the export degrades to this session rather than erroring.
 public enum DiagnosticsArchive {
     public struct Summary: Equatable, Sendable {
         public let dayCount: Int
@@ -23,24 +19,17 @@ public enum DiagnosticsArchive {
 
     /// Days of history to request.
     public static let defaultDayCount = 30
-    /// Per-day cap. High enough that a normal day is never trimmed at all —
-    /// this is a backstop against a pathological day (a crash loop writing
-    /// tens of thousands of lines), not a size target.
-    ///
-    /// It started at 600 to keep exports to a few kilobytes, and that produced
-    /// an archive that could not be used: a day with 736 errors in it kept all
-    /// of them and *none* of the surrounding notices, so the file showed what
-    /// failed with no trace of what the app was doing at the time. Errors
-    /// without their context are not a log. Compression makes the difference
-    /// cheap — the same day is tens of kilobytes zipped either way.
+    /// Backstop against a crash loop writing tens of thousands of lines, not a
+    /// size target. At 600 it produced an unusable archive: a day with 736
+    /// errors kept all of them and none of the surrounding notices, leaving no
+    /// trace of what the app was doing. Errors without context are not a log.
     public static let defaultEntriesPerDay = 20_000
     /// Share of the cap held for routine entries even when errors alone would
     /// fill it. Errors are still never dropped; this stops them from crowding
     /// out the context that makes them readable.
     static let routineFloorFraction = 0.5
 
-    /// Groups entries by calendar day in the local time zone — the day a user
-    /// would name when saying "it broke on Tuesday".
+    /// Groups by local calendar day — the day a user names when reporting.
     static func groupByDay(
         _ entries: [(date: Date, line: String)],
         calendar: Calendar = .current,
@@ -55,10 +44,8 @@ public enum DiagnosticsArchive {
             let lines = byDay[day] ?? []
             guard lines.count > entriesPerDay else { return (day, lines, 0) }
 
-            // Errors survive the cap unconditionally. Everything else is kept
-            // newest-first up to the remaining budget — the end of a bad day is
-            // where the failure is — and the result is put back in time order,
-            // because a log read out of sequence is barely a log.
+            // Errors survive unconditionally; the rest is kept newest-first up
+            // to the remaining budget, then restored to time order.
             var keep = Set<Int>()
             var routine: [Int] = []
             for (index, line) in lines.enumerated() {
@@ -68,8 +55,7 @@ public enum DiagnosticsArchive {
                     routine.append(index)
                 }
             }
-            // Errors are all kept, but never at the price of every routine
-            // entry: the floor guarantees context survives an error-heavy day.
+            // The floor keeps context alive on an error-heavy day.
             let routineFloor = Int(Double(entriesPerDay) * routineFloorFraction)
             let budget = max(entriesPerDay - keep.count, routineFloor)
             keep.formUnion(routine.suffix(budget))
@@ -130,10 +116,8 @@ public enum DiagnosticsArchive {
     }
 
     /// Writes the archive to `destination`, replacing anything already there.
-    ///
-    /// The zip is built by `NSFileCoordinator`'s `.forUploading` option, which
-    /// is Foundation's own way to produce one — no external tool, no bundled
-    /// compression library.
+    /// The zip comes from `NSFileCoordinator`'s `.forUploading` — Foundation's
+    /// own, so no external tool or bundled compression library.
     @discardableResult
     public static func write(
         to destination: URL,
@@ -144,17 +128,15 @@ public enum DiagnosticsArchive {
         let entries = readEntries(days: days, now: now)
         let grouped = groupByDay(entries, entriesPerDay: entriesPerDay)
 
-        // The zip takes its top-level folder name from this directory, so the
-        // unique part goes on its *parent*: someone opening the archive sees
-        // "LaunchpadNative-logs", not a UUID.
+        // The zip names its top-level folder after this directory, so the
+        // unique part goes on the parent — the recipient sees no UUID.
         let stagingRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("launchpadnative-export-\(UUID().uuidString)")
         let staging = stagingRoot.appendingPathComponent("LaunchpadNative-logs")
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: stagingRoot) }
 
-        // A summary alongside the days, so whoever opens the zip knows what
-        // build produced it without opening a log file.
+        // So whoever opens the zip sees the build without opening a log.
         let environment = DiagnosticsReport.Environment.current(now: now)
         try DiagnosticsReport.compose(environment: environment, logLines: [])
             .write(to: staging.appendingPathComponent("summary.txt"), atomically: true, encoding: .utf8)

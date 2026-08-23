@@ -37,16 +37,9 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     private static let swipeFlickVelocity: CGFloat = 400
     private let gridModel = FolderOverlayGridModel()
     private let iconSize: Double
-    /// The main grid's own column count (`GridSettings.columns`) — a real
-    /// screenshot of a genuinely different app (confirmed by the user;
-    /// its "その他" folder held system utilities that don't match this
-    /// app's own data at all) showed the opened folder always using the
-    /// *same* fixed column count as the closed grid itself, with rows
-    /// growing/shrinking to fit — not a variable column count computed
-    /// from the item count (this file's previous `sqrt(itemCount * 1.6)`
-    /// heuristic), which the reference never does
-    /// (`LazyVGrid(columns: Array(repeating: ..., count: metrics.columns))`
-    /// — always exactly `metrics.columns`).
+    /// The main grid's own column count: an opened folder keeps the grid's
+    /// columns and grows rows, rather than deriving columns from the item
+    /// count (this file's earlier `sqrt(itemCount * 1.6)` heuristic).
     private let columns: Int
     /// The bounded outer-card width selected by `GridViewController.openFolder`,
     /// fed into `preferredContentSize.width` by `updatePreferredContentSize()`
@@ -67,29 +60,19 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     private static let minimumPanelWidth: CGFloat = 240
     private var itemHeight: CGFloat { CGFloat(iconSize) + 40 }
 
-    // The card's own vertical layout, spelled out rather than folded into one
-    // magic number. `updatePreferredContentSize` used to add a flat `88 + 70`,
-    // which matched no actual measurement: it left ~39pt of dead space below a
-    // single row (the card read as oddly tall for two apps) while being ~94pt
-    // short for two rows, so the second row was clipped mid-icon with its
-    // labels cut off — both reported ("小さい時の画面が微妙", "中身で
-    // スクロールをしたりすると微妙").
+    // Spelled out rather than folded into one number. A flat `88 + 70` matched
+    // no measurement: ~39pt of dead space under one row, ~94pt short for two,
+    // so the second row was clipped mid-icon ("小さい時の画面が微妙").
     /// `FolderOverlayGridContent`'s own `.padding(.vertical, 34)`.
     private static let gridVerticalPadding: CGFloat = 34
     private static let titleTopInset: CGFloat = 14
     /// The reference's `VStack(spacing: 28)` between the title and the grid.
     private static let titleToGridGap: CGFloat = 28
     private static let cardBottomInset: CGFloat = 10
-    /// How much of the screen the card may occupy before its content starts
-    /// scrolling. The previous flat 480pt cap was set without reference to the
-    /// display: on a 1050pt-tall screen it clipped a second row that had ample
-    /// room to fit, and on a short screen it would have overflowed instead.
-    ///
-    /// The panel is kept to this share of the screen. Rather than clipping what
-    /// does not fit, the icons are drawn smaller so the rows fit — see
-    /// `folderIconSize`. Following the grid's own column count keeps the common
-    /// cases well under this, so the scaling is a backstop for deep folders
-    /// rather than something that normally engages.
+    /// Share of the screen the panel may occupy. Rather than clipping what does
+    /// not fit, icons are drawn smaller (see `folderIconSize`) — a backstop for
+    /// deep folders, since following the grid's columns keeps common cases well
+    /// under it. Replaced a flat 480pt cap that ignored the display entirely.
     private static let maximumHeightFraction: CGFloat = 0.75
     /// What `itemHeight` adds to an icon for its label and the gap above it.
     private static let tileLabelAllowanceVertical: CGFloat = 40
@@ -200,15 +183,10 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         // has no explicit weight (defaults to regular).
         titleField.font = .systemFont(ofSize: 21, weight: .regular)
         titleField.alignment = .center
-        // Editable in place, the way the system's own folder title is.
-        //
-        // `NSTextField(labelWithString:)` builds a cell that is neither
-        // editable nor selectable, and this codebase has already lost a day to
-        // exactly that: a field whose cell refuses to track a click falls back
-        // to `super.mouseDown`, the click walks up the responder chain, and
-        // whatever sits behind it acts on it instead — here that would be the
-        // backdrop, so clicking the name would close the folder. Both flags are
-        // set explicitly rather than relying on any convenience initializer.
+        // Editable in place. `labelWithString:` builds a cell that is neither
+        // editable nor selectable, and a cell that refuses to track a click
+        // falls back to `super.mouseDown` — the click then walks up to the
+        // backdrop and closes the folder. Both flags are set explicitly.
         titleField.isEditable = true
         titleField.isSelectable = true
         titleField.isBordered = false
@@ -295,17 +273,9 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         refresh()
     }
 
-    /// Computes `preferredContentSize` — width is always exactly `panelWidth`
-    /// (the caller's target, see its doc comment for why this must match
-    /// exactly); only the height is derived here, from the fixed `columns`
-    /// count (the main grid's own column count — see that property's doc
-    /// comment for why this isn't a per-item-count heuristic) and the actual
-    /// row count, capped at `maximumHeight`.
-    ///
-    /// Every term is a real distance in the layout above, so a folder that fits
-    /// gets a card that ends exactly where its content does — no dead space
-    /// under a single row, and no row clipped in half when a second one would
-    /// have fitted.
+    /// Width is exactly `panelWidth`; only the height is derived here, from the
+    /// row count and capped at `maximumHeight`. Every term is a real distance in
+    /// the layout above, so a folder that fits ends where its content does.
     private func updatePreferredContentSize() {
         // The fullest page, not this one: a card that shrank when the user
         // paged onto a half-empty last page would jump under the cursor.

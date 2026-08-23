@@ -27,27 +27,13 @@ final class PagedGridLayout: NSCollectionViewLayout {
         guard let collectionView else { return }
         itemAttributes.removeAll(keepingCapacity: true)
 
-        // A large-scale code audit (7 parallel finders, independently
-        // converging on this same spot) traced a long-standing, previously
-        // measured fact — `collectionView`'s content ends up ~63pt *taller*
-        // than the scroll view's real visible viewport — to a self-
-        // referential loop here: `collectionView.bounds` is the size of
-        // `collectionView` itself (the scroll view's `documentView`), which
-        // AppKit sets FROM this same layout's own `collectionViewContentSize`
-        // (see `contentSize` below) on a *prior* `prepare()` pass. If the
-        // very first `prepare()` ever runs before Auto Layout has settled
-        // the real enclosing scroll view size, that early (wrong) height
-        // gets baked into `contentSize`, which becomes `collectionView`'s
-        // new `bounds.height`, which this method then reads right back out
-        // next time — a self-reinforcing loop with no path back to the
-        // real viewport size once it's off. Reading the *scroll view's own
-        // clip view* bounds instead breaks the loop: `contentView` is sized
-        // purely by Auto Layout constraints on the scroll view itself, never
-        // by this layout's own output, so it can't be self-referential.
-        // Falls back to `collectionView.bounds` when there's no enclosing
-        // scroll view at all (the offscreen `tempCollectionView` used by
-        // `renderPageSnapshot`, which is never scrolled and is already
-        // constructed at its final, correct size).
+        // Sized from the scroll view's clip view, never `collectionView.bounds`:
+        // AppKit sets that from this layout's own `collectionViewContentSize` on
+        // a prior pass, so reading it back is a self-reinforcing loop with no
+        // path to the real viewport once it drifts (measured: content ended up
+        // ~63pt taller than the viewport). The clip view is sized purely by Auto
+        // Layout. Falls back when there is no scroll view — the offscreen
+        // snapshot view, which is built at its final size and never scrolled.
         let viewportSize = collectionView.enclosingScrollView?.contentView.bounds.size ?? collectionView.bounds.size
         let viewportHeight = viewportSize.height
         let pageWidth = viewportSize.width

@@ -3,22 +3,15 @@ import Diagnostics
 
 /// Turns trackpad scroll events into page changes.
 ///
-/// Lifted verbatim out of `GridCollectionView`, which had it as a `scrollWheel`
-/// override, so an opened folder can page by the same gesture and the same
-/// numbers as the grid behind it. Nothing about the recognition changed in the
-/// move: every threshold, phase-normalization branch and ordering below is the
-/// one the grid has been shipping, including the ones whose doc comments record
-/// specific ways they went wrong on real hardware.
-///
-/// It reads only `NSEvent` fields and its own state — it never touched any
-/// collection-view API, which is what made it liftable at all.
+/// Lifted verbatim out of `GridCollectionView`'s `scrollWheel` override so an
+/// opened folder pages by the same gesture and the same numbers. Nothing about
+/// the recognition changed in the move. It reads only `NSEvent` fields and its
+/// own state, which is what made it liftable.
 @MainActor
 final class SwipePageRecognizer {
-    /// `onDiscretePage` fires with `-1`/`+1` for plain wheel ticks, which carry
-    /// no continuous position to track. The other three describe one continuous
-    /// gesture: `onChanged` receives the *cumulative* delta since it began (not
-    /// a per-frame delta) so a caller can track it 1:1, and `onEnded` adds a
-    /// points-per-second velocity estimate for handoff into a settle spring.
+    /// `onDiscretePage` fires `-1`/`+1` for plain wheel ticks, which carry no
+    /// continuous position. The rest describe one gesture: `onChanged` gets the
+    /// *cumulative* delta (not per-frame), `onEnded` adds a pt/s velocity.
     struct Callbacks {
         var onDiscretePage: ((Int) -> Void)?
         var onBegan: (() -> Void)?

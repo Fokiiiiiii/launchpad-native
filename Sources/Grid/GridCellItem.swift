@@ -141,18 +141,13 @@ final class GridCellItem: NSCollectionViewItem {
         applyVisualTransforms()
     }
 
-    /// Re-applies the icon geometry to a cell that is already configured.
+    /// Re-applies the icon geometry to an already-configured cell.
     ///
-    /// `configureAsApp`/`configureAsFolder` bake in whatever size was current
-    /// when the cell was built, and nothing revisits that until the cell is
-    /// rebuilt. A cell built before the grid's own layout settled therefore
-    /// keeps the pre-settle size until the next `reloadData()` — on a first
-    /// launch that reload is the full catalog scan finishing a second or two
-    /// later, so the icons visibly shrink long after the window is on screen.
-    /// This lets the controller correct live cells in place instead.
-    ///
-    /// Reports whether anything actually changed, so the caller can skip the
-    /// extra layout pass when every cell was already the right size.
+    /// `configure…` bakes in whatever size was current when the cell was built.
+    /// A cell built before the layout settled keeps that size until the next
+    /// `reloadData()` — on a cold start, the catalog scan a second or two later
+    /// — so the icons visibly shrink long after the window is up. Reports
+    /// whether anything changed, so the caller can skip an extra layout pass.
     @discardableResult
     func refreshIconSize(_ size: Double, visualScale: Double) -> Bool {
         let previous = displayedIconSizeValue
@@ -229,17 +224,10 @@ final class GridCellItem: NSCollectionViewItem {
         return hosting
     }
 
-    /// - Parameter showsLabel: When `false`, hides and empties the name
-    ///   label (an empty, hidden label has 0 intrinsic height, so the
-    ///   existing Auto Layout constraints between `iconView`/`label`/
-    ///   `container` stay satisfied with no conflicts). No caller currently
-    ///   passes `false` — the opened-folder panel now hosts its own SwiftUI
-    ///   tile grid (`FolderOverlayTileView`) instead of `GridCellItem`
-    ///   directly — but kept as a real, reachable option rather than pruned,
-    ///   since a future compact-icon-only presentation of this cell is
-    ///   plausible. VoiceOver still announces the name either way
-    ///   (`setAccessibilityLabel` is unconditional) since hiding the visible
-    ///   label shouldn't hide it from accessibility.
+    /// - Parameter showsLabel: when `false`, empties and hides the label (an
+    ///   empty hidden label has no intrinsic height, so the constraints stay
+    ///   satisfied). No caller passes `false` today; VoiceOver announces the
+    ///   name either way.
     func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, visualScale: Double = 1, displayName: String? = nil, showsLabel: Bool = true) {
         currentRequestKey = record.iconCacheKey
         applyIconSize(iconSize, visualScale: visualScale)

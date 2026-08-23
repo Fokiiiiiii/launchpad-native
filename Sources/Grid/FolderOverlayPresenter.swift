@@ -3,36 +3,20 @@ import Catalog
 import Diagnostics
 import Persistence
 
-/// Presents an opened folder as a screen-wide band over a dimmed grid.
+/// Presents an opened folder over a dimmed grid.
 ///
 /// Split out of `GridViewController` because none of it touches the grid's own
-/// state: it owns a backdrop, a tint, a notch and a
-/// `FolderContentsViewController`, and the grid only ever asks it to open or
-/// close. Everything the panel needs from the grid — where to host it, how big
-/// its icons are, which icon it came from, what to do on launch or drag-out —
-/// arrives as parameters, so the two can be read independently.
-///
-/// The shape follows the system's own Launchpad: a band spanning the screen
-/// that grows out of the folder icon, rather than a card centered over a fully
-/// dimmed screen (this app's previous form, itself replacing an even earlier
-/// anchored `NSPopover`). `bandPlacement` decides where it actually lands, and
-/// whether pointing a notch at the icon is honest there.
-///
-/// `FolderContentsViewController` and its already-proven AppKit interaction
-/// code (click-to-launch, right-click context menu, drag-out-to-remove) are not
-/// involved in any of this — only the presentation container is, which is what
-/// has repeatedly kept visual changes here from re-risking interaction logic
-/// fixed several times in this project's history.
+/// state: everything the panel needs arrives as parameters. Only the
+/// presentation container lives here — `FolderContentsViewController`'s
+/// interaction code (click-to-launch, context menu, drag-out) is untouched by
+/// visual changes, which is what has kept them from re-breaking it.
 @MainActor
 final class FolderOverlayPresenter {
-    /// What the panel needs to know about the grid it was opened from, so its
-    /// mosaic and card size follow the same scale the grid is currently drawn
-    /// at rather than a second, independently-derived one.
+    /// What the panel needs from the grid, so its sizing follows the scale the
+    /// grid is currently drawn at rather than a second derivation.
     struct Metrics {
-        /// Already multiplied by the grid's effective visual scale. The open
-        /// folder's tiles are SwiftUI content rather than `GridCellItem`, so
-        /// they never receive the cell layer transform that scale is otherwise
-        /// applied through.
+        /// Already multiplied by the grid's visual scale: the folder's tiles
+        /// are SwiftUI and never receive the cell layer transform.
         let iconSize: Double
         let configuredColumns: Int
     }
@@ -48,9 +32,8 @@ final class FolderOverlayPresenter {
     private var contentsViewController: FolderContentsViewController?
     private var onDidCloseHandler: (() -> Void)?
 
-    /// Test hook. The panel's lifetime is the thing worth asserting on: it is
-    /// held only by this property, and losing that hold once left every async
-    /// icon load resolving against a dead controller.
+    /// Test hook: the panel is held only here, and losing that hold once left
+    /// every async icon load resolving against a dead controller.
     var presentedPanelForTesting: FolderContentsViewController? { contentsViewController }
 
     init(model: GridModel, iconCache: IconCache) {
@@ -157,11 +140,10 @@ final class FolderOverlayPresenter {
 
         self.backdrop?.removeFromSuperview()
         self.backdrop = backdrop
-        // Retaining the controller is load-bearing, not bookkeeping: its view is
-        // in the backdrop's subview tree, but nothing else holds the controller
-        // behind it. Without this it deallocates immediately, and every async
-        // icon load then resolves against a dead `self` and is dropped — the
-        // folder renders with empty placeholders where its icons should be.
+        // Load-bearing: only the backdrop holds the panel's *view*, nothing
+        // holds the controller. Without this it deallocates immediately and
+        // every async icon load resolves against a dead `self`, leaving the
+        // folder full of blank placeholders.
         contentsViewController = folderVC
         hostView.window?.makeFirstResponder(backdrop)
 
@@ -177,14 +159,9 @@ final class FolderOverlayPresenter {
 
     /// Centered on screen, at whatever size its contents came to.
     ///
-    /// An earlier pass placed the panel directly below the folder icon with a
-    /// notch pointing back at it, following the system's own Launchpad. The
-    /// reference launcher this was compared against does neither: its panel
-    /// sits in the same centered position whether the folder holds two apps or
-    /// eighteen, and draws no notch. Centering also sidesteps what made the
-    /// anchored version awkward here — at this grid's icon sizes a deep folder
-    /// does not fit below its own icon, so it ended up pinned to the top of the
-    /// screen with the icon buried inside it.
+    /// An earlier pass anchored it below the folder icon with a notch. At this
+    /// grid's icon sizes a deep folder does not fit below its own icon, so it
+    /// ended up pinned to the top with the icon buried inside it.
     static func panelFrame(size: NSSize, in hostSize: NSSize) -> NSRect {
         NSRect(
             x: (hostSize.width - size.width) / 2,

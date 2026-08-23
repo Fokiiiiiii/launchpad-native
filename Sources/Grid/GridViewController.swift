@@ -150,21 +150,13 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         refreshVisibleIconSizes()
     }
 
-    /// Pushes the settled icon geometry onto cells that were built before it
-    /// was known.
+    /// Pushes the settled icon geometry onto cells built before it was known.
     ///
-    /// `itemForRepresentedObjectAt` reads `currentIconSize` once, when the cell
-    /// is created, and nothing revisits that afterwards — a cell keeps its
-    /// creation-time size until `reloadData()` builds a replacement. The first
-    /// layout pass runs before `updatePageControlBottomMargin` has measured the
-    /// Dock, so those first cells are sized against a taller cell than the grid
-    /// ends up with.
-    ///
-    /// Reported bug ("初回起動時にアプリが一瞬だけ大きくなってから元のサイズに
-    /// 戻る"): on a cold start the reload that would have fixed them is the full
-    /// catalog scan finishing a second or two later, so the icons sat visibly
-    /// oversized on screen until then and then snapped down. Warm opens never
-    /// showed it because their cells already existed at the settled size.
+    /// A cell keeps its creation-time size until `reloadData()` replaces it, and
+    /// the first layout pass runs before the Dock has been measured. On a cold
+    /// start the reload that would fix that is the full catalog scan a second
+    /// later, so icons sat oversized on screen and then snapped down
+    /// ("初回起動時にアプリが一瞬だけ大きくなってから元のサイズに戻る").
     private func refreshVisibleIconSizes() {
         let cellSize = layout.currentCellSize
         guard cellSize.width > 0, cellSize.height > 0 else { return }
@@ -377,22 +369,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.reloadItems(at: [indexPath])
     }
 
-    /// The data-source-swap approach itself (as opposed to scroll-position
-    /// paging) is unchanged and stays that way — see this file's top-level
-    /// doc comment for why the earlier scroll-based version never reliably
-    /// worked live. The swap is wrapped in a short directional slide while
-    /// the collection view stays fully opaque, so there is no fade-to-black
-    /// frame between pages.
-    /// Adds a small directional slide —
-    /// apple-design's "spatial consistency"/"hint in the direction of the
-    /// gesture" guidance: a jump to a *later* page slides content out to
-    /// the left and the new page in from the right (mirrored for a jump
-    /// backward), instead of the fade alone just cutting in place. Still a
-    /// discrete jump (not a continuously finger-tracked scroll — that
-    /// approach was already tried and abandoned, see this type's top-level
-    /// doc comment). Keep the travel deliberately small: the page drag path
-    /// provides the large spatial movement; arrow/dot jumps only need a
-    /// restrained directional cue.
+    /// Pages by swapping the data source, not by scrolling — see this file's
+    /// top-level comment for why the scroll-based version never worked live.
+    /// The swap is wrapped in a short directional slide (later page slides in
+    /// from the right, mirrored going back) while the collection view stays
+    /// opaque, so there is no fade-to-black frame between pages.
     private static let pageSlideOffset: CGFloat = 18
     private var pageTransitionGeneration = 0
 
@@ -887,19 +868,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         setGridContentHidden(true)
     }
 
-    /// Hides the grid itself while a folder is open, leaving the wallpaper.
+    /// Hides the grid while a folder is open, leaving the wallpaper.
     ///
-    /// An opened folder used to sit over a dimmed but still-visible grid, which
-    /// left the apps behind the panel legible through it and competing with the
-    /// ones inside it. Hiding the grid outright is what the reference launcher
-    /// does, and it is what lets the panel be a light surface rather than
-    /// needing a near-blackout behind it to separate from its own background.
+    /// A dimmed but visible grid left the apps behind the panel competing with
+    /// the ones inside it. Hiding it outright is what lets the panel be a light
+    /// surface instead of needing a near-blackout behind it.
     ///
-    /// Uses opacity rather than `isHidden`: this project has twice shipped a
-    /// stuck `isHidden` that left the grid permanently blank and needed a
-    /// force-quit. Alongside that, `openFolder` sets this false again on every
-    /// open and `LauncherViewController` restores it whenever the launcher is
-    /// shown, so a state left behind by one path cannot outlive it.
+    /// Uses opacity, not `isHidden`: this project has twice shipped a stuck
+    /// `isHidden` that left the grid permanently blank. `openFolder` also resets
+    /// it on every open, and the launcher restores it whenever it is shown.
     public func setGridContentHidden(_ hidden: Bool) {
         let target: CGFloat = hidden ? 0 : 1
         guard abs(collectionView.alphaValue - target) > 0.001 else { return }

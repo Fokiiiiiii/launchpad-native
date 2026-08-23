@@ -15,21 +15,14 @@ import Persistence
 /// in sync with the other.
 @MainActor
 enum PageSnapshotRenderer {
-    /// A single, permanently-parked offscreen window that hosts the throwaway
-    /// collection view while it draws.
+    /// A permanently-parked offscreen window hosting the throwaway collection
+    /// view while it draws.
     ///
-    /// `cacheDisplay(in:to:)` only produces real pixels for layer-backed views
-    /// that belong to a window which has actually been displayed at least
-    /// once; a view that has never been in any `NSWindow` yields a bitmap that
-    /// reports success while every pixel is fully transparent. That was a real,
-    /// diagnosed bug ("the next page's content isn't visible during the drag").
-    ///
-    /// Ordered front exactly once, at creation, and never ordered out: the
-    /// first version of the fix ordered it in and out per gesture, and a
-    /// screen-wide flicker on every page move was reported right after that
-    /// shipped — repeatedly ordering any real window in and out forces a
-    /// WindowServer composite pass. Parked far outside any display's
-    /// coordinate space, so it is never visible.
+    /// `cacheDisplay` only produces real pixels for a layer-backed view in a
+    /// window that has been displayed at least once; otherwise it reports
+    /// success and returns a fully transparent bitmap — a real diagnosed bug
+    /// ("the next page isn't visible during the drag"). Ordered front once at
+    /// creation and never out: doing it per gesture caused visible flicker.
     private static let hostWindow: NSWindow = {
         let window = NSWindow(
             contentRect: NSRect(x: -20000, y: -20000, width: 1, height: 1),

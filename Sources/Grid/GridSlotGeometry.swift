@@ -1,19 +1,13 @@
 import CoreGraphics
 import Foundation
 
-/// The page-grid's slot arithmetic, free of AppKit and of any drag state, so
-/// it can be unit-tested directly — same role `GridIconLayoutPolicy` plays for
-/// icon sizing.
+/// The page-grid's slot arithmetic, free of AppKit and drag state so it can be
+/// tested directly.
 ///
-/// This exists because the identical `column = slot % columns` /
-/// `row = slot / columns` / `x = margin + column * (cellWidth + spacing)`
-/// arithmetic was written out three separate times: in `PagedGridLayout`
-/// (which positions the real cells), and twice inside `GridViewController`
-/// (`frameForSlot`, which the drag hysteresis measures against, and
-/// `insertionSlot`, which maps a pointer back to a slot). Those three had to
-/// agree exactly or a drag would highlight one cell and drop into another,
-/// and nothing enforced that they did. `GridSlotGeometryTests` now pins the
-/// layout and this type to the same answer.
+/// The identical arithmetic was written out three times — in `PagedGridLayout`,
+/// and twice in `GridViewController` (`frameForSlot`, `insertionSlot`). They had
+/// to agree exactly or a drag would highlight one cell and drop into another,
+/// and nothing enforced it. `GridSlotGeometryTests` pins them to one answer.
 struct GridSlotGeometry {
     /// Distance from one slot's leading edge to the next one's, along each
     /// axis. Clamped to at least 1 so a degenerate configuration can't divide

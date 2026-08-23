@@ -73,27 +73,11 @@ public final class GridModel {
         document.triggerSettings = settings
     }
 
-    /// Applies immediately (relayout) without losing item order — the grid
-    /// only changes how many items fit per page, not which items exist.
-    /// Reflows only when the *capacity itself* (`columns * rows`) actually
-    /// changed, in either direction: shrinking needs it so overflow items
-    /// don't render off the bottom of their page and vanish (see
-    /// `loadDocument()`'s doc comment), growing needs it too (a real user
-    /// report: increasing rows from 3 to 4 changed the layout but left
-    /// pages grouped at the old, smaller capacity, so the newly-available
-    /// row just sat empty).
-    ///
-    /// A prior version of this method reflowed *unconditionally*, on the
-    /// mistaken assumption that reflowing at an unchanged capacity is a
-    /// no-op. It isn't: `reflowPagesToCurrentCapacity()` flattens every
-    /// page and repacks tightly to capacity, which silently destroyed any
-    /// *intentionally non-compact* arrangement (pages the user left
-    /// partially empty, gaps from manual drag-and-drop reordering) every
-    /// single time any grid setting was applied — including changes
-    /// completely unrelated to capacity, like icon size — a real regression
-    /// confirmed via user report ("行数の設定やページごとのアプリ数の数が
-    /// おかしい"). Comparing capacity before/after and only reflowing on an
-    /// actual change avoids that.
+    /// Reflows only when capacity (`columns * rows`) actually changed, either
+    /// way: shrinking hides overflow items off the page, growing leaves the new
+    /// row empty. Reflowing *unconditionally* is not a no-op — it repacks every
+    /// page tightly, destroying gaps the user arranged on purpose, on every
+    /// unrelated settings change ("行数の設定やページごとのアプリ数がおかしい").
     public func updateGridSettings(_ settings: GridSettings) {
         let oldCapacity = capacityPerPage
         gridSettings = settings
@@ -219,19 +203,12 @@ public final class GridModel {
         document.blursWallpaper = value
     }
 
-    /// "カスタム" (manual drag order, unchanged), "名前順", "追加日順" (newest
-    /// first), or "最終使用日順" (most recently launched first) — the latter
-    /// two read from `LayoutDocument.dateAddedByID`/`lastUsedByID`, stamped
-    /// by `reconcile(with:)`/`backfillMissingDateAdded()` and
-    /// `recordLaunch(for:)` respectively.
-    ///
-    /// Sorts *within* each existing page/folder-page rather than flattening
-    /// and repacking across them — page boundaries and folder membership
-    /// are left exactly as they are, only the order within each container
-    /// changes. Switching back to `.custom` is deliberately a no-op beyond
-    /// recording the preference: the manual order was already overwritten
-    /// by the last sort, so there's nothing to restore without tracking
-    /// separate undo history, which isn't worth it for a toggle.
+    /// Sorts *within* each page and folder page — boundaries and folder
+    /// membership are untouched, only the order inside each container changes.
+    /// `.dateAdded`/`.lastUsed` read `LayoutDocument`'s stamped timestamps.
+    /// Switching back to `.custom` is a no-op beyond recording the preference:
+    /// the manual order was already overwritten, and restoring it would need
+    /// undo history this does not keep.
     public func applySortMode(_ mode: SortMode) {
         gridSettings.sortMode = mode
         document.gridSettings = gridSettings
@@ -300,16 +277,10 @@ public final class GridModel {
         return document.lastUsedByID[identifier] ?? .distantPast
     }
 
-    /// Stamps "now" as this app's most recent launch — the basis for
-    /// `SortMode.lastUsed`. Called from the single funnel point every
-    /// launch path (grid click, search result, folder contents, "Open New
-    /// Instance") ultimately goes through. Deliberately does *not* call
-    /// `onChange?()`: `.lastUsed` is a one-shot sort applied when the user
-    /// picks it in Settings (matching `.name`'s existing semantics, see
-    /// this type's doc comment above), not a continuously-enforced live
-    /// order — re-sorting the grid out from under someone at the exact
-    /// moment they click an icon would be a surprising, distracting UI
-    /// shuffle for no real benefit.
+    /// Stamps "now" as this app's most recent launch, from the single funnel
+    /// every launch path goes through. Deliberately does not fire `onChange`:
+    /// `.lastUsed` is a one-shot sort applied when picked in Settings, not a
+    /// live order — reshuffling the grid as someone clicks would be startling.
     public func recordLaunch(for id: StableAppID) {
         document.lastUsedByID[id.asPersistenceIdentifier] = Date()
     }
@@ -362,22 +333,14 @@ public final class GridModel {
     }
 
     /// Reconciles the live catalog against the persisted arrangement: apps no
-    /// longer installed (or newly hidden) are pruned from pages/folders;
-    /// newly discovered apps are appended in alphabetical order.
+    /// longer installed (or newly hidden) are pruned; new ones are appended
+    /// alphabetically.
     ///
-    /// - Parameter prunesMissingItems: whether `records` is authoritative
-    ///   about what is installed. Real, confirmed data-corruption bug: the
-    ///   startup path restores a cached catalog snapshot to get a first frame
-    ///   up early, and that snapshot legitimately lags the real disk state
-    ///   (observed live: 94 cached records restored, `Pruned 4 item(s) from
-    ///   page 3` 6ms later, then `Full scan complete: 98 applications` 1.6s
-    ///   later). Treating that partial set as authoritative deleted the four
-    ///   apps it hadn't cached yet, and the completed scan then re-appended
-    ///   them as "new" at the end of the grid — silently reshuffling the
-    ///   user's last page on *every* launch, with the exact order depending on
-    ///   which records the snapshot happened to hold. A cached snapshot can
-    ///   only ever add confidence that an app exists, never that one is gone,
-    ///   so removal stays gated on a completed scan.
+    /// - Parameter prunesMissingItems: whether `records` is authoritative about
+    ///   what is installed. The startup path restores a cached snapshot that
+    ///   legitimately lags the disk (observed: 94 cached, 4 pruned 6ms later,
+    ///   98 found 1.6s later). Treating that as authoritative deleted the four
+    ///   it had not cached, and the full scan re-appended them as new.
     @discardableResult
     public func reconcile(with records: [ApplicationRecord], prunesMissingItems: Bool = true) -> Bool {
         let previousRecords = recordsByIDValue
@@ -420,20 +383,11 @@ public final class GridModel {
         return changed
     }
 
-    /// Apps placed before `dateAddedByID` existed (i.e. every app already in
-    /// a real user's grid the first time they launch a build with this
-    /// feature) have no recorded timestamp. Rather than leaving them all
-    /// tied at "unknown" — which would make `SortMode.dateAdded` fall back
-    /// to an arbitrary order for someone's *entire* existing grid — backfill
-    /// each with a synthetic, strictly-increasing timestamp based on its
-    /// current position: apps get appended to the end of the grid over time
-    /// (see `appendToLastPage`), so existing position is the best available
-    /// proxy for "roughly when this was added" without inventing history
-    /// this app never actually recorded. Anchored to the Unix epoch (not
-    /// "now minus N seconds") so backfilled values always sort older than
-    /// genuinely-new `Date()` timestamps stamped going forward, regardless
-    /// of when this backfill happens to run. Only fills gaps — once an item
-    /// has an entry, this is a no-op for it on every subsequent reconcile.
+    /// Apps that predate `dateAddedByID` have no timestamp, which would leave
+    /// `SortMode.dateAdded` arbitrary across someone's entire existing grid.
+    /// Each is backfilled from its current position — apps are appended over
+    /// time, so position is the best available proxy. Anchored to the epoch so
+    /// backfilled values always sort older than genuinely new ones.
     private func backfillMissingDateAdded() {
         var index = 0
         for page in pages {
@@ -475,26 +429,13 @@ public final class GridModel {
         return result
     }
 
-    /// Removes items no longer found in the current catalog scan from both
-    /// pages and folders. Folders that become empty as a result are
-    /// dissolved (reusing `isFolderEmpty`/`dissolveFolder`, the same pair
-    /// `removeFromFolder` already uses for the user-driven single-item
-    /// case) — a real bug had this path leave behind empty, named folder
-    /// shells (confirmed on a real `layout.json`: "その他"/"ゲーム", legacy-
-    /// imported with real contents per project history, both later found
-    /// with 0 items but their folder entries still present) because only
-    /// the user-driven removal path used to check for the resulting empty
-    /// state.
+    /// Removes items no longer in the catalog from pages and folders, and
+    /// dissolves folders left empty (reusing the same pair `removeFromFolder`
+    /// uses). Without that last step this path left empty named folder shells
+    /// behind, since only the user-driven removal checked for it.
     ///
-    /// Every identifier actually pruned is logged — root-caused why
-    /// specific apps stop matching `validIDs` between scans wasn't possible
-    /// from this session's read-only investigation (code-signing team ID
-    /// and path were both confirmed stable via `codesign` for the affected
-    /// apps), so if this recurs, `DiagnosticsLog.grid` is where to look
-    /// next time instead of reverse-engineering it after the fact. This
-    /// path prunes top-level page items with the exact same `validIDs`
-    /// check, so a recurrence could in principle affect ordinary grid items
-    /// too, not just folder contents — the logging covers both.
+    /// Every pruned identifier is logged: why specific apps stop matching
+    /// between scans has never been root-caused.
     private func pruneMissingItems(validIDs: Set<String>) {
         for pageIndex in pages.indices {
             let before = pages[pageIndex]
@@ -566,20 +507,10 @@ public final class GridModel {
         onChange?()
     }
 
-    /// Real, confirmed report ("フォルダ内だとアプリの並び替えができな
-    /// い"): the folder-internal equivalent of `moveItem` above — same
-    /// remove/clamp/insert shape, but scoped to one page inside a single
-    /// folder's own `pages` array, driven by `FolderOverlayTileView`'s
-    /// SwiftUI `.draggable`/`.dropDestination` (not the main grid's
-    /// AppKit-only `ItemDragSession`, which has no way to address a
-    /// folder's internal contents). Deliberately doesn't span folder pages
-    /// — `FolderContentsViewController` flattens all of a folder's pages
-    /// into one scrollable list for display, but the underlying model
-    /// still pages at `gridSettings.folderGridSize`; letting a drag reorder
-    /// across that boundary would need to decide how the two pages'
-    /// capacities absorb the move, which the caller isn't set up to
-    /// resolve yet (see `FolderContentsViewController.reorderTile`'s own
-    /// same-page guard).
+    /// The folder-internal equivalent of `moveItem`, scoped to one page inside
+    /// one folder. Deliberately does not span folder pages: that would need a
+    /// decision about how the two pages' capacities absorb the move, which the
+    /// caller is not set up to resolve.
     public func moveItemWithinFolder(_ folderID: FolderID, page: Int, fromIndex: Int, toIndex: Int) {
         guard var folder = folders[folderID],
               folder.pages.indices.contains(page),
@@ -655,16 +586,11 @@ public final class GridModel {
 
     /// Brings every folder's pages back in line with `folderGridSize`.
     ///
-    /// `appendToFolder` above is the only place that has ever enforced that
-    /// capacity, and two paths get around it: `createOrJoinFolder` builds a
-    /// two-item folder directly, and `LegacyLaunchpadImporter` puts *every*
-    /// imported item on one page regardless of count. `removeFromFolder`
-    /// separately leaves a hole in a middle page rather than compacting.
-    ///
-    /// None of that was visible while the opened folder flattened all of its
-    /// pages into one scrolling list — it only matters now that a page is
-    /// something the user actually sees and swipes between. Returns whether
-    /// anything moved, so a caller can decide whether a save is warranted.
+    /// `appendToFolder` is the only place that enforces it, and two paths got
+    /// around it: `createOrJoinFolder` built a two-item page directly, and the
+    /// legacy importer put every item on one page. `removeFromFolder` left
+    /// holes. None of it showed while the UI flattened folders into one list.
+    /// Returns whether anything moved, so the caller can decide to save.
     @discardableResult
     public func normalizeFolderPages() -> Bool {
         var changed = false
@@ -716,16 +642,10 @@ public final class GridModel {
         onChange?()
     }
 
-    /// User-invoked "Ungroup" — unlike the private `dissolveFolder`/
-    /// `isFolderEmpty` pair above (which only ever fire automatically once a
-    /// folder has *already* emptied via pruning or a drag-out), this
-    /// dissolves a folder that still has real contents. Flattens the
-    /// folder's internal pages in their existing order and splices them into
-    /// `pages` at exactly the folder's former position — contiguous,
-    /// matching a real Springboard/Launchpad ungroup. Reuses
-    /// `reflowPagesToCurrentCapacity()` for the overflow case (splicing N
-    /// items in place of 1 can push a page over `capacityPerPage`) rather
-    /// than a bespoke overflow routine.
+    /// User-invoked "Ungroup": dissolves a folder that still has contents,
+    /// unlike the automatic `dissolveFolder` for ones already emptied. Splices
+    /// the folder's items into `pages` at its former position, contiguous, and
+    /// reuses the normal reflow for the overflow that can cause.
     public func ungroupFolder(_ id: FolderID) {
         guard let folder = folders[id] else { return }
         let flattenedItems = folder.pages.flatMap { $0 }

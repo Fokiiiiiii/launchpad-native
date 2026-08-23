@@ -2,15 +2,13 @@ import AppKit
 
 /// Renders a live view and reports what actually came out as pixels.
 ///
-/// The layers above this — "the panel exists", "its tiles hold icons" — can all
-/// be satisfied by something the user cannot see. This project has shipped a
-/// folder snapshot that reported success while producing a fully transparent
-/// bitmap, and a folder whose icons were present in the model but drawn as
-/// empty placeholders. Looking at pixels is the only check that covers both.
+/// "The panel exists" and "its tiles hold icons" can both be true of something
+/// the user cannot see — this project has shipped a snapshot that reported
+/// success while producing a transparent bitmap, and a folder whose icons were
+/// in the model but drawn as blank placeholders.
 ///
-/// `cacheDisplay(in:to:)` only yields real pixels for a view that belongs to a
-/// window and has been laid out, so callers must host the view first — the same
-/// constraint `PageSnapshotRenderer` documents in the production path.
+/// `cacheDisplay` only yields real pixels for a view that belongs to a window
+/// and has been laid out, so callers must host the view first.
 @MainActor
 enum RenderProbe {
     static func render(_ view: NSView) -> NSBitmapImageRep? {
@@ -23,11 +21,7 @@ enum RenderProbe {
     }
 
     /// Fraction of sampled points inside `rect` that are not fully transparent.
-    ///
-    /// Sampling rather than reading every pixel: a full-screen bitmap is
-    /// millions of points, and the questions being asked here ("did anything
-    /// draw", "is this region blank") are answered just as well by a grid of
-    /// samples.
+    /// Sampled rather than exhaustive — "did anything draw" needs no more.
     static func coverage(_ bitmap: NSBitmapImageRep, in rect: NSRect, samples: Int = 24) -> Double {
         let scaleX = Double(bitmap.pixelsWide) / Double(bitmap.size.width)
         let scaleY = Double(bitmap.pixelsHigh) / Double(bitmap.size.height)

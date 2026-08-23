@@ -19,39 +19,20 @@ private final class EventMonitorToken: @unchecked Sendable {
 }
 
 /// The grid's item-drag state machine: press feedback, lift, live reorder
-/// preview, folder creation, drag-to-the-edge page turning, and every exit
-/// path back out of a drag.
+/// preview, folder creation, edge page turning, and every exit path out.
 ///
-/// Split out of `GridViewController` because it is by far the largest single
-/// responsibility in that file and the one with the most history — nearly
-/// every ordering detail in here exists because a specific way of getting it
-/// wrong was reproduced on real hardware, and the doc comments record which.
-/// **Nothing in the moved code changed**: the same statements run in the same
-/// order, against the same views. What changed is only how this reaches the
-/// few things it does not own — the current page, committing a page change,
-/// icon prefetching, page snapshots, launching an app, and the keyboard
-/// selection ring — which now arrive as explicit callbacks instead of being
-/// reachable as private members of the same class.
+/// Nearly every ordering detail here exists because a specific way of getting
+/// it wrong was reproduced on real hardware; the doc comments record which.
+/// Nothing changed when this moved out of `GridViewController` — only how it
+/// reaches what it does not own, which now arrives as explicit callbacks.
 ///
-/// The grid's views are held directly (same property names as before) rather
-/// than routed through callbacks: the drag reads `collectionView` in about
-/// fifty places and `view` in a dozen, and forcing those through an indirection
-/// would have meant editing the very lines whose exact form is what several of
-/// these fixes consist of.
-/// Tried as the first hypothesis while root-causing "the grabbed icon
-/// doesn't move" via genuine CGEvent-driven drag testing (not synthetic
-/// `window.sendEvent` — the first time this codebase could exercise a
-/// real, continuous OS-level drag): a plain `NSImageView` is a perfectly
-/// normal hit-testable view, and `createFloatingDragView` adds it *on top
-/// of* `collectionView` (`positioned: .above`), directly under the
-/// cursor. Making it hit-test-transparent turned out NOT to fix the bug on
-/// its own (measured: `mouseDragged` still stopped after the first event
-/// with this alone) — the real cause was `cell.view.isHidden = true`, see
-/// that call site's doc comment. Kept anyway as cheap, correct defense in
-/// depth: a purely decorative/passthrough overlay still shouldn't be
-/// hit-testable, on the same principle as `NonInteractiveGlassEffectView`
-    /// in the shared glass-surface implementation, even though it wasn't this
-    /// bug's cause.
+/// The grid's views are held directly rather than routed through callbacks: the
+/// drag reads `collectionView` in about fifty places, and indirecting those
+/// would mean editing the very lines whose exact form is the fix.
+/// The floating drag preview sits directly under the cursor, above the
+/// collection view. Making it hit-test-transparent did not fix "the grabbed
+/// icon doesn't move" on its own (the cause was `cell.view.isHidden`), but a
+/// passthrough overlay should not be hit-testable regardless.
 private final class NonInteractiveImageView: NSImageView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

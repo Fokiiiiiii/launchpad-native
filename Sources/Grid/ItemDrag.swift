@@ -3,29 +3,16 @@ import Persistence
 
 /// State and tuning for one in-progress item drag.
 ///
-/// Split out of `GridViewController` so the drag's own vocabulary — what a
-/// session holds, and the timing/geometry constants that govern it — reads as
-/// one unit instead of being interleaved with the controller's view wiring.
-/// Behaviour is unchanged; every value here is the one the drag already used.
-///
-/// The constants are deliberately named and documented rather than inlined:
-/// each encodes a decision made against real hardware, and several were
-/// changed in response to specific reports.
+/// The constants are named rather than inlined because each encodes a decision
+/// made against real hardware, several in response to specific reports.
 @MainActor
 enum ItemDrag {
-    /// Which slot the dragged item occupies on `page`, or `nil` if it is not
-    /// on that page at all.
+    /// Which slot the dragged item occupies on `page`, or `nil` if it is not on
+    /// that page — a drag can cross page turns while the item stays behind.
     ///
-    /// A drag can carry the pointer across page turns while the item itself
-    /// stays on the page it was picked up from. Everything that reasons about
-    /// the page currently in view — which cell to leave out of the reorder
-    /// preview, which cells may become folder targets, how many slots a drop
-    /// can choose between — needs this rather than the item's origin index.
-    ///
-    /// Both directions matter. Reported bug ("次のページまで持っていって
-    /// 戻すと元の位置に同じアプリが出てきて増殖する"): returning to the
-    /// origin page must restore the exclusion, or the item's own cell is laid
-    /// out and drawn again beneath the floating icon still under the cursor.
+    /// Both directions matter: returning to the origin page must restore the
+    /// exclusion, or the item is drawn again beneath the floating icon
+    /// ("次のページまで持っていって戻すと…アイコンが増殖する").
     nonisolated static func sourceIndex(
         onPage page: Int,
         sourcePage: Int,
@@ -34,28 +21,20 @@ enum ItemDrag {
         page == sourcePage ? sourceOriginalIndex : nil
     }
 
-    /// `@unchecked Sendable`: `Timer.scheduledTimer`'s completion closure is
-    /// technically a non-isolated context by Swift 6's rules, but in
-    /// practice it always fires on the main run loop (the same actor this
-    /// entire view controller is isolated to) — there is no real
-    /// cross-thread access here, just the compiler unable to see that a
-    /// `Timer` scheduled from `@MainActor` code stays on that same thread.
+    /// `@unchecked Sendable`: a `Timer` closure is non-isolated by Swift 6's
+    /// rules but always fires on the main run loop, which is the actor this is
+    /// already confined to.
     final class ItemDragSession: @unchecked Sendable {
         let sourcePage: Int
         let sourceOriginalIndex: Int
         let draggedItem: LayoutItem
         let originalFrame: NSRect
-        /// The floating view's frame, in the top-level host coordinates, set exactly
-        /// once at creation and never reassigned — see `updateItemDrag`'s
-        /// doc comment for why: all *movement* after that happens purely
-        /// via `transform.translation.x/y`, matching every other continuous
-        /// drag in this codebase (page-drag, reorder preview). Needed here
-        /// as the fixed baseline those translation deltas are computed from.
+        /// Set once at creation and never reassigned: movement happens purely
+        /// through `transform.translation`, and this is the baseline those
+        /// deltas are measured from. See `updateItemDrag` for why.
         var floatingViewOriginalFrameInHost: NSRect = .zero
-        /// Offset from the cell's origin to where the user actually grabbed
-        /// it — respected while following the cursor so the icon doesn't
-        /// jump to be centered under the pointer (apple-design's direct-
-        /// manipulation guidance).
+        /// Where the user grabbed the cell, so the icon does not jump to centre
+        /// itself under the pointer.
         let grabOffset: NSPoint
         var floatingView: NSView?
         weak var floatingViewHost: NSView?
@@ -134,80 +113,34 @@ enum ItemDrag {
     static let itemDragThresholdDistance: CGFloat = 6
     static let itemDragEdgeZoneWidth: CGFloat = 70
     static let itemDragEdgeHoverDelay: TimeInterval = 0.45
-    /// Real, confirmed report ("フォルダ判定をもう少し遅く"): 0.5s let a
-    /// brief pass-over during reordering register as folder intent too
-    /// easily. Raised to 0.7s — still well under a full second (doesn't
-    /// read as unresponsive) but requires more deliberate dwell before
-    /// committing. The hover-progress ring's own sweep duration and the
-    /// debug-hook wait both read this constant directly, so both track the
-    /// new value automatically.
+    /// Raised from 0.5s ("フォルダ判定をもう少し遅く"): a brief pass-over while
+    /// reordering registered as folder intent too easily.
     static let itemDragFolderHoverDelay: TimeInterval = 0.7
-    /// iOS's own folder-creation highlight reads as "a little more than the
-    /// icon," not a separate shape — noticeably but not dramatically larger
-    /// than the icon it wraps. 1.18x keeps the padding visible without the
-    /// indicator ballooning into neighboring cells at tight column counts.
+    /// Reads as "a little more than the icon", not a separate shape — larger
+    /// scales spill into neighbouring cells at tight column counts.
     static let itemDragFolderZoneIndicatorScale: CGFloat = 1.18
-    /// Deliberately rounder than `GridCellItem`'s own app-icon squircle
-    /// ratio (0.236, `applyIconSize`) — this is a plain rounded-square
-    /// backdrop, not an icon mask, and a plumper curve reads as
-    /// "background" rather than "blank icon."
+    /// Rounder than the icon squircle (0.236) on purpose: a plumper curve reads
+    /// as a backdrop rather than a blank icon.
     static let itemDragFolderZoneIndicatorCornerRatio: CGFloat = 0.28
-    /// Real, confirmed report ("上からやってもなんの反応もない"): now that
-    /// the 2D hysteresis radius below is the sole anti-chatter gate (see its
-    /// doc comment), this additional time delay only added pure lag on top
-    /// — dropped to 0. The `Timer` mechanism itself is unchanged so a future
-    /// tuning pass can reintroduce a nonzero value without restructuring
-    /// anything.
+    /// 0 since the 2D hysteresis below became the sole anti-chatter gate; a
+    /// time delay on top was pure lag ("上からやってもなんの反応もない"). The
+    /// timer remains so a nonzero value can be reintroduced.
     static let itemDragReorderDebounce: TimeInterval = 0.0
     static let itemDragFolderZoneInset: CGFloat = 0.2 // ~60% center region
-    /// Round 12 §8a: the pointer must move this fraction of a cell's own
-    /// short side past the committed slot's center before the candidate slot
-    /// is allowed to change at all — a real hysteresis band (spec 7.3)
-    /// around the current selection, replacing the old "any raw nearest-slot
-    /// change restarts the debounce timer" behavior, which could still
-    /// flicker if the pointer sat right on a cell boundary. Real, confirmed
-    /// report ("狙った位置にアプリを置いてもそこにあるアプリが動かない"):
-    /// judging this from `point.x` alone made straight vertical drags onto
-    /// a different row never satisfy the crossing condition — this is now a
-    /// straight-line distance from the committed cell's center, so movement
-    /// in any direction (including pure vertical) can cross it. Raised
-    /// slightly from 0.15 to 0.18 alongside dropping the debounce above to
-    /// 0 — with hysteresis now the *only* anti-chatter layer (instead of
-    /// splitting the job with a time delay), a touch more radius keeps
-    /// boundary flicker damped without feeling sluggish.
+    /// Fraction of a cell's short side the pointer must clear, measured as a
+    /// straight-line distance from the committed cell's centre. Judging it on
+    /// `point.x` alone meant a purely vertical drag never crossed
+    /// ("狙った位置にアプリを置いてもそこにあるアプリが動かない").
     static let itemDragHysteresisFraction: CGFloat = 0.18
-    /// Real, confirmed report ("ページ端についてその先へ無理や進もうとし
-    /// た時に起きるアニメーションが過剰すぎる"): the old linear
-    /// `proximity * 30` formula meant the preview kept growing the harder
-    /// the pointer pushed toward the edge, with no natural ceiling short of
-    /// the zone's own zero/one clamp. `updateEdgePeek` now runs the
-    /// penetration distance through the existing `rubberBand` helper
-    /// (already used for the trackpad page-swipe's own edge resistance)
-    /// instead — overshoot-proportional resistance rather than a hard
-    /// linear ramp. This constant is the rubber band's `dimension`
-    /// term (how quickly it saturates), not a maximum offset: measured
-    /// output for `itemDragEdgeZoneWidth`(70)-sized penetration is ≈14.8pt,
-    /// and ≈5.8pt at 14pt of penetration — both comfortably below the old
-    /// linear formula's up-to-30pt sweep.
+    /// The rubber band's `dimension` term (how fast it saturates), not a
+    /// maximum offset: 70pt of penetration yields ≈14.8pt, 14pt yields ≈5.8pt.
+    /// Replaced a linear ramp that grew without ceiling
+    /// ("ページ端…アニメーションが過剰すぎる"). Pinned by `GridSpringTests`.
     static let itemDragEdgePeekResistanceDimension: CGFloat = 24
-    /// Real, confirmed bug found via a genuine (not simulated) trackpad
-    /// drag on this exact codebase: `mouseDown` -> `mouseDragged` ->
-    /// `beginItemDrag` all fired correctly, but `mouseUp` never arrived —
-    /// AppKit's per-window mouse-tracking continuity (the mechanism
-    /// `GridCollectionView`'s override relies on) isn't guaranteed if the
-    /// pointer leaves the window's bounds, key status changes, or a handful
-    /// of other real-world edge cases a synthetic in-bounds test never hits.
-    /// Without a way out, `activeItemDrag` stayed non-nil forever — the
-    /// floating icon stuck on screen, and every subsequent
-    /// `handleItemMouseDown` treating the grid as still mid-drag,
-    /// effectively freezing all grid interaction ("操作が効かない"). Two
-    /// independent nets, matching the page-drag machinery's own established
-    /// pattern:
-    ///  1. A fixed, generous fallback timer (far longer than any real
-    ///     drag) that force-reverts no matter what.
-    ///  2. A *global* mouse-up monitor — catches a real mouseUp AppKit
-    ///     delivered somewhere else entirely (a different view/window)
-    ///     instead of back to `GridCollectionView`, which the per-window
-    ///     tracking continuity alone can miss.
+    /// Backstop for a real drag where `mouseUp` never arrived: AppKit's
+    /// per-window tracking continuity is not guaranteed once the pointer leaves
+    /// the window or key status changes. Without an exit `activeItemDrag` stayed
+    /// non-nil forever and froze all grid interaction ("操作が効かない"). Paired
+    /// with a global mouse-up monitor, which catches an up delivered elsewhere.
     static let itemDragSafetyNetTimeout: TimeInterval = 15.0
 }
