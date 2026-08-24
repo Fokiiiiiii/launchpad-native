@@ -38,17 +38,15 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// Fired when this window closes — lets the composition root hand key
     /// status back to the still-visible launcher underneath (see
     /// `windowWillClose`'s doc comment for why this is needed at all).
-    private let onWillClose: () -> Void
+    private let dismissal: PanelDismissal
     /// Built once, alongside the window, and kept alive for the controller's
     /// lifetime.
     private var viewModel: SettingsViewModel?
     /// Closes Settings on a click outside its bounds (Round 12 §7) — the
     /// launcher itself must never react to that same click, see
     /// `OutsideClickDismissMonitor`'s doc comment.
-    private var outsideClickMonitor: OutsideClickDismissMonitor?
     /// Round 13 §A: set by `closeWithoutKeyReclaim()` right before closing
     /// — see that method's doc comment for the race it exists to avoid.
-    private var suppressNextWillCloseReclaim = false
 
     public init(
         model: GridModel,
@@ -71,7 +69,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.onMenuBarApplicationsChanged = onMenuBarApplicationsChanged
         self.onBackgroundSettingsChanged = onBackgroundSettingsChanged
         self.onCustomSourcesChanged = onCustomSourcesChanged
-        self.onWillClose = onWillClose
+        self.dismissal = PanelDismissal(onWillClose: onWillClose)
         super.init()
     }
 
@@ -79,13 +77,9 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         if let window {
             viewModel?.refresh()
             PanelPlacement.center(window, on: screen)
-            if outsideClickMonitor == nil {
-                let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak window] in
-                    DiagnosticsLog.settings.info("settings panel: dismissed by a click outside it")
-                    window?.close()
-                }
-                monitor.start()
-                outsideClickMonitor = monitor
+            dismissal.startMonitoring(panelWindow: window) { [weak window] in
+                DiagnosticsLog.settings.info("settings panel: dismissed by a click outside it")
+                window?.close()
             }
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -163,23 +157,14 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak window] in
+        dismissal.startMonitoring(panelWindow: window) { [weak window] in
             DiagnosticsLog.settings.info("settings panel: dismissed by a click outside it")
             window?.close()
         }
-        monitor.start()
-        outsideClickMonitor = monitor
     }
 
     public func windowWillClose(_ notification: Notification) {
-        outsideClickMonitor?.stop()
-        outsideClickMonitor = nil
-        let shouldReclaim = !suppressNextWillCloseReclaim
-        suppressNextWillCloseReclaim = false
-        guard shouldReclaim else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.onWillClose()
-        }
+        dismissal.windowWillClose()
     }
 
     /// Closes Settings if it's open — a no-op otherwise. Used by the
@@ -190,7 +175,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     public func closeWithoutKeyReclaim() {
-        suppressNextWillCloseReclaim = true
+        dismissal.suppressNextKeyReclaim()
         window?.close()
     }
 

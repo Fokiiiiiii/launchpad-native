@@ -17,12 +17,10 @@ public final class WhatsNewWindowController: NSObject, NSWindowDelegate {
     private var window: DismissableWindow?
     /// See `SettingsWindowController.onWillClose`'s doc comment for why this
     /// exists at all — identical reasoning applies here.
-    private let onWillClose: () -> Void
-    private var outsideClickMonitor: OutsideClickDismissMonitor?
-    private var suppressNextWillCloseReclaim = false
+    private let dismissal: PanelDismissal
 
     public init(onWillClose: @escaping () -> Void = {}) {
-        self.onWillClose = onWillClose
+        self.dismissal = PanelDismissal(onWillClose: onWillClose)
         super.init()
     }
 
@@ -94,17 +92,14 @@ public final class WhatsNewWindowController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak self] in
+        dismissal.startMonitoring(panelWindow: window) { [weak self] in
             DiagnosticsLog.whatsNew.info("what's new panel: dismissed by a click outside it")
             self?.close()
         }
-        monitor.start()
-        outsideClickMonitor = monitor
     }
 
     public func close() {
-        outsideClickMonitor?.stop()
-        outsideClickMonitor = nil
+        dismissal.stopMonitoring()
         window?.close()
         window = nil
     }
@@ -112,19 +107,12 @@ public final class WhatsNewWindowController: NSObject, NSWindowDelegate {
     /// See `SettingsWindowController.closeWithoutKeyReclaim()`'s doc comment
     /// for the exact race this avoids (identical reasoning applies here).
     public func closeWithoutKeyReclaim() {
-        suppressNextWillCloseReclaim = true
+        dismissal.suppressNextKeyReclaim()
         close()
     }
 
     public func windowWillClose(_ notification: Notification) {
-        outsideClickMonitor?.stop()
-        outsideClickMonitor = nil
-        let shouldReclaim = !suppressNextWillCloseReclaim
-        suppressNextWillCloseReclaim = false
-        guard shouldReclaim else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.onWillClose()
-        }
+        dismissal.windowWillClose()
     }
 
 }

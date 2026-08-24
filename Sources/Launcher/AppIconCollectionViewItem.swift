@@ -1,4 +1,5 @@
 import AppKit
+import DesignSystem
 import Catalog
 import Localization
 
@@ -139,13 +140,7 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     /// smaller icon — a large, mostly-empty highlighted rectangle. Fixed
     /// the same way as `GridCellItem`: see its `applySelection` doc comment.
     private func applySelection(_ isSelected: Bool) {
-        highlightView.layer?.cornerRadius = 16
-        highlightView.layer?.cornerCurve = .continuous
-        highlightView.layer?.backgroundColor = isSelected
-            ? NSColor.white.withAlphaComponent(0.10).cgColor
-            : NSColor.clear.cgColor
-        highlightView.layer?.borderWidth = isSelected ? 1 : 0
-        highlightView.layer?.borderColor = NSColor.white.withAlphaComponent(0.20).cgColor
+        SelectionHighlight.apply(to: highlightView, isSelected: isSelected)
     }
 
     private var renderedIconFrame: NSRect {

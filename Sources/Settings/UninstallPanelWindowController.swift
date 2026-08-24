@@ -24,8 +24,7 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
     /// accepting clicks/keyboard input. Round 13 §A: this was previously
     /// missing entirely for this controller (an asymmetry versus Settings),
     /// fixed here.
-    private let onWillClose: () -> Void
-    private var outsideClickMonitor: OutsideClickDismissMonitor?
+    private let dismissal: PanelDismissal
     private var viewModel: UninstallPanelViewModel?
     /// Round 20 §C: the sibling `background`/`hosting.view` pair inside the
     /// window's real content view. Kept as stored properties (rather than
@@ -39,7 +38,6 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
     /// Round 13 §A: set by `closeWithoutKeyReclaim()` — see
     /// `SettingsWindowController.closeWithoutKeyReclaim()`'s doc comment for
     /// the race this avoids (identical reasoning applies here).
-    private var suppressNextWillCloseReclaim = false
     /// Guards the destructive action while its operation report is being
     /// persisted. A report-write failure leaves the panel open so its warning
     /// can be read; the model itself also rejects any second execution.
@@ -47,7 +45,7 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
 
     public init(iconCache: IconCache, onWillClose: @escaping () -> Void = {}) {
         self.iconCache = iconCache
-        self.onWillClose = onWillClose
+        self.dismissal = PanelDismissal(onWillClose: onWillClose)
         super.init()
     }
 
@@ -140,12 +138,10 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak self] in
+        dismissal.startMonitoring(panelWindow: window) { [weak self] in
             DiagnosticsLog.settings.info("uninstall panel: dismissed by a click outside it")
             self?.close()
         }
-        monitor.start()
-        outsideClickMonitor = monitor
 
         let cache = iconCache
         Task { [weak self] in
@@ -231,8 +227,7 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
 
     public func close() {
         isConfirming = false
-        outsideClickMonitor?.stop()
-        outsideClickMonitor = nil
+        dismissal.stopMonitoring()
         window?.close()
         window = nil
         viewModel = nil
@@ -244,19 +239,12 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
     /// `SettingsWindowController.closeWithoutKeyReclaim()`'s doc comment for
     /// the exact race this avoids (identical reasoning applies here).
     public func closeWithoutKeyReclaim() {
-        suppressNextWillCloseReclaim = true
+        dismissal.suppressNextKeyReclaim()
         close()
     }
 
     public func windowWillClose(_ notification: Notification) {
-        outsideClickMonitor?.stop()
-        outsideClickMonitor = nil
-        let shouldReclaim = !suppressNextWillCloseReclaim
-        suppressNextWillCloseReclaim = false
-        guard shouldReclaim else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.onWillClose()
-        }
+        dismissal.windowWillClose()
     }
 
 }

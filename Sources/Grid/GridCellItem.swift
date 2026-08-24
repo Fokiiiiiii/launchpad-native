@@ -1,4 +1,5 @@
 import AppKit
+import DesignSystem
 import Catalog
 import Diagnostics
 import Localization
@@ -138,7 +139,7 @@ final class GridCellItem: NSCollectionViewItem {
         if abs((iconTopConstraint?.constant ?? 2) - centeredTop) > 0.5 {
             iconTopConstraint?.constant = centeredTop
         }
-        applyVisualTransforms()
+        resetVisualTransforms()
     }
 
     /// Re-applies the icon geometry to an already-configured cell.
@@ -178,9 +179,11 @@ final class GridCellItem: NSCollectionViewItem {
         view.needsLayout = true
     }
 
-    private func applyVisualTransforms() {
-        // The effective size is now expressed by Auto Layout. Resetting the
-        // old transforms prevents a recycled cell from being scaled twice.
+    /// The effective size is expressed by Auto Layout, so every path that
+    /// configures or recycles this cell clears the layer transforms rather
+    /// than setting one — a leftover transform would scale an already-sized
+    /// cell a second time.
+    private func resetVisualTransforms() {
         resetTransform(for: iconView)
         if let folderHostingView {
             resetTransform(for: folderHostingView)
@@ -191,14 +194,6 @@ final class GridCellItem: NSCollectionViewItem {
     private func resetTransform(for targetView: NSView) {
         targetView.layer?.removeAllAnimations()
         targetView.layer?.setAffineTransform(.identity)
-    }
-
-    private func resetVisualTransforms() {
-        resetTransform(for: iconView)
-        if let folderHostingView {
-            resetTransform(for: folderHostingView)
-        }
-        resetTransform(for: highlightView)
     }
 
     /// Creates (once) and positions `folderHostingView` exactly over
@@ -250,7 +245,7 @@ final class GridCellItem: NSCollectionViewItem {
         view.setAccessibilityLabel(name)
         view.setAccessibilitySelected(isSelected)
         view.setAccessibilityValue(isSelected ? L10n.selectedAccessibilityValue : nil)
-        applyVisualTransforms()
+        resetVisualTransforms()
     }
 
     func configureAsFolder(name: String, isSelected: Bool, iconSize: Double, visualScale: Double = 1, icons: [NSImage], requestKey: String) {
@@ -274,7 +269,7 @@ final class GridCellItem: NSCollectionViewItem {
         view.setAccessibilityLabel("\(name) folder")
         view.setAccessibilitySelected(isSelected)
         view.setAccessibilityValue(isSelected ? L10n.selectedAccessibilityValue : nil)
-        applyVisualTransforms()
+        resetVisualTransforms()
     }
 
     /// Applies real icons once the caller's own `IconCache` fetches finish
@@ -284,17 +279,11 @@ final class GridCellItem: NSCollectionViewItem {
     func setFolderIcons(_ icons: [NSImage]) {
         folderHostingView?.rootView = FolderIconView(icons: icons, size: displayedIconSizeValue)
         folderHostingView?.layoutSubtreeIfNeeded()
-        applyVisualTransforms()
+        resetVisualTransforms()
     }
 
     func applySelection(_ isSelected: Bool) {
-        highlightView.layer?.cornerRadius = 16
-        highlightView.layer?.cornerCurve = .continuous
-        highlightView.layer?.backgroundColor = isSelected
-            ? NSColor.white.withAlphaComponent(0.10).cgColor
-            : NSColor.clear.cgColor
-        highlightView.layer?.borderWidth = isSelected ? 1 : 0
-        highlightView.layer?.borderColor = NSColor.white.withAlphaComponent(0.20).cgColor
+        SelectionHighlight.apply(to: highlightView, isSelected: isSelected)
     }
 
     var iconFrame: NSRect {

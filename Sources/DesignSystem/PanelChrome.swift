@@ -151,3 +151,55 @@ public struct PanelCloseButton: View {
         .accessibilityLabel(accessibilityLabel)
     }
 }
+
+/// Bookkeeping every glass panel repeats: the outside-click monitor's
+/// lifetime, and whether closing should hand key status back to the launcher.
+///
+/// Handing key status back is not unconditional. The launcher's `hide()`
+/// orders its window out only after a fade, so `isVisible` stays true
+/// throughout — and a panel closed *because* the launcher is going away would
+/// otherwise reclaim focus from whatever the user just switched to. Closing
+/// along that path suppresses the reclaim.
+///
+/// The callback fires one run loop later rather than synchronously: called
+/// inside `windowWillClose`, `NSWindow.close()`'s own remaining work runs
+/// afterwards and takes key status back again.
+@MainActor
+public final class PanelDismissal {
+    private let onWillClose: () -> Void
+    private var monitor: OutsideClickDismissMonitor?
+    private var suppressesNextKeyReclaim = false
+
+    public init(onWillClose: @escaping () -> Void) {
+        self.onWillClose = onWillClose
+    }
+
+    public var isMonitoring: Bool { monitor != nil }
+
+    public func startMonitoring(panelWindow: NSWindow, onOutsideClick: @escaping () -> Void) {
+        guard monitor == nil else { return }
+        let monitor = OutsideClickDismissMonitor(panelWindow: panelWindow, onDismiss: onOutsideClick)
+        monitor.start()
+        self.monitor = monitor
+    }
+
+    public func stopMonitoring() {
+        monitor?.stop()
+        monitor = nil
+    }
+
+    public func suppressNextKeyReclaim() {
+        suppressesNextKeyReclaim = true
+    }
+
+    /// Call from `windowWillClose(_:)`.
+    public func windowWillClose() {
+        stopMonitoring()
+        let shouldReclaim = !suppressesNextKeyReclaim
+        suppressesNextKeyReclaim = false
+        guard shouldReclaim else { return }
+        DispatchQueue.main.async { [onWillClose] in
+            onWillClose()
+        }
+    }
+}
