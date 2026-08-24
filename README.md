@@ -2280,6 +2280,67 @@ and there is no signing here by choice. Shipping an updater that cannot verify
 its payload would add a path to running arbitrary code, which is worse than
 having no updater.
 
+## Paging cost, and work the app was doing twice (2026-08-24)
+
+**Paging felt heavy, and moving several pages quickly was unusable.** Two
+separate causes. Committing a page turn waited out the settling spring in full
+before swapping the content — 607ms per turn, where the spring only needs a
+fraction of that to be visually settled; deriving the wait from the spring's
+response instead brought it to 377ms. The larger one was the neighbour-page
+snapshot: it builds a throwaway collection view, every cell in it, and draws
+the result, which measured 320-384ms of blocked main thread *per swipe*.
+Flicking through pages paid that on every one. The same page renders
+identically until the model changes, so it is cached on page, size and icon
+size, and dropped on reload. Measured over six real swipe cycles: 384.7 /
+375.4 / 186.4ms for the first sight of each page, then 1.26 / 0.87 / 0.64ms.
+
+**Then a pass over work that was simply being done more than once.** Counting
+icon requests over the first eight seconds of a launch found 236 of them for a
+95-app catalog — more than twice the number of apps, with 123 resolving
+straight out of the memory cache:
+
+- Prefetch re-requested icons it already had. `reload()` runs on every model
+  mutation, so moving a single icon rebuilt a task group of ~100 awaits that
+  all hit the cache. 122 requests → 31, none of them a hit.
+- The search results collection view kept a full data source while nobody was
+  searching: with an empty query the filter returns every record, and AppKit
+  realizes items regardless of `isHidden`. A screen worth of icons was read for
+  a view that was not on screen. 25 → 0.
+- The wallpaper was resolved twice per launch — once by the background view's
+  initializer, once by the `show()` that immediately follows it. The image
+  itself coalesced, but resolving the *source* enumerates every window on the
+  system (`CGWindowListCopyWindowInfo`, measured at 5.5ms, on the main thread).
+  The redundant second resolve is gone, and what remains now runs off the main
+  thread.
+
+Total 236 → 105 requests, 113 → 70 actual disk reads. Dropping an icon ran
+`reloadData()` three times (model change, settle, then again 0.2s later); the
+last two rebuilt the page for content that had not changed, and the `opacity =
+1` between them was writing a value `prepareForReuse` had already restored.
+`IconCache`'s LRU moved a key through a 192-element array on every *read*,
+which is the hottest path it has; it is a per-entry counter now. The trackpad
+callback — 60-125Hz while a finger is down — allocated two `Set`s per frame,
+one of which existed only to be counted and discarded.
+
+**Dead weight.** `itemOrder` was never written, so the reconcile comparison
+against it was always false; `lastSelectedPage`, `lastScrollPosition` and
+`labelLineCount` were persisted and never read. One `L10n` accessor was
+shipping a string in seven languages for a screen that never displayed it —
+the existing catalog test could not see it, because an accessor keeps its key
+"used" from the catalog's point of view, so a second test now checks from the
+accessor side.
+
+**Copies that had drifted.** Settings, the uninstall panel, onboarding and
+What's New each carried their own copy of the panel window, the outside-click
+monitor, the close button and the centering code. The copies were not equal:
+What's New and onboarding had lost Command-W and the key/main overrides — a
+borderless window is not key-eligible by default — and What's New drew a grey
+`xmark.circle` where the others draw the red traffic-light dot. One
+implementation now lives in `DesignSystem`, with tests pinning exactly the
+behaviour the copies had dropped. The same had happened to the selection
+highlight (grid and search results) and to the log-level names (archive and
+report).
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
