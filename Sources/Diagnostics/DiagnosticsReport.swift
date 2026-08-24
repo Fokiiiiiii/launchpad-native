@@ -117,24 +117,12 @@ public enum DiagnosticsReport {
             for entry in try store.getEntries(at: position) {
                 guard let logEntry = entry as? OSLogEntryLog,
                       logEntry.subsystem == DiagnosticsLog.subsystem else { continue }
-                lines.append("\(formatter.string(from: logEntry.date)) [\(logEntry.category)] [\(levelName(logEntry.level))] \(logEntry.composedMessage)")
+                lines.append("\(formatter.string(from: logEntry.date)) [\(logEntry.category)] [\(logEntry.level.exportName)] \(logEntry.composedMessage)")
             }
             return Array(lines.suffix(limit))
         } catch {
             DiagnosticsLog.appHost.error("Diagnostics report could not read the log store: \(error.localizedDescription, privacy: .public)")
             return []
-        }
-    }
-
-    private static func levelName(_ level: OSLogEntryLog.Level) -> String {
-        switch level {
-        case .debug: return "debug"
-        case .info: return "info"
-        case .notice: return "notice"
-        case .error: return "error"
-        case .fault: return "fault"
-        case .undefined: return "undefined"
-        @unknown default: return "unknown"
         }
     }
 

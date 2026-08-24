@@ -168,8 +168,13 @@ let package = Package(
             path: "Tests/UninstallTests"
         ),
         .testTarget(
+            name: "DesignSystemTests",
+            dependencies: ["DesignSystem"],
+            path: "Tests/DesignSystemTests"
+        ),
+        .testTarget(
             name: "SettingsTests",
-            dependencies: ["Settings", "Uninstall", "Catalog"],
+            dependencies: ["Settings", "Uninstall", "Catalog", "DesignSystem"],
             path: "Tests/SettingsTests"
         ),
         .testTarget(

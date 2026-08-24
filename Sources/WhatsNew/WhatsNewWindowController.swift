@@ -86,7 +86,7 @@ public final class WhatsNewWindowController: NSObject, NSWindowDelegate {
         containerController.view.layoutSubtreeIfNeeded()
         let fittingSize = hosting.view.fittingSize
         window.setContentSize(fittingSize)
-        positionWindow(window, on: screen)
+        PanelPlacement.center(window, on: screen)
         window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) + 1)
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
@@ -94,22 +94,12 @@ public final class WhatsNewWindowController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak self] in self?.close() }
+        let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak self] in
+            DiagnosticsLog.whatsNew.info("what's new panel: dismissed by a click outside it")
+            self?.close()
+        }
         monitor.start()
         outsideClickMonitor = monitor
-    }
-
-    private func positionWindow(_ window: NSWindow, on screen: NSScreen?) {
-        guard let screen else {
-            window.center()
-            return
-        }
-        let target = screen.visibleFrame
-        let origin = NSPoint(
-            x: target.midX - window.frame.width / 2,
-            y: target.midY - window.frame.height / 2
-        )
-        window.setFrameOrigin(origin)
     }
 
     public func close() {

@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import DesignSystem
+import Diagnostics
 import Grid
 import Persistence
 import SwiftUI
@@ -77,9 +78,10 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     public func show(on screen: NSScreen?) {
         if let window {
             viewModel?.refresh()
-            positionWindow(window, on: screen)
+            PanelPlacement.center(window, on: screen)
             if outsideClickMonitor == nil {
                 let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak window] in
+                    DiagnosticsLog.settings.info("settings panel: dismissed by a click outside it")
                     window?.close()
                 }
                 monitor.start()
@@ -147,7 +149,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.setContentSize(SettingsWindowMetrics.size)
         window.isReleasedWhenClosed = false
         window.delegate = self
-        positionWindow(window, on: screen)
+        PanelPlacement.center(window, on: screen)
         // One level above the Dock — and therefore above `LauncherWindow`
         // (`dockLevel - 1`) too — so Settings renders in front of the still-
         // visible launcher grid instead of behind it. `.canJoinAllSpaces`/
@@ -161,22 +163,12 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak window] in window?.close() }
+        let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak window] in
+            DiagnosticsLog.settings.info("settings panel: dismissed by a click outside it")
+            window?.close()
+        }
         monitor.start()
         outsideClickMonitor = monitor
-    }
-
-    private func positionWindow(_ window: NSWindow, on screen: NSScreen?) {
-        guard let screen else {
-            window.center()
-            return
-        }
-        let target = screen.visibleFrame
-        let origin = NSPoint(
-            x: target.midX - window.frame.width / 2,
-            y: target.midY - window.frame.height / 2
-        )
-        window.setFrameOrigin(origin)
     }
 
     public func windowWillClose(_ notification: Notification) {

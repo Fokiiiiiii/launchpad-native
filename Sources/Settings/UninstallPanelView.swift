@@ -1,4 +1,5 @@
 import AppKit
+import DesignSystem
 import Localization
 import SwiftUI
 
@@ -46,7 +47,7 @@ struct UninstallPanelView: View {
             // Round 13 §A: the window's native titlebar/traffic-lights are
             // now fully hidden — this is the only remaining discoverable
             // way to close the panel beyond outside-click/Escape.
-            PanelCloseButton(action: onCancel)
+            PanelCloseButton(accessibilityLabel: L10n.closePanelAccessibilityLabel, action: onCancel)
                 .padding(12)
         }
         .frame(width: 586)

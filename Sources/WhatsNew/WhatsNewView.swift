@@ -1,3 +1,4 @@
+import DesignSystem
 import Localization
 import SwiftUI
 
@@ -35,7 +36,7 @@ public struct WhatsNewView: View {
             }
             .padding(EdgeInsets(top: 40, leading: 44, bottom: 34, trailing: 44))
 
-            PanelCloseButton(action: onClose)
+            PanelCloseButton(accessibilityLabel: L10n.closePanelAccessibilityLabel, action: onClose)
                 .padding(16)
         }
         .frame(width: 640)

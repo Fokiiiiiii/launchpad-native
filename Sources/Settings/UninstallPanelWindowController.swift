@@ -129,7 +129,7 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
         window.setContentSize(NSSize(width: 586, height: 500))
         window.isReleasedWhenClosed = false
         window.delegate = self
-        positionWindow(window, on: screen)
+        PanelPlacement.center(window, on: screen)
         // Same stacking as SettingsWindowController — above the Dock (and
         // therefore above LauncherWindow) so it renders over the still-
         // visible launcher grid instead of behind it.
@@ -140,7 +140,10 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak self] in self?.close() }
+        let monitor = OutsideClickDismissMonitor(panelWindow: window) { [weak self] in
+            DiagnosticsLog.settings.info("uninstall panel: dismissed by a click outside it")
+            self?.close()
+        }
         monitor.start()
         outsideClickMonitor = monitor
 
@@ -208,19 +211,6 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
         newFrame.size.height = clampedHeight
         newFrame.origin.y = center.y - clampedHeight / 2
         window.setFrame(newFrame, display: true, animate: true)
-    }
-
-    private func positionWindow(_ window: NSWindow, on screen: NSScreen?) {
-        guard let screen else {
-            window.center()
-            return
-        }
-        let target = screen.visibleFrame
-        let origin = NSPoint(
-            x: target.midX - window.frame.width / 2,
-            y: target.midY - window.frame.height / 2
-        )
-        window.setFrameOrigin(origin)
     }
 
     private func confirmAndClose() {

@@ -1,4 +1,5 @@
 import AppKit
+import DesignSystem
 import Foundation
 import Testing
 @testable import Settings

@@ -1,4 +1,5 @@
 import AppKit
+import DesignSystem
 import Diagnostics
 import Localization
 import Persistence
@@ -46,7 +47,7 @@ public struct SettingsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .overlay(alignment: .topLeading) {
-            PanelCloseButton(action: onClose)
+            PanelCloseButton(accessibilityLabel: L10n.closePanelAccessibilityLabel, action: onClose)
                 .padding(.leading, 8)
                 .padding(.top, 8)
         }

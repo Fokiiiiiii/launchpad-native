@@ -87,7 +87,7 @@ public enum DiagnosticsArchive {
                 guard let log = entry as? OSLogEntryLog else { continue }
                 collected.append((
                     log.date,
-                    "\(formatter.string(from: log.date)) [\(log.category)] [\(levelName(log.level))] \(log.composedMessage)"
+                    "\(formatter.string(from: log.date)) [\(log.category)] [\(log.level.exportName)] \(log.composedMessage)"
                 ))
             }
             return collected
@@ -100,18 +100,6 @@ public enum DiagnosticsArchive {
                 "Log archive could not read the system store (\(error.localizedDescription, privacy: .public)); falling back to this session"
             )
             return (try? collect(from: OSLogStore(scope: .currentProcessIdentifier))) ?? []
-        }
-    }
-
-    private static func levelName(_ level: OSLogEntryLog.Level) -> String {
-        switch level {
-        case .debug: return "debug"
-        case .info: return "info"
-        case .notice: return "notice"
-        case .error: return "error"
-        case .fault: return "fault"
-        case .undefined: return "undefined"
-        @unknown default: return "unknown"
         }
     }
 
