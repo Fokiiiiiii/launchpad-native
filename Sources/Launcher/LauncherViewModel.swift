@@ -8,6 +8,9 @@ import Foundation
 @MainActor
 public final class LauncherViewModel {
     public private(set) var allRecords: [ApplicationRecord] = []
+    /// Normalized once per catalog change rather than once per keystroke —
+    /// see `SearchableApplication`.
+    private var searchIndex: [SearchableApplication] = []
     public private(set) var filteredRecords: [ApplicationRecord] = []
     public private(set) var query: String = ""
     public private(set) var selectedIndex: Int?
@@ -32,6 +35,12 @@ public final class LauncherViewModel {
 
     public func setRecords(_ records: [ApplicationRecord]) {
         allRecords = records
+        let start = DispatchTime.now()
+        searchIndex = records.map(SearchableApplication.init(record:))
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+        DiagnosticsLog.launcher.info(
+            "search index built: \(records.count, privacy: .public) records in \(ms, privacy: .public)ms"
+        )
         refilter()
     }
 
@@ -71,7 +80,7 @@ public final class LauncherViewModel {
         // catalog sizes around 1,000 apps (one frame at 60Hz).
         let start = DispatchTime.now()
         filteredRecords = LauncherFiltering.filter(
-            allRecords,
+            searchIndex,
             query: query,
             showMenuBarApplications: showMenuBarApplications
         )
