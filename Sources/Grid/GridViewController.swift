@@ -382,8 +382,34 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         guard model.pages.indices.contains(currentPage),
               model.pages[currentPage].indices.contains(indexPath.item) else { return }
         keyboardSelectionActive = true
+        let previous = collectionView.selectionIndexPaths
         collectionView.selectionIndexPaths = [indexPath]
-        collectionView.reloadItems(at: [indexPath])
+        applySelectionToLiveCells(selected: indexPath, clearing: previous)
+        collectionView.scrollToItems(at: [indexPath], scrollPosition: .nearestHorizontalEdge)
+    }
+
+    /// Paints the selection onto the cells that already exist rather than
+    /// reloading them. `reloadItems` replaces the view a cell is made of, and
+    /// asking for that mid-interaction is what once broke item dragging
+    /// outright — but it also simply does not repaint here: the reload is
+    /// batched, so a selection moved by the arrow keys did not appear until
+    /// something else happened to rebuild the page.
+    private func applySelectionToLiveCells(selected: IndexPath, clearing previous: Set<IndexPath>) {
+        for path in previous.union([selected]) {
+            (collectionView.item(at: path) as? GridCellItem)?.applySelection(path == selected)
+        }
+    }
+
+    /// Drops the keyboard selection and its highlight. Clicking or launching
+    /// ends keyboard navigation; leaving the tile behind would suggest the
+    /// arrow keys were still somewhere they are not.
+    private func clearKeyboardSelection() {
+        keyboardSelectionActive = false
+        let previous = collectionView.selectionIndexPaths
+        collectionView.selectionIndexPaths = []
+        for path in previous {
+            (collectionView.item(at: path) as? GridCellItem)?.applySelection(false)
+        }
     }
 
     /// Pages by swapping the data source, not by scrolling — see this file's
@@ -1085,7 +1111,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             prefetchIcons: { [unowned self] page in prefetchAdjacentPageIcons(including: page) },
             pageSnapshot: { [unowned self] page, size in renderPageSnapshot(forPage: page, size: size) },
             activateItem: { [unowned self] indexPath in activate(at: indexPath) },
-            clearKeyboardSelection: { [unowned self] in keyboardSelectionActive = false }
+            clearKeyboardSelection: { [unowned self] in clearKeyboardSelection() }
         )
     )
 

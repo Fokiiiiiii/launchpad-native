@@ -25,6 +25,7 @@ final class GridCellItem: NSCollectionViewItem {
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private var iconWidthConstraint: NSLayoutConstraint?
+    private var highlightInsets: [NSLayoutConstraint] = []
     private var iconHeightConstraint: NSLayoutConstraint?
     private var iconTopConstraint: NSLayoutConstraint?
     private var folderHostingView: NSHostingView<FolderIconView>?
@@ -94,13 +95,21 @@ final class GridCellItem: NSCollectionViewItem {
             label.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 5),
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 2),
             label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
-            labelBottom,
-
-            highlightView.topAnchor.constraint(equalTo: iconView.topAnchor, constant: -8),
-            highlightView.bottomAnchor.constraint(equalTo: label.bottomAnchor, constant: 8),
-            highlightView.leadingAnchor.constraint(equalTo: iconView.leadingAnchor, constant: -16),
-            highlightView.trailingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 16)
+            labelBottom
         ])
+
+        // A square around the icon alone, not a band around icon and label:
+        // the selection should read as the icon sitting on a tile, the way a
+        // focused icon does elsewhere on the system. The insets track the icon
+        // size, so the tile keeps its proportions as the grid is resized.
+        let highlightInsets = [
+            highlightView.topAnchor.constraint(equalTo: iconView.topAnchor),
+            highlightView.bottomAnchor.constraint(equalTo: iconView.bottomAnchor),
+            highlightView.leadingAnchor.constraint(equalTo: iconView.leadingAnchor),
+            highlightView.trailingAnchor.constraint(equalTo: iconView.trailingAnchor)
+        ]
+        self.highlightInsets = highlightInsets
+        NSLayoutConstraint.activate(highlightInsets)
         view = container
         view.wantsLayer = true
     }
@@ -176,8 +185,26 @@ final class GridCellItem: NSCollectionViewItem {
         // recomputed per size change since the corner curve must track the
         // icon's actual current width, not a size set at cell-creation time.
         iconView.layer?.cornerRadius = displayedIconSizeValue * 0.236
+        applyHighlightGeometry()
         view.needsLayout = true
     }
+
+    /// The selection tile, sized from the icon it sits behind.
+    private func applyHighlightGeometry() {
+        let inset = displayedIconSizeValue * Self.highlightIconInsetFraction
+        // top/leading grow outward (negative), bottom/trailing inward.
+        highlightInsets[0].constant = -inset
+        highlightInsets[1].constant = inset
+        highlightInsets[2].constant = -inset
+        highlightInsets[3].constant = inset
+        highlightView.layer?.cornerRadius = (displayedIconSizeValue + inset * 2) * Self.highlightCornerFraction
+        highlightView.layer?.cornerCurve = .continuous
+    }
+
+    /// How far the tile extends past the icon, as a fraction of the icon's
+    /// width, and the tile's own corner radius as a fraction of its side.
+    private static let highlightIconInsetFraction: CGFloat = 0.14
+    private static let highlightCornerFraction: CGFloat = 0.225
 
     /// The effective size is expressed by Auto Layout, so every path that
     /// configures or recycles this cell clears the layer transforms rather
@@ -284,6 +311,12 @@ final class GridCellItem: NSCollectionViewItem {
 
     func applySelection(_ isSelected: Bool) {
         SelectionHighlight.apply(to: highlightView, isSelected: isSelected)
+    }
+
+    /// Test hook: the selection tile's own frame, for checking it stays a
+    /// square around the icon as the grid is resized.
+    var selectionTileFrameForTesting: NSRect? {
+        highlightView.layer?.backgroundColor.flatMap { $0.alpha > 0 ? highlightView.frame : nil }
     }
 
     var iconFrame: NSRect {

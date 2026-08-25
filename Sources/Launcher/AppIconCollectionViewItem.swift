@@ -16,6 +16,7 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     private let iconView = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private var iconWidthConstraint: NSLayoutConstraint?
+    private var highlightInsets: [NSLayoutConstraint] = []
     private var iconHeightConstraint: NSLayoutConstraint?
     private var iconTopConstraint: NSLayoutConstraint?
     private var displayedIconSize: CGFloat = 64
@@ -72,11 +73,19 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
             label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
             labelBottom,
 
-            highlightView.topAnchor.constraint(equalTo: iconView.topAnchor, constant: -8),
-            highlightView.bottomAnchor.constraint(equalTo: label.bottomAnchor, constant: 8),
-            highlightView.leadingAnchor.constraint(equalTo: iconView.leadingAnchor, constant: -16),
-            highlightView.trailingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 16)
         ])
+
+        // Same tile as the main grid's — arrow keys move between the two, and
+        // a selection that changed shape on the way would read as a different
+        // kind of selection.
+        let highlightInsets = [
+            highlightView.topAnchor.constraint(equalTo: iconView.topAnchor),
+            highlightView.bottomAnchor.constraint(equalTo: iconView.bottomAnchor),
+            highlightView.leadingAnchor.constraint(equalTo: iconView.leadingAnchor),
+            highlightView.trailingAnchor.constraint(equalTo: iconView.trailingAnchor)
+        ]
+        self.highlightInsets = highlightInsets
+        NSLayoutConstraint.activate(highlightInsets)
         view = container
     }
 
@@ -99,11 +108,25 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
         displayedIconSize = 64
         iconWidthConstraint?.constant = displayedIconSize
         iconHeightConstraint?.constant = displayedIconSize
+        applyHighlightGeometry()
         view.layer?.removeAllAnimations()
         view.layer?.setAffineTransform(.identity)
         view.layer?.opacity = 1
         view.isHidden = false
         applyVisualTransforms()
+    }
+
+    /// The selection tile, sized from the icon it sits behind. Kept in step
+    /// with the main grid's own proportions.
+    private func applyHighlightGeometry() {
+        let inset = displayedIconSize * 0.14
+        highlightInsets[0].constant = -inset
+        highlightInsets[1].constant = inset
+        highlightInsets[2].constant = -inset
+        highlightInsets[3].constant = inset
+        highlightView.wantsLayer = true
+        highlightView.layer?.cornerRadius = (displayedIconSize + inset * 2) * 0.225
+        highlightView.layer?.cornerCurve = .continuous
     }
 
     /// Matches `Grid.GridCellItem`'s icon sizing — this item was previously
@@ -118,6 +141,7 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
         displayedIconSize = baseSize * scale
         iconWidthConstraint?.constant = displayedIconSize
         iconHeightConstraint?.constant = displayedIconSize
+        applyHighlightGeometry()
         iconView.image = icon
         label.stringValue = record.displayName
         view.wantsLayer = true

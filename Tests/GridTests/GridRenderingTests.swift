@@ -98,6 +98,15 @@ private final class GridHarness {
         return drawn
     }
 
+    /// The cell for one slot on the current page, by index rather than by
+    /// position — `visibleItems()` comes back in no particular order.
+    func cell(at index: Int) -> GridCellItem? {
+        guard let collectionView = controller.view.subviews
+            .compactMap({ $0 as? NSScrollView }).first?.documentView as? NSCollectionView
+        else { return nil }
+        return collectionView.item(at: IndexPath(item: index, section: 0)) as? GridCellItem
+    }
+
     func visibleCells() -> [GridCellItem] {
         guard let collectionView = controller.view.subviews
             .compactMap({ $0 as? NSScrollView }).first?.documentView as? NSCollectionView
@@ -246,4 +255,62 @@ private final class GridHarness {
     let small = harness.controller.pageSnapshotForTesting(page: 1, size: NSSize(width: 800, height: 600))
     let large = harness.controller.pageSnapshotForTesting(page: 1, size: NSSize(width: 1_000, height: 700))
     #expect(small !== large)
+}
+
+// MARK: - Keyboard selection
+
+/// The arrow keys are the only way to reach an icon without a pointer, and the
+/// selection they move has to be visible. It was not: `select` asked for a
+/// `reloadItems`, which `NSCollectionView` batches, so the highlight did not
+/// appear until something else happened to rebuild the page. Painting the live
+/// cell is also what the drag machinery had to switch to, for the same class
+/// of reason.
+@Test @MainActor func arrowKeySelectionPaintsTheCellImmediately() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 14, directory: dir)
+    defer { harness.teardown() }
+    try await harness.waitForIcons(1)
+
+    let before = try #require(RenderProbe.render(harness.controller.view))
+    let target = try #require(harness.cell(at: 4))
+
+    harness.controller.moveSelection(deltaColumns: 0, deltaRows: 0)
+    harness.controller.moveSelection(deltaColumns: 4, deltaRows: 0)
+    let after = try #require(RenderProbe.render(harness.controller.view))
+
+    // The tile sits behind the icon, so sample just outside the icon but
+    // inside where the tile should be.
+    let iconFrame = target.view.convert(target.iconFrame, to: harness.controller.view)
+    let probe = NSPoint(x: iconFrame.minX - 4, y: iconFrame.midY)
+    #expect(
+        RenderProbe.coverage(after, in: NSRect(x: probe.x - 2, y: probe.y - 2, width: 4, height: 4)) > 0.9,
+        "nothing was drawn beside the selected icon"
+    )
+    #expect(
+        RenderProbe.coverage(before, in: NSRect(x: probe.x - 2, y: probe.y - 2, width: 4, height: 4)) < 0.1,
+        "something was already drawn there before anything was selected"
+    )
+}
+
+/// The tile hugs the icon rather than the icon *and* its label: it should read
+/// as the icon sitting on a tile, and a band wide enough to hold a long name
+/// reads as a text selection instead.
+@Test @MainActor func theSelectionTileIsASquareAroundTheIconAlone() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 14, directory: dir)
+    defer { harness.teardown() }
+    try await harness.waitForIcons(1)
+
+    harness.controller.moveSelection(deltaColumns: 0, deltaRows: 0)
+    harness.controller.view.layoutSubtreeIfNeeded()
+
+    let cell = try #require(harness.cell(at: 0))
+    let tile = try #require(cell.selectionTileFrameForTesting)
+    #expect(abs(tile.width - tile.height) < 1, "the tile was not square")
+    #expect(tile.width > cell.iconFrame.width, "the tile did not extend past the icon")
+    #expect(tile.width < cell.iconFrame.width * 1.6, "the tile was far larger than the icon")
+    #expect(abs(tile.midX - cell.iconFrame.midX) < 1, "the tile was not centred on the icon")
+    #expect(abs(tile.midY - cell.iconFrame.midY) < 1, "the tile was not centred on the icon")
 }
