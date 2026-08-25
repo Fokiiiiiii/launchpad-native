@@ -2382,6 +2382,48 @@ that only happens while something is sampling the process, and launch timings
 without a sampler attached (107-202ms end to end) leave no room for it to have
 been the real cost.
 
+## Search that answers what people actually type (2026-08-24)
+
+The filter had grown into one function that folded prefix/substring/subsequence
+booleans through nested ternaries into five ranks. Adding a rank meant editing
+that expression, so ranks stopped being added. The decision is now a
+`MatchTier` enum and a pure `AppSearchMatcher`, ordered by tuple comparison,
+and the ranks that were missing went in:
+
+- **Exact name.** "notes" reaches Notes before Notes Pro.
+- **Word start.** "code" reaches Visual Studio Code before Barcode Reader.
+- **Initials.** "vsc" as an abbreviation, rather than falling through to the
+  subsequence tier where it ranked alongside anything whose letters happen to
+  appear in order.
+- **Reading.** An app whose name only ever appears in Japanese was previously
+  unreachable without switching input modes. A general Latin transform is no
+  help — it renders 写真 as its Chinese reading, "xie zhen" — so the reading
+  comes from the tokenizer's transcription attribute, which uses the same data
+  the input methods do: 写真 → "shashin", システム設定 → "shisutemu settei".
+  Computed only for names containing Japanese, and only while indexing.
+
+The reading tiers are interleaved with the Latin ones rather than stacked
+after them, which the real catalog forced: typing "memo" was returning
+ボイスメモ ahead of メモ, because the former's bundle name is "Voice Memos" and
+a substring of an English name was outranking a Japanese name read in full.
+
+**Recency** breaks ties inside a tier — never across one. Someone who typed
+enough to name an app exactly gets that app, not the one they opened yesterday.
+
+**The loosest tier no longer looks at identifiers or paths.** "memo" threads
+straight through "com.apple.mobilesms", which is why Messages was appearing in
+a search for メモ. Anything genuinely worth finding by identifier is caught by
+the substring tier above it.
+
+Normalization moved too: lowercasing every record's five strings ran on every
+keystroke, and now runs when the catalog changes. Diacritics fold with it, so
+Café is reachable as "cafe". Indexing 98 apps costs 20-48ms; filtering them
+costs microseconds.
+
+**Not adopted: Spotlight's alternate names.** Measured first — on this machine
+all 92 apps report an alternate name, and in every case it is the filename,
+which the index already holds. 98ms for nothing.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon
