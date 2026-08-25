@@ -53,21 +53,39 @@ public actor ApplicationScanner {
     /// path, but overlapping source roots make it possible).
     @discardableResult
     public func performFullScan() -> Snapshot {
+        let start = DispatchTime.now()
+        let known = knownSignatures()
         var merged: [StableAppID: ApplicationRecord] = [:]
         for source in sources.sorted(by: { $0.priority < $1.priority }) {
-            for record in ApplicationBundleReader.scan(source: source) {
+            for record in ApplicationBundleReader.scan(source: source, knownSignatures: known) {
                 merged[record.id] = record
             }
         }
         let changed = merged != snapshot.recordsByID
         snapshot = Snapshot(recordsByID: merged)
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.catalog.info(
-            "Full scan complete: \(merged.count, privacy: .public) applications across \(self.sources.count, privacy: .public) sources"
+            "Full scan complete: \(merged.count, privacy: .public) applications across \(self.sources.count, privacy: .public) sources in \(ms, privacy: .public)ms"
         )
         if changed {
             broadcast()
         }
         return snapshot
+    }
+
+    /// What the current snapshot — restored from disk at launch, or left by
+    /// an earlier scan — already knows about each bundle's code signature.
+    private func knownSignatures() -> [String: ApplicationBundleReader.KnownSignature] {
+        var known: [String: ApplicationBundleReader.KnownSignature] = [:]
+        known.reserveCapacity(snapshot.recordsByID.count)
+        for record in snapshot.recordsByID.values {
+            known[ApplicationBundleReader.signatureCacheKey(for: record.bundleURL)] =
+                ApplicationBundleReader.KnownSignature(
+                    modificationDate: record.lastSeenModificationDate,
+                    teamIdentifier: record.teamIdentifier
+                )
+        }
+        return known
     }
 
     /// Starts watching all source roots for filesystem changes. Each event is
@@ -159,10 +177,11 @@ public actor ApplicationScanner {
         }
         guard !affectedSources.isEmpty else { return }
 
-        var merged = snapshot.recordsByID
+        let known = knownSignatures()
+        let affectedSourceIDs = Set(affectedSources.map(\.id))
+        var merged = snapshot.recordsByID.filter { !affectedSourceIDs.contains($0.value.sourceID) }
         for source in affectedSources {
-            merged = merged.filter { $0.value.sourceID != source.id }
-            for record in ApplicationBundleReader.scan(source: source) {
+            for record in ApplicationBundleReader.scan(source: source, knownSignatures: known) {
                 merged[record.id] = record
             }
         }

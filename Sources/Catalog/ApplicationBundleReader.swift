@@ -5,7 +5,26 @@ import Foundation
 /// that Tier 3 API's selectors are not yet verified, so discovery here relies
 /// only on `Bundle`, `FileManager`, and the public `Security` framework.
 enum ApplicationBundleReader {
-    static func scan(source: ApplicationSource) -> [ApplicationRecord] {
+    /// What a previous scan already learned about a bundle. Reading the code
+    /// signature means building a `SecStaticCode` for the bundle, which in a
+    /// launch sample was 626ms of the 636ms full scan — essentially all of it,
+    /// for ~95 apps that had not changed since the last launch. The
+    /// modification date is what makes reuse safe: a bundle that was replaced
+    /// or updated gets read again.
+    struct KnownSignature: Sendable {
+        let modificationDate: Date
+        let teamIdentifier: String?
+
+        init(modificationDate: Date, teamIdentifier: String?) {
+            self.modificationDate = modificationDate
+            self.teamIdentifier = teamIdentifier
+        }
+    }
+
+    static func scan(
+        source: ApplicationSource,
+        knownSignatures: [String: KnownSignature] = [:]
+    ) -> [ApplicationRecord] {
         let fm = FileManager.default
         var appURLs: [URL] = []
 
@@ -32,10 +51,16 @@ enum ApplicationBundleReader {
 
         appURLs = appURLs.filter { source.matches(bundleFilename: $0.lastPathComponent) }
 
-        return appURLs.compactMap { record(for: $0, sourceID: source.id) }
+        return appURLs.compactMap {
+            record(for: $0, sourceID: source.id, knownSignatures: knownSignatures)
+        }
     }
 
-    static func record(for bundleURL: URL, sourceID: String) -> ApplicationRecord? {
+    static func record(
+        for bundleURL: URL,
+        sourceID: String,
+        knownSignatures: [String: KnownSignature] = [:]
+    ) -> ApplicationRecord? {
         guard let bundle = Bundle(url: bundleURL),
               let bundleIdentifier = bundle.bundleIdentifier else { return nil }
 
@@ -49,11 +74,14 @@ enum ApplicationBundleReader {
             ?? (localizedInfo["CFBundleName"] as? String)
             ?? originalDisplayName
 
-        let teamIdentifier = CodeSigningInspector.teamIdentifier(for: bundleURL)
-        let id = StableAppID(bundleURL: bundleURL, bundleIdentifier: bundleIdentifier, teamIdentifier: teamIdentifier)
-
         let modDate = (try? bundleURL.resourceValues(forKeys: [.contentModificationDateKey]))?
             .contentModificationDate ?? Date(timeIntervalSince1970: 0)
+
+        let known = knownSignatures[signatureCacheKey(for: bundleURL)]
+        let teamIdentifier = known?.modificationDate == modDate
+            ? known?.teamIdentifier
+            : CodeSigningInspector.teamIdentifier(for: bundleURL)
+        let id = StableAppID(bundleURL: bundleURL, bundleIdentifier: bundleIdentifier, teamIdentifier: teamIdentifier)
 
         let executableURL = bundle.executableURL
         let canLaunch = executableURL.map { FileManager.default.isExecutableFile(atPath: $0.path) } ?? false
@@ -85,6 +113,12 @@ enum ApplicationBundleReader {
             canOpenNewInstance: canOpenNewInstance,
             lastSeenModificationDate: modDate
         )
+    }
+
+    /// Matches how `StableAppID` normalizes a bundle path, so a record read
+    /// back from a snapshot lines up with the same bundle on disk.
+    static func signatureCacheKey(for bundleURL: URL) -> String {
+        bundleURL.standardizedFileURL.path
     }
 
     private static func boolish(_ value: Any?) -> Bool {

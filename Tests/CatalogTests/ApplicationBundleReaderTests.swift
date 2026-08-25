@@ -131,3 +131,58 @@ private func makeFixtureApp(
 
     #expect(first.id == second.id)
 }
+
+/// Reading a bundle's code signature builds a `SecStaticCode` for it, which a
+/// launch sample showed to be 626ms of a 636ms full scan — nearly the whole
+/// thing, for apps that had not changed since the previous launch. A scan
+/// carries forward what the last one learned, keyed on the bundle's
+/// modification date.
+@Test func aBundleThatHasNotChangedReusesTheKnownTeamIdentifier() throws {
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let bundleURL = try makeFixtureApp(named: "FixtureApp", bundleIdentifier: "com.example.fixture", in: tempDir)
+    let modificationDate = try #require(
+        (try? bundleURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    )
+
+    // The fixture is unsigned, so anything non-nil coming back can only have
+    // come from the carried-forward value.
+    let known = [
+        ApplicationBundleReader.signatureCacheKey(for: bundleURL): ApplicationBundleReader.KnownSignature(
+            modificationDate: modificationDate,
+            teamIdentifier: "CARRIEDFORWARD"
+        )
+    ]
+    let reused = try #require(
+        ApplicationBundleReader.record(for: bundleURL, sourceID: "s", knownSignatures: known)
+    )
+    #expect(reused.teamIdentifier == "CARRIEDFORWARD")
+}
+
+/// The date is what keeps that safe: a bundle replaced since the last scan
+/// must be read again rather than inheriting the old identity, because the
+/// team identifier feeds `StableAppID` and a wrong one silently turns an app
+/// into a different app.
+@Test func aBundleWithADifferentModificationDateIsReadAgain() throws {
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let bundleURL = try makeFixtureApp(named: "FixtureApp", bundleIdentifier: "com.example.fixture", in: tempDir)
+    let known = [
+        ApplicationBundleReader.signatureCacheKey(for: bundleURL): ApplicationBundleReader.KnownSignature(
+            modificationDate: Date(timeIntervalSince1970: 0),
+            teamIdentifier: "STALE"
+        )
+    ]
+    let rescanned = try #require(
+        ApplicationBundleReader.record(for: bundleURL, sourceID: "s", knownSignatures: known)
+    )
+    #expect(rescanned.teamIdentifier == nil, "a stale entry was reused for a bundle whose date did not match")
+
+    // And a record with no entry at all behaves the same way.
+    let fresh = try #require(ApplicationBundleReader.record(for: bundleURL, sourceID: "s"))
+    #expect(fresh.id == rescanned.id)
+}
