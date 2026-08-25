@@ -195,6 +195,31 @@ private final class GridHarness {
     #expect(first === second, "the second request re-rendered instead of reusing")
 }
 
+/// A page whose icons have not loaded yet renders with gaps. Keeping that
+/// picture meant every later swipe onto the page showed the same gaps, and the
+/// icons only reappeared when the live grid took over at the end of the drag —
+/// an icon that blinks out for the length of a swipe, on that page only,
+/// forever after the one unlucky swipe that cached it.
+@Test @MainActor func anIncompleteSnapshotIsNotKept() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 60, directory: dir)
+    defer { harness.teardown() }
+    // Deliberately no `waitForIcons`: the icons are still loading, which is
+    // exactly the state a swipe can catch a neighbouring page in.
+
+    let size = NSSize(width: 800, height: 600)
+    let first = harness.controller.pageSnapshotForTesting(page: 1, size: size)
+    let second = harness.controller.pageSnapshotForTesting(page: 1, size: size)
+    #expect(first !== second, "a snapshot drawn with missing icons was cached")
+
+    // Once everything is warm the same request does get cached.
+    try await harness.waitForIcons(1)
+    let warm = harness.controller.pageSnapshotForTesting(page: 1, size: size)
+    let warmAgain = harness.controller.pageSnapshotForTesting(page: 1, size: size)
+    #expect(warm === warmAgain, "a complete snapshot was re-rendered instead of reused")
+}
+
 /// A cached snapshot must not outlive the arrangement it depicts.
 @Test @MainActor func changingTheModelInvalidatesCachedSnapshots() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -47,6 +47,10 @@ enum PageSnapshotRenderer {
     /// here would delay the drag's first frame. Pages the user has already
     /// seen are normally warm; a never-seen page renders blank until the live
     /// grid takes over at the end of the drag, an accepted trade-off.
+    ///
+    /// `isComplete` reports whether every icon was warm. A snapshot drawn with
+    /// missing icons is a picture of a moment, not of the page, so the caller
+    /// must not keep it.
     static func render(
         items: [LayoutItem],
         model: GridModel,
@@ -55,7 +59,7 @@ enum PageSnapshotRenderer {
         iconSize: Double,
         visualScale: CGFloat,
         size: NSSize
-    ) -> NSImage? {
+    ) -> (image: NSImage, isComplete: Bool)? {
         let tempLayout = PagedGridLayout()
         tempLayout.settings = model.gridSettings
         let tempCollectionView = NSCollectionView(frame: NSRect(origin: .zero, size: size))
@@ -97,7 +101,7 @@ enum PageSnapshotRenderer {
         tempCollectionView.cacheDisplay(in: tempCollectionView.bounds, to: bitmap)
         let image = NSImage(size: size)
         image.addRepresentation(bitmap)
-        return image
+        return (image, dataSource.drewEveryIcon)
     }
 
     /// Builds the overlay that shows a neighbouring page alongside the live
@@ -156,6 +160,10 @@ private final class SnapshotDataSource: NSObject, NSCollectionViewDataSource {
         items.count
     }
 
+    /// False once any cell had to draw a placeholder for an icon that was not
+    /// in memory yet.
+    private(set) var drewEveryIcon = true
+
     func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
         guard let cell = collectionView.makeItem(withIdentifier: itemIdentifier, for: indexPath) as? GridCellItem,
               items.indices.contains(indexPath.item) else {
@@ -164,7 +172,9 @@ private final class SnapshotDataSource: NSObject, NSCollectionViewDataSource {
         switch items[indexPath.item] {
         case .app(let id):
             guard let record = model.record(for: id) else { return cell }
-            let icon = iconCache.cachedIconIfAvailable(for: record) ?? NSImage()
+            let warmIcon = iconCache.cachedIconIfAvailable(for: record)
+            if warmIcon == nil { drewEveryIcon = false }
+            let icon = warmIcon ?? NSImage()
             let displayName = model.displayName(for: record)
             cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: iconSize, visualScale: visualScale, displayName: displayName)
         case .folder(let folderID):
@@ -178,7 +188,9 @@ private final class SnapshotDataSource: NSObject, NSCollectionViewDataSource {
                 guard case .app(let id) = item else { return nil }
                 return model.record(for: id)
             } ?? []
-            let icons = records.prefix(9).compactMap { iconCache.cachedIconIfAvailable(for: $0) }
+            let previews = Array(records.prefix(9))
+            let icons = previews.compactMap { iconCache.cachedIconIfAvailable(for: $0) }
+            if icons.count < previews.count { drewEveryIcon = false }
             cell.configureAsFolder(name: name, isSelected: false, iconSize: iconSize, visualScale: visualScale, icons: icons, requestKey: "folder:\(folderID.value)")
         }
         return cell

@@ -270,6 +270,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             pages.removeAll { $0 == targetPage }
             pages.insert(targetPage, at: 0)
         }
+        // Then everything else, still in priority order. Paging is not the
+        // only way onto a page — the dots jump straight to one — and a page
+        // reached that way had never been warmed at all, so its icons filled
+        // in a moment after it appeared. The budget below is what bounds this;
+        // for an ordinary catalog it covers every page.
+        pages.append(contentsOf: model.pages.indices)
         var seenPages = Set<Int>()
         let selectedPages = pages.filter {
             model.pages.indices.contains($0) && seenPages.insert($0).inserted
@@ -713,7 +719,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         )
         if let cached = pageSnapshotCache[key] { return cached }
 
-        let image = PageSnapshotRenderer.render(
+        let rendered = PageSnapshotRenderer.render(
             items: model.pages[page],
             model: model,
             iconCache: iconCache,
@@ -722,14 +728,20 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             visualScale: metrics.visualScale,
             size: size
         )
-        if let image {
+        guard let rendered else { return nil }
+        // A snapshot with missing icons is not a picture of the page, it is a
+        // picture of the moment the icons had not loaded yet. Keeping it meant
+        // every later swipe onto that page showed the gap again, and the icons
+        // only appeared once the live grid took over — an icon that blinks out
+        // for the length of a swipe.
+        if rendered.isComplete {
             // Bounded: a neighbour peek only ever needs the pages either side
             // of the current one, and the grid is not usually deep enough for
             // this to grow, but a stale entry is dead weight either way.
             if pageSnapshotCache.count >= 6 { pageSnapshotCache.removeAll(keepingCapacity: true) }
-            pageSnapshotCache[key] = image
+            pageSnapshotCache[key] = rendered.image
         }
-        return image
+        return rendered.image
     }
 
     public func debugSimulatePageDrag(commit: Bool) {
