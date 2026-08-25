@@ -285,6 +285,18 @@ public final class GridModel {
         document.lastUsedByID[id.asPersistenceIdentifier] = Date()
     }
 
+    /// Last-launch times keyed the way `ApplicationRecord.id` is, for search
+    /// ranking. The grid's own order is deliberately left alone — see
+    /// `recordLaunch`.
+    public var lastLaunchDatesByRecordID: [String: Date] {
+        var dates: [String: Date] = [:]
+        dates.reserveCapacity(document.lastUsedByID.count)
+        for (identifier, date) in document.lastUsedByID {
+            dates[identifier.value] = date
+        }
+        return dates
+    }
+
     public func record(for identifier: StableAppIdentifier) -> ApplicationRecord? {
         recordsByIDValue[identifier.value]
     }

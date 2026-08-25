@@ -356,6 +356,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             screenFrame: screen.frame
         )
         viewController?.resetSearch()
+        viewModel.setLastLaunchDates(gridModel.lastLaunchDatesByRecordID)
 
         animationGeneration += 1
 

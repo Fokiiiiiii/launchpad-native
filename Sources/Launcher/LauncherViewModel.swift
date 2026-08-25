@@ -11,6 +11,7 @@ public final class LauncherViewModel {
     /// Normalized once per catalog change rather than once per keystroke —
     /// see `SearchableApplication`.
     private var searchIndex: [SearchableApplication] = []
+    private var lastLaunchDates: [String: Date] = [:]
     public private(set) var filteredRecords: [ApplicationRecord] = []
     public private(set) var query: String = ""
     public private(set) var selectedIndex: Int?
@@ -36,12 +37,18 @@ public final class LauncherViewModel {
     public func setRecords(_ records: [ApplicationRecord]) {
         allRecords = records
         let start = DispatchTime.now()
-        searchIndex = records.map(SearchableApplication.init(record:))
+        searchIndex = records.map({ SearchableApplication(record: $0) })
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.launcher.info(
             "search index built: \(records.count, privacy: .public) records in \(ms, privacy: .public)ms"
         )
         refilter()
+    }
+
+    /// Refreshed when the launcher opens rather than on every launch, so
+    /// results do not reorder underneath someone who is still looking at them.
+    public func setLastLaunchDates(_ dates: [String: Date]) {
+        lastLaunchDates = dates
     }
 
     public func setQuery(_ query: String) {
@@ -82,7 +89,8 @@ public final class LauncherViewModel {
         filteredRecords = LauncherFiltering.filter(
             searchIndex,
             query: query,
-            showMenuBarApplications: showMenuBarApplications
+            showMenuBarApplications: showMenuBarApplications,
+            lastLaunchDates: lastLaunchDates
         )
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.launcher.info("search filter: \(self.allRecords.count, privacy: .public) records took \(ms, privacy: .public)ms")

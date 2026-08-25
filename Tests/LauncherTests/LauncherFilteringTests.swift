@@ -121,7 +121,7 @@ private func record(
 @Test @MainActor func buildingTheIndexForOneThousandRecordsStaysCheap() {
     let records = (0..<1000).map { record("App \($0)", id: "app\($0)") }
     let start = DispatchTime.now()
-    let index = records.map(SearchableApplication.init(record:))
+    let index = records.map({ SearchableApplication(record: $0) })
     let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
     #expect(index.count == 1000)
     #expect(ms < 120, "building an index of 1,000 records took \(ms)ms")
@@ -198,4 +198,74 @@ private func record(
 @Test func aDirectNameMatchOutranksAReadingMatch() {
     let records = [record("メモリ計測", id: "jp"), record("Memory Monitor", id: "mem")]
     #expect(LauncherFiltering.filter(records, query: "memo").first?.displayName == "Memory Monitor")
+}
+
+// MARK: - Recency
+
+/// Two apps matching equally well should not be separated by grid position
+/// alone — the one opened more recently is the likelier target.
+@Test func recentlyOpenedAppsComeFirstAmongEquallyGoodMatches() {
+    let older = record("Terminal", id: "com.example.terminal")
+    let newer = record("Terminal Pro", id: "com.example.terminalpro")
+    let dates = [
+        older.id.value: Date(timeIntervalSince1970: 1_000),
+        newer.id.value: Date(timeIntervalSince1970: 2_000)
+    ]
+    let result = LauncherFiltering.filter([older, newer], query: "termin", lastLaunchDates: dates)
+    #expect(result.map(\.displayName) == ["Terminal Pro", "Terminal"])
+}
+
+/// Recency must stay inside its tier: an exact name still wins over an app
+/// that only shares a prefix, no matter how recently that one was opened.
+@Test func recencyNeverLiftsAResultPastABetterMatch() {
+    let exact = record("Notes", id: "com.example.notes")
+    let prefixed = record("Notes Pro", id: "com.example.notespro")
+    let dates = [prefixed.id.value: Date(timeIntervalSince1970: 9_999)]
+    let result = LauncherFiltering.filter([prefixed, exact], query: "notes", lastLaunchDates: dates)
+    #expect(result.first?.displayName == "Notes")
+}
+
+/// With nothing launched yet, results keep the order the grid gave them.
+@Test func withoutAnyLaunchHistoryTheCallersOrderIsKept() {
+    let records = [record("Alpine", id: "com.example.alpine"), record("Alpha", id: "com.example.alpha")]
+    #expect(LauncherFiltering.filter(records, query: "al").map(\.displayName) == ["Alpine", "Alpha"])
+}
+
+/// The reading tiers mirror the Latin ones: an exact reading beats one that
+/// merely starts with the query, which beats one that contains it somewhere.
+@Test func readingMatchesAreRankedTheSameWayNamesAre() {
+    let records = [
+        record("ボイスメモ", id: "com.example.voice"),
+        record("メモ帳", id: "com.example.pad"),
+        record("メモ", id: "com.example.memo")
+    ]
+    #expect(LauncherFiltering.filter(records, query: "memo").map(\.displayName)
+        == ["メモ", "メモ帳", "ボイスメモ"])
+}
+
+/// A name read in full outranks an English name that merely contains the same
+/// letters — メモ's bundle name is "Notes", ボイスメモ's is "Voice Memos", and
+/// someone typing "memo" means the former.
+@Test func aFullReadingOutranksAnEnglishNameThatContainsTheLetters() {
+    let voice = record("ボイスメモ", id: "com.example.voice")
+    let memo = record("メモ", id: "com.example.notes")
+    let index = [
+        SearchableApplication(record: voice, originalName: "Voice Memos"),
+        SearchableApplication(record: memo, originalName: "Notes")
+    ]
+    #expect(LauncherFiltering.filter(index, query: "memo").map(\.displayName) == ["メモ", "ボイスメモ"])
+}
+
+/// A reading is several words; the query usually names one of them.
+@Test func aWordInsideTheReadingIsEnough() {
+    let records = [record("Safari", id: "com.example.safari"), record("システム設定", id: "com.example.settings")]
+    #expect(LauncherFiltering.filter(records, query: "settei").map(\.displayName) == ["システム設定"])
+}
+
+/// The loosest tier is names only. Threading a query through a bundle
+/// identifier matches nearly everything — "memo" runs straight through
+/// "com.apple.mobilesms" — and says nothing about what the user meant.
+@Test func theLoosestTierIgnoresIdentifiersAndPaths() {
+    let records = [record("メッセージ", id: "com.apple.mobilesms")]
+    #expect(LauncherFiltering.filter(records, query: "memo").isEmpty)
 }

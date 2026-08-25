@@ -6,17 +6,26 @@ import Foundation
 enum MatchTier: Int, Comparable {
     /// The query is the whole name.
     case exactName
+    /// The query is the whole Latin reading of a Japanese name. As strong a
+    /// signal as naming the app outright — someone typing "memo" in full means
+    /// メモ, not the app whose English name happens to contain those letters.
+    case readingExact
     /// The name starts with the query — how most searches are meant.
     case namePrefix
+    /// The reading starts with the query, or the query abbreviates it.
+    case readingPrefix
     /// A word inside the name starts with the query: "code" for
     /// "Visual Studio Code".
     case wordStart
+    /// A word inside the reading starts with the query: "settei" for
+    /// システム設定.
+    case readingWordStart
     /// The query is how the name abbreviates: "vsc" for "Visual Studio Code".
     case initials
     /// The query appears somewhere in the name.
     case nameSubstring
-    /// The Latin reading of a Japanese name matched.
-    case reading
+    /// The query appears somewhere in the reading.
+    case readingSubstring
     /// The bundle identifier, the file on disk, or the app's category.
     case metadata
     /// The query's letters appear in order but not together. Last on purpose:
@@ -33,20 +42,26 @@ enum MatchTier: Int, Comparable {
 /// matters more here than usual: search ranking is easy to change by accident
 /// and hard to notice going wrong.
 enum AppSearchMatcher {
+    /// The reading tiers are interleaved with the Latin ones rather than
+    /// stacked after them. A Japanese name read in full is a stronger signal
+    /// than an English name that merely contains the letters somewhere: typing
+    /// "memo" means メモ, not ボイスメモ (whose bundle name is "Voice Memos").
     static func tier(for query: String, in app: SearchableApplication) -> MatchTier? {
+        let hasReading = !app.latinReading.isEmpty
+
         if app.name == query || app.originalName == query { return .exactName }
+        if hasReading, app.latinReading == query { return .readingExact }
         if app.name.hasPrefix(query) || app.originalName.hasPrefix(query) { return .namePrefix }
+        if hasReading, app.latinReading.hasPrefix(query) || app.latinReadingInitials.hasPrefix(query) {
+            return .readingPrefix
+        }
         if app.words.contains(where: { $0.hasPrefix(query) }) { return .wordStart }
+        if hasReading, app.latinReadingWords.contains(where: { $0.hasPrefix(query) }) {
+            return .readingWordStart
+        }
         if !app.initials.isEmpty, app.initials.hasPrefix(query) { return .initials }
         if app.name.contains(query) || app.originalName.contains(query) { return .nameSubstring }
-
-        if !app.latinReading.isEmpty {
-            if app.latinReading.hasPrefix(query)
-                || app.latinReading.contains(query)
-                || app.latinReadingInitials.hasPrefix(query) {
-                return .reading
-            }
-        }
+        if hasReading, app.latinReading.contains(query) { return .readingSubstring }
 
         if app.bundleIdentifier.contains(query)
             || app.fileName.contains(query)
@@ -54,11 +69,13 @@ enum AppSearchMatcher {
             return .metadata
         }
 
+        // Only the names take part in the loosest tier. Threading a query
+        // through a bundle identifier matches almost anything — "memo" runs
+        // through "com.apple.mobilesms" — and whatever it would have found
+        // there, the substring check above already found honestly.
         if isSubsequence(query, of: app.name)
             || isSubsequence(query, of: app.originalName)
-            || isSubsequence(query, of: app.bundleIdentifier)
-            || isSubsequence(query, of: app.fileName)
-            || isSubsequence(query, of: app.category) {
+            || isSubsequence(query, of: app.latinReading) {
             return .subsequence
         }
 
