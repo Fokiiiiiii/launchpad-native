@@ -83,3 +83,33 @@ private func keyEvent(characters: String, modifiers: NSEvent.ModifierFlags) -> N
     #expect(abs(window.frame.midX - visible.midX) < 1)
     #expect(abs(window.frame.midY - visible.midY) < 1)
 }
+
+/// An app icon is a rounded square drawn inside a canvas that leaves a margin
+/// around it — the artwork is 824 of the canvas's 1024 points. An image view
+/// is sized to the canvas, so a tile measured from the view's own frame is far
+/// larger than it looks against the icon anyone sees; at this grid's sizes it
+/// overran the cell and clipped against the row above.
+@Test @MainActor func theSelectionTileIsMeasuredFromTheArtworkNotTheCanvas() {
+    let canvas: CGFloat = 100
+    let tile = SelectionHighlight.tileGeometry(iconViewSide: canvas)
+    let side = canvas - tile.inset * 2
+    let artwork = canvas * 824 / 1024
+
+    #expect(side > artwork, "the tile did not clear the artwork")
+    #expect(side < artwork * 1.35, "the tile was far larger than the artwork")
+    #expect(side < canvas * 1.1, "the tile would overrun the cell")
+    #expect(tile.cornerRadius > side * 0.15)
+    #expect(tile.cornerRadius < side * 0.3)
+}
+
+/// The tile has to scale with the icon: the grid's icon size follows the row
+/// and column counts, so a fixed inset is right at one setting and wrong at
+/// every other.
+@Test @MainActor func theTileScalesWithTheIcon() {
+    let small = SelectionHighlight.tileGeometry(iconViewSide: 60)
+    let large = SelectionHighlight.tileGeometry(iconViewSide: 180)
+    let smallSide = 60 - small.inset * 2
+    let largeSide = 180 - large.inset * 2
+    #expect(abs(largeSide / smallSide - 3) < 0.01, "the tile did not scale with the icon")
+    #expect(abs(large.cornerRadius / small.cornerRadius - 3) < 0.01)
+}

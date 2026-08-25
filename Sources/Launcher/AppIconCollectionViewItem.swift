@@ -119,13 +119,13 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     /// The selection tile, sized from the icon it sits behind. Kept in step
     /// with the main grid's own proportions.
     private func applyHighlightGeometry() {
-        let inset = displayedIconSize * 0.14
-        highlightInsets[0].constant = -inset
-        highlightInsets[1].constant = inset
-        highlightInsets[2].constant = -inset
-        highlightInsets[3].constant = inset
+        let tile = SelectionHighlight.tileGeometry(iconViewSide: displayedIconSize)
+        highlightInsets[0].constant = tile.inset
+        highlightInsets[1].constant = -tile.inset
+        highlightInsets[2].constant = tile.inset
+        highlightInsets[3].constant = -tile.inset
         highlightView.wantsLayer = true
-        highlightView.layer?.cornerRadius = (displayedIconSize + inset * 2) * 0.225
+        highlightView.layer?.cornerRadius = tile.cornerRadius
         highlightView.layer?.cornerCurve = .continuous
     }
 

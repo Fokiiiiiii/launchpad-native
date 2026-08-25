@@ -279,10 +279,10 @@ private final class GridHarness {
     harness.controller.moveSelection(deltaColumns: 4, deltaRows: 0)
     let after = try #require(RenderProbe.render(harness.controller.view))
 
-    // The tile sits behind the icon, so sample just outside the icon but
-    // inside where the tile should be.
+    // Sample inside the tile but outside the icon artwork: an app icon leaves
+    // a margin inside its own image, so the tile shows through there.
     let iconFrame = target.view.convert(target.iconFrame, to: harness.controller.view)
-    let probe = NSPoint(x: iconFrame.minX - 4, y: iconFrame.midY)
+    let probe = NSPoint(x: iconFrame.minX + 3, y: iconFrame.midY)
     #expect(
         RenderProbe.coverage(after, in: NSRect(x: probe.x - 2, y: probe.y - 2, width: 4, height: 4)) > 0.9,
         "nothing was drawn beside the selected icon"
@@ -309,8 +309,12 @@ private final class GridHarness {
     let cell = try #require(harness.cell(at: 0))
     let tile = try #require(cell.selectionTileFrameForTesting)
     #expect(abs(tile.width - tile.height) < 1, "the tile was not square")
-    #expect(tile.width > cell.iconFrame.width, "the tile did not extend past the icon")
-    #expect(tile.width < cell.iconFrame.width * 1.6, "the tile was far larger than the icon")
+    // The icon view's frame is the icon's *canvas*; the artwork inside it is
+    // smaller, so the tile lands close to the canvas rather than well past it.
+    // Measured against the canvas: a tile the size of the frame would sit far
+    // too loosely around the artwork, and one much larger overruns the cell.
+    #expect(tile.width > cell.iconFrame.width * 0.9, "the tile crowded the icon")
+    #expect(tile.width < cell.iconFrame.width * 1.15, "the tile was far larger than the icon")
     #expect(abs(tile.midX - cell.iconFrame.midX) < 1, "the tile was not centred on the icon")
     #expect(abs(tile.midY - cell.iconFrame.midY) < 1, "the tile was not centred on the icon")
 }

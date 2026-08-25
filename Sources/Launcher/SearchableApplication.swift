@@ -50,8 +50,14 @@ struct SearchableApplication {
 
     /// Case and diacritics are noise for matching: someone typing quickly will
     /// not reach for an accented character to find an app they can see.
+    ///
+    /// Most names and every bundle identifier are plain ASCII, where lowering
+    /// the case is the whole job. `folding` consults Unicode normalization
+    /// tables and costs several times as much, so it is kept for the strings
+    /// that actually need it.
     static func fold(_ text: String) -> String {
-        text.folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: nil)
+        if text.utf8.allSatisfy({ $0 < 0x80 }) { return text.lowercased() }
+        return text.folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: nil)
     }
 
     /// Splits on the seams people abbreviate at: whitespace, punctuation, and

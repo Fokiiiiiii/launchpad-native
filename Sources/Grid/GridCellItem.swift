@@ -189,22 +189,19 @@ final class GridCellItem: NSCollectionViewItem {
         view.needsLayout = true
     }
 
-    /// The selection tile, sized from the icon it sits behind.
+    /// The selection tile, sized from the artwork inside the icon view rather
+    /// than from the view's own frame — see `SelectionHighlight.tileGeometry`.
     private func applyHighlightGeometry() {
-        let inset = displayedIconSizeValue * Self.highlightIconInsetFraction
-        // top/leading grow outward (negative), bottom/trailing inward.
-        highlightInsets[0].constant = -inset
-        highlightInsets[1].constant = inset
-        highlightInsets[2].constant = -inset
-        highlightInsets[3].constant = inset
-        highlightView.layer?.cornerRadius = (displayedIconSizeValue + inset * 2) * Self.highlightCornerFraction
+        let tile = SelectionHighlight.tileGeometry(iconViewSide: displayedIconSizeValue)
+        // top/leading move inward as positives; bottom/trailing as negatives.
+        highlightInsets[0].constant = tile.inset
+        highlightInsets[1].constant = -tile.inset
+        highlightInsets[2].constant = tile.inset
+        highlightInsets[3].constant = -tile.inset
+        highlightView.wantsLayer = true
+        highlightView.layer?.cornerRadius = tile.cornerRadius
         highlightView.layer?.cornerCurve = .continuous
     }
-
-    /// How far the tile extends past the icon, as a fraction of the icon's
-    /// width, and the tile's own corner radius as a fraction of its side.
-    private static let highlightIconInsetFraction: CGFloat = 0.14
-    private static let highlightCornerFraction: CGFloat = 0.225
 
     /// The effective size is expressed by Auto Layout, so every path that
     /// configures or recycles this cell clears the layer transforms rather
