@@ -24,7 +24,33 @@ enum ApplicationBundleReader {
     static func scan(
         source: ApplicationSource,
         knownSignatures: [String: KnownSignature] = [:]
-    ) -> [ApplicationRecord] {
+    ) async -> [ApplicationRecord] {
+        let appURLs = bundleURLs(in: source)
+
+        // Reading a bundle is independent per app and dominated by
+        // `localizedInfoDictionary`, which walks the bundle's resources to
+        // resolve the display name. Nothing here mutates shared state, so the
+        // bundles are read concurrently; the results are put back in the
+        // enumeration's order so a duplicate stable ID still resolves the same
+        // way it did when this was a serial pass.
+        let sourceID = source.id
+        return await withTaskGroup(of: (Int, ApplicationRecord?).self) { group in
+            for (index, url) in appURLs.enumerated() {
+                group.addTask {
+                    (index, record(for: url, sourceID: sourceID, knownSignatures: knownSignatures))
+                }
+            }
+            var byIndex: [Int: ApplicationRecord] = [:]
+            for await (index, record) in group {
+                if let record { byIndex[index] = record }
+            }
+            return appURLs.indices.compactMap { byIndex[$0] }
+        }
+    }
+
+    /// `FileManager`'s directory enumerator cannot be iterated from an
+    /// asynchronous context, so the walk stays in its own synchronous step.
+    private static func bundleURLs(in source: ApplicationSource) -> [URL] {
         let fm = FileManager.default
         var appURLs: [URL] = []
 
@@ -49,11 +75,7 @@ enum ApplicationBundleReader {
             appURLs = contents.filter { $0.pathExtension == "app" }
         }
 
-        appURLs = appURLs.filter { source.matches(bundleFilename: $0.lastPathComponent) }
-
-        return appURLs.compactMap {
-            record(for: $0, sourceID: source.id, knownSignatures: knownSignatures)
-        }
+        return appURLs.filter { source.matches(bundleFilename: $0.lastPathComponent) }
     }
 
     static func record(

@@ -52,12 +52,12 @@ public actor ApplicationScanner {
     /// by two sources (should be rare since identity includes the resolved
     /// path, but overlapping source roots make it possible).
     @discardableResult
-    public func performFullScan() -> Snapshot {
+    public func performFullScan() async -> Snapshot {
         let start = DispatchTime.now()
         let known = knownSignatures()
         var merged: [StableAppID: ApplicationRecord] = [:]
         for source in sources.sorted(by: { $0.priority < $1.priority }) {
-            for record in ApplicationBundleReader.scan(source: source, knownSignatures: known) {
+            for record in await ApplicationBundleReader.scan(source: source, knownSignatures: known) {
                 merged[record.id] = record
             }
         }
@@ -117,11 +117,11 @@ public actor ApplicationScanner {
     /// watchers are torn down before the first scan so removed folders cannot
     /// continue emitting stale events; subscribers receive the rebuilt
     /// snapshot through the normal update stream.
-    public func replaceSources(_ newSources: [ApplicationSource]) {
+    public func replaceSources(_ newSources: [ApplicationSource]) async {
         let wasWatching = watcher != nil
         stopWatching()
         sources = newSources
-        _ = performFullScan()
+        _ = await performFullScan()
         if wasWatching {
             startWatching()
         }
@@ -164,7 +164,7 @@ public actor ApplicationScanner {
         }
     }
 
-    private func flushPendingChanges() {
+    private func flushPendingChanges() async {
         debounceTask = nil
         let changedPaths = Array(pendingChangedPaths)
         pendingChangedPaths.removeAll()
@@ -181,7 +181,7 @@ public actor ApplicationScanner {
         let affectedSourceIDs = Set(affectedSources.map(\.id))
         var merged = snapshot.recordsByID.filter { !affectedSourceIDs.contains($0.value.sourceID) }
         for source in affectedSources {
-            for record in ApplicationBundleReader.scan(source: source, knownSignatures: known) {
+            for record in await ApplicationBundleReader.scan(source: source, knownSignatures: known) {
                 merged[record.id] = record
             }
         }

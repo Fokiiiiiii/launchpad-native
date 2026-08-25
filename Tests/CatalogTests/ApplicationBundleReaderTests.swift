@@ -39,7 +39,7 @@ private func makeFixtureApp(
     return bundleURL
 }
 
-@Test func scanFindsFixtureAppWithExpectedFields() throws {
+@Test func scanFindsFixtureAppWithExpectedFields() async throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -47,7 +47,7 @@ private func makeFixtureApp(
     _ = try makeFixtureApp(named: "FixtureApp", bundleIdentifier: "com.example.fixture", in: tempDir)
 
     let source = ApplicationSource(id: "fixture", rootURL: tempDir, recursive: false, priority: 0)
-    let records = ApplicationBundleReader.scan(source: source)
+    let records = await ApplicationBundleReader.scan(source: source)
 
     #expect(records.count == 1)
     let record = try #require(records.first)
@@ -59,7 +59,7 @@ private func makeFixtureApp(
     #expect(record.canOpenNewInstance == true)
 }
 
-@Test func backgroundOnlyAndMultipleInstanceFlagsAreRead() throws {
+@Test func backgroundOnlyAndMultipleInstanceFlagsAreRead() async throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -73,14 +73,14 @@ private func makeFixtureApp(
     )
 
     let source = ApplicationSource(id: "fixture", rootURL: tempDir, recursive: false, priority: 0)
-    let record = try #require(ApplicationBundleReader.scan(source: source).first)
+    let record = try #require(await ApplicationBundleReader.scan(source: source).first)
 
     #expect(record.isBackgroundOnly == false)
     #expect(record.isMenuBarApp == true)
     #expect(record.canOpenNewInstance == false)
 }
 
-@Test func backgroundOnlyAndMenuBarFlagsRemainIndependent() throws {
+@Test func backgroundOnlyAndMenuBarFlagsRemainIndependent() async throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -93,7 +93,7 @@ private func makeFixtureApp(
     )
 
     let record = try #require(
-        ApplicationBundleReader.scan(
+        await ApplicationBundleReader.scan(
             source: ApplicationSource(id: "fixture", rootURL: tempDir, recursive: false, priority: 0)
         ).first
     )
