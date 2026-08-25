@@ -394,11 +394,30 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private static let pageSlideOffset: CGFloat = 18
     private var pageTransitionGeneration = 0
 
-    /// How long to let a page-change spring run before swapping the data
-    /// source under it. A critically damped spring has visually arrived after
-    /// roughly one `response`; the small margin covers the last of the ease.
-    static func pageSwapDelay(response: CGFloat) -> TimeInterval {
-        TimeInterval(min(max(response * 1.15, 0.12), 0.42))
+    /// Timings for moving between pages, gathered in one place because they
+    /// have to move together: the data swap is scheduled off the same
+    /// `response` that drives the spring, so changing one alone either shows
+    /// the swap mid-flight or leaves the page sitting still after it lands.
+    enum PageTransition {
+        /// Just short of critically damped. No overshoot: a page that drifts
+        /// back at the edge reads as the transition catching.
+        static let damping: CGFloat = 0.98
+
+        /// A page leaving, and the same page coming back when a drag is
+        /// abandoned.
+        static let exitResponse: CGFloat = 0.30
+        /// A page arriving. Slightly longer than the exit so the incoming page
+        /// settles rather than snapping into place.
+        static let entryResponse: CGFloat = 0.36
+        /// A trackpad swipe carried far enough to commit.
+        static let commitResponse: CGFloat = 0.34
+
+        /// How long to let the spring run before swapping the data source
+        /// under it. A critically damped spring has visually arrived after
+        /// roughly one `response`; the margin covers the last of the ease.
+        static func swapDelay(response: CGFloat) -> TimeInterval {
+            TimeInterval(min(max(response * 1.15, 0.12), 0.5))
+        }
     }
 
     private func jumpToPage(_ index: Int) {
@@ -423,8 +442,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             keyPath: "transform.translation.x",
             from: currentOffset,
             to: exitTarget,
-            damping: 0.98,
-            response: 0.22
+            damping: PageTransition.damping,
+            response: PageTransition.exitResponse
         )
         layer?.add(exitSpring, forKey: "pageSlideOut")
         CATransaction.begin()
@@ -432,7 +451,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         layer?.setValue(exitTarget, forKeyPath: "transform.translation.x")
         CATransaction.commit()
 
-        let settleDelay = Self.pageSwapDelay(response: 0.22)
+        let settleDelay = PageTransition.swapDelay(response: PageTransition.exitResponse)
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) { [weak self] in
             Task { @MainActor in
                 guard let self, self.pageTransitionGeneration == generation else { return }
@@ -462,8 +481,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                     keyPath: "transform.translation.x",
                     from: direction * offset,
                     to: 0,
-                    damping: 0.98,
-                    response: 0.26
+                    damping: PageTransition.damping,
+                    response: PageTransition.entryResponse
                 )
                 self.collectionView.layer?.add(entrySpring, forKey: "pageSlideIn")
                 self.collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
@@ -582,11 +601,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let targetTranslation: CGFloat = commit ? (dragDirection > 0 ? -width : width) : 0
         let distanceRemaining = targetTranslation - deltaX
 
-        // Critically damped both ways: at 0.97 the commit spring kept easing
-        // for a long tail after it had visually arrived, and the swap waited on
-        // that tail. No overshoot also means the page does not drift back at the
-        // edge, which read as the transition catching.
-        let (damping, response): (CGFloat, CGFloat) = commit ? (1.0, 0.24) : (1.0, 0.22)
+        let response = commit ? PageTransition.commitResponse : PageTransition.exitResponse
+        let damping = PageTransition.damping
         let boundedVelocity = min(max(velocity, -1600), 1600)
         let relativeVelocity = abs(distanceRemaining) > 1 ? boundedVelocity / distanceRemaining : 0
 
@@ -614,7 +630,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // arrived — measured 417ms for a page that looked settled in about
         // half that, and the data swap sat waiting for all of it. That wait was
         // the lag: the swap itself takes ~7ms.
-        let settleDuration = Self.pageSwapDelay(response: response)
+        let settleDuration = PageTransition.swapDelay(response: response)
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) { [weak self] in
             Task { @MainActor in
                 guard let self, self.dragGeneration == generation else { return }

@@ -107,3 +107,35 @@ import Testing
     #expect(GridSpring.estimateVelocity(from: nil, at: 10.0, to: 50, at: 10.1) == 0)
     #expect(GridSpring.estimateVelocity(from: 0, at: nil, to: 50, at: 10.1) == 0)
 }
+
+// MARK: - Page transition timing
+
+/// The data swap is scheduled off the spring's own `response`, so the two have
+/// to stay related. Waiting on `settlingDuration` instead — when the spring
+/// stops *moving* rather than when it has visually arrived — was measured at
+/// 417ms for a page that looked settled in about half that, and the page sat
+/// showing its old contents for the difference.
+@Test @MainActor func theDataSwapIsTimedFromTheSpringsResponse() {
+    for response in [GridViewController.PageTransition.exitResponse,
+                     GridViewController.PageTransition.entryResponse,
+                     GridViewController.PageTransition.commitResponse] {
+        let delay = GridViewController.PageTransition.swapDelay(response: response)
+        #expect(delay >= Double(response), "the swap would land before the page does")
+        #expect(delay <= Double(response) * 1.4, "the page would sit still waiting for the swap")
+    }
+}
+
+/// Bounded at both ends: a response tuned very short must not swap so early
+/// that the page is still visibly moving, and a long one must not leave the
+/// page parked.
+@Test @MainActor func theSwapDelayStaysWithinItsBounds() {
+    #expect(GridViewController.PageTransition.swapDelay(response: 0.01) == 0.12)
+    #expect(GridViewController.PageTransition.swapDelay(response: 10) == 0.5)
+}
+
+/// Overshoot at a page boundary reads as the transition catching rather than
+/// as bounce, so these springs stay just short of critically damped.
+@Test @MainActor func pageSpringsDoNotOvershoot() {
+    #expect(GridViewController.PageTransition.damping >= 0.95)
+    #expect(GridViewController.PageTransition.damping <= 1.0)
+}
