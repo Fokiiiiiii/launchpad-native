@@ -174,8 +174,6 @@ public final class PanelDismissal {
         self.onWillClose = onWillClose
     }
 
-    public var isMonitoring: Bool { monitor != nil }
-
     public func startMonitoring(panelWindow: NSWindow, onOutsideClick: @escaping () -> Void) {
         guard monitor == nil else { return }
         let monitor = OutsideClickDismissMonitor(panelWindow: panelWindow, onDismiss: onOutsideClick)

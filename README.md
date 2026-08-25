@@ -2341,6 +2341,47 @@ behaviour the copies had dropped. The same had happened to the selection
 highlight (grid and search results) and to the log-level names (archive and
 report).
 
+## Where the launch actually goes (2026-08-24)
+
+A stack sample of a launch, rather than another round of reading code. The
+largest single frame under the catalog scan was not the scan: of 636ms,
+**626ms was `CodeSigningInspector.teamIdentifier`** — `SecStaticCodeCreateWithPath`
+building a `BundleDiskRep` for each of ~95 apps, essentially none of which had
+changed since the previous launch.
+
+The team identifier feeds `StableAppID`, so getting it wrong turns an app into
+a different app and scrambles the grid. What makes reuse safe is the bundle's
+modification date, which the restored snapshot already carries: a scan now
+takes `(path → date + team id)` from the previous one and only re-reads the
+signature where the date does not match. The incremental FSEvents rescan gets
+the same treatment — a changed app has a changed date, so it is always re-read.
+
+What remained was `NSBundle.localizedInfoDictionary` (197ms), which walks a
+bundle's resources to resolve its display name. Skipping *that* would show
+stale app names, so it stays — but bundles are independent, so they are read
+concurrently through a task group, keeping the enumeration order so a
+duplicate stable ID still resolves the way it did serially.
+
+    full scan, real catalog of 98 apps, median of four runs
+    before                 610ms
+    signature reuse        284ms
+    + concurrent reads      96ms
+
+The scan runs on a utility task, not the main thread, so this is CPU and time
+to a settled catalog rather than a frozen window — but it is CPU spent every
+single launch to re-learn what was already known.
+
+**One thing tried and reverted.** The same sample showed 329ms inside
+`NSTextView.updateWritingToolsSelection` → `dlopen`, soft-linking the Writing
+Tools framework during the search field's first layout. Turning Writing Tools
+off for a field that only ever holds an app name looked like free savings, but
+`NSTextField` exposes no such property and routing it through the cell's
+`fieldEditor(for:)` recursed into `NSWindow.fieldEditor(_:for:)` and blew the
+stack. Backed out: most of that 329ms is the debugger-notification round trip
+that only happens while something is sampling the process, and launch timings
+without a sampler attached (107-202ms end to end) leave no room for it to have
+been the real cost.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon

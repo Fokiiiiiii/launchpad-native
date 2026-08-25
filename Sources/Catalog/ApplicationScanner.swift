@@ -105,7 +105,7 @@ public actor ApplicationScanner {
         }
     }
 
-    public func stopWatching() {
+    func stopWatching() {
         watcher?.stop()
         watcher = nil
         debounceTask?.cancel()
