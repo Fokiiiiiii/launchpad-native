@@ -92,7 +92,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Shared by the initial-launch branch and `applicationShouldHandleReopen`
     /// so both agree on whether onboarding still owns this launch.
     private var shouldShowOnboarding: Bool {
-        ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_FORCE_ONBOARDING"] == "1" || !OnboardingState.hasCompleted()
+        #if LAUNCHPAD_DEBUG_HOOKS
+        return ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_FORCE_ONBOARDING"] == "1"
+            || !OnboardingState.hasCompleted()
+        #else
+        return !OnboardingState.hasCompleted()
+        #endif
     }
 
     private func applicationSources() -> [ApplicationSource] {
@@ -177,27 +182,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 launcherWindowController.show()
                 presentWhatsNewIfNeeded()
 
+#if LAUNCHPAD_DEBUG_HOOKS
                 if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_SETTINGS"] == "1" {
                     whatsNewWindowController.closeWithoutKeyReclaim()
                     settingsWindowController.show(on: launcherWindowController.currentScreen)
                 }
+                #endif
             }
 
+#if LAUNCHPAD_DEBUG_HOOKS
             if let query = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SEARCH_QUERY"], !query.isEmpty {
                 launcherWindowController.debugSetSearchQuery(query)
             }
+            #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
             if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_CLICK_SEARCH_FIELD"] == "1" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                     self?.launcherWindowController.debugSimulateSearchFieldClick()
                 }
             }
+            #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
             if let text = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_TYPE_SEARCH_FIELD"], !text.isEmpty {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                     self?.launcherWindowController.debugSimulateSearchFieldTyping(text)
                 }
             }
+            #endif
 
             // Reconcile the live catalog after the first frame. The scan runs
             // on the Catalog actor from a utility task, so Bundle metadata and
@@ -210,6 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
 
+#if LAUNCHPAD_DEBUG_HOOKS
             if let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG"] {
                 if mode == "rapid" {
                     launcherWindowController.debugSimulatePageDrag(commit: true)
@@ -220,15 +234,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     launcherWindowController.debugSimulatePageDrag(commit: mode != "abort")
                 }
             }
+            #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
             if let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG"] {
                 launcherWindowController.debugSimulateItemDrag(mode: mode)
             }
+            #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
             if let ordinal = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_OPEN_FIRST_FOLDER"].flatMap(Int.init) {
                 launcherWindowController.debugOpenFolder(ordinal: ordinal)
             }
+            #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
             if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_UNINSTALL"] == "1" {
                 let fixtureURL = URL(fileURLWithPath: NSHomeDirectory() + "/.cache/launchpad-native/fixtures/UninstallFixture.app")
                 let bundleID = "com.launchpadnative.uninstallfixture"
@@ -256,6 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.uninstallPanelWindowController.show(for: record, allRecords: [record], on: self.launcherWindowController.currentScreen)
                 }
             }
+            #endif
 
             var skippedRestoredSnapshot = false
             let restoredIDs = Set(cachedRecords.map { $0.id })
@@ -270,6 +291,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+#if LAUNCHPAD_DEBUG_HOOKS
         if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                 self?.settingsWindowController.show(on: self?.launcherWindowController.currentScreen)
@@ -282,6 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        #endif
     }
 
     /// Applies a candidate trigger configuration as a transaction: capture
@@ -412,12 +435,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func normalizedTriggerSettings(_ requested: TriggerSettings) -> TriggerSettings {
-        TriggerSettingsPolicy.normalized(
-            requested,
-            // Debug-only override so triggers can be forced on for verification
-            // without going through the Settings window.
-            forceAllTriggers: ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_ALL_TRIGGERS"] == "1"
-        )
+        #if LAUNCHPAD_DEBUG_HOOKS
+        // Debug-only override so triggers can be forced on for verification
+        // without going through the Settings window.
+        let forceAllTriggers = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_ALL_TRIGGERS"] == "1"
+        #else
+        let forceAllTriggers = false
+        #endif
+        return TriggerSettingsPolicy.normalized(requested, forceAllTriggers: forceAllTriggers)
     }
 
     private func openLauncherFromMultitouch() {

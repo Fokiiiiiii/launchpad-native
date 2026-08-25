@@ -1,6 +1,13 @@
 // swift-tools-version:6.0
 import PackageDescription
 
+/// The debug hooks (`LAUNCHPAD_DEBUG_*`) drive the app from the outside for
+/// verification: they open panels, synthesize drags, and in some cases write
+/// to the real layout. None of that belongs in a build anyone else runs, so
+/// the condition is only defined for debug builds and the hooks compile out
+/// of `Scripts/build-app.sh release` entirely.
+let debugHooks = SwiftSetting.define("LAUNCHPAD_DEBUG_HOOKS", .when(configuration: .debug))
+
 let package = Package(
     name: "LaunchpadNative",
     defaultLocalization: "en",
@@ -11,7 +18,8 @@ let package = Package(
         .executableTarget(
             name: "AppHost",
             dependencies: ["Diagnostics", "Catalog", "Persistence", "Launcher", "Localization", "Triggers", "Settings", "Onboarding", "WhatsNew"],
-            path: "Sources/AppHost"
+            path: "Sources/AppHost",
+            swiftSettings: [debugHooks]
         ),
         .target(
             name: "Diagnostics",
@@ -39,12 +47,14 @@ let package = Package(
         .target(
             name: "Launcher",
             dependencies: ["Diagnostics", "Catalog", "Grid", "Localization", "DesignSystem"],
-            path: "Sources/Launcher"
+            path: "Sources/Launcher",
+            swiftSettings: [debugHooks]
         ),
         .target(
             name: "Grid",
             dependencies: ["Diagnostics", "Catalog", "Persistence", "WindowBrowser", "Localization", "DesignSystem"],
             path: "Sources/Grid",
+            swiftSettings: [debugHooks],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .target(
@@ -55,7 +65,8 @@ let package = Package(
         .target(
             name: "Settings",
             dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Uninstall", "Localization", "DesignSystem"],
-            path: "Sources/Settings"
+            path: "Sources/Settings",
+            swiftSettings: [debugHooks]
         ),
         .target(
             name: "WindowBrowser",

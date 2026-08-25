@@ -339,11 +339,14 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         view.window?.makeFirstResponder(searchField)
     }
 
+#if LAUNCHPAD_DEBUG_HOOKS
     func debugSetSearchQuery(_ query: String) {
         searchField.stringValue = query
         applyQuery(query)
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     func debugSimulateSearchFieldClick() {
         guard let window = view.window else {
             DiagnosticsLog.launcher.info("debugSimulateSearchFieldClick: no window")
@@ -388,7 +391,9 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         window.sendEvent(mouseUp)
         DiagnosticsLog.launcher.info("debugSimulateSearchFieldClick: after sendEvent, firstResponder=\(String(describing: window.firstResponder), privacy: .public), windowIsVisible=\(window.isVisible, privacy: .public), windowIsKey=\(window.isKeyWindow, privacy: .public)")
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     func debugSimulateSearchFieldTyping(_ text: String) {
         guard let window = view.window else {
             DiagnosticsLog.launcher.info("debugSimulateSearchFieldTyping: no window")
@@ -413,6 +418,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         }
         logSearchFieldEditingGeometryIfEnabled(context: "afterDebugTyping")
     }
+    #endif
 
     func reloadGrid() {
         gridViewController.reload()
@@ -475,26 +481,32 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         applySearchResultsLayoutMetrics()
     }
 
+#if LAUNCHPAD_DEBUG_HOOKS
     /// Debug-only entry point (`LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG`, wired
     /// in `AppDelegate`) — see `GridViewController.debugSimulatePageDrag`'s
     /// doc comment for why this exists.
     func debugSimulatePageDrag(commit: Bool) {
         gridViewController.debugSimulatePageDrag(commit: commit)
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     /// Debug-only entry point (`LAUNCHPAD_DEBUG_OPEN_FIRST_FOLDER`, wired
     /// in `AppDelegate`) — see `GridViewController.debugOpenFolder`'s
     /// doc comment for why this exists.
     func debugOpenFolder(ordinal: Int) {
         gridViewController.debugOpenFolder(ordinal: ordinal)
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     /// Debug-only entry point (`LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG`, wired
     /// in `AppDelegate`) — see `GridViewController.debugSimulateItemDrag`'s
     /// doc comment for why this exists.
     func debugSimulateItemDrag(mode: String) {
         gridViewController.debugSimulateItemDrag(mode: mode)
     }
+    #endif
 
     private func applySearchResultsLayoutMetrics() {
         let cellSize = gridViewController.currentCellSize
@@ -646,12 +658,16 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     }
 
     private func logSearchFieldEditingGeometryIfEnabled(context: String) {
+        #if !LAUNCHPAD_DEBUG_HOOKS
+        return
+        #else
         guard ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SEARCH_FIELD_EDITING"] == "1" else { return }
         let fieldEditor = view.window?.fieldEditor(false, for: searchField) as? NSTextView
         let cellDrawingRect = (searchField.cell as? SearchFieldCell)?.drawingRect(forBounds: searchField.bounds)
         DiagnosticsLog.launcher.info("""
             searchFieldEditingGeometry[\(context, privacy: .public)]: fieldEditor.frame=\(String(describing: fieldEditor?.frame), privacy: .public), fieldEditor.textContainerInset=\(String(describing: fieldEditor?.textContainerInset), privacy: .public), cellDrawingRect=\(String(describing: cellDrawingRect), privacy: .public), searchField.bounds=\(String(describing: self.searchField.bounds), privacy: .public), searchField.textColor=\(String(describing: self.searchField.textColor), privacy: .public), fieldEditor.textColor=\(String(describing: fieldEditor?.textColor), privacy: .public), fieldEditor.typingAttributes=\(String(describing: fieldEditor?.typingAttributes), privacy: .public), fieldEditor.string=\(String(describing: fieldEditor?.string), privacy: .public)
             """)
+        #endif
     }
 
     private func applyQuery(_ query: String) {

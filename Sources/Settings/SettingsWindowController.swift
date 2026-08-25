@@ -179,7 +179,9 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         window?.close()
     }
 
+#if LAUNCHPAD_DEBUG_HOOKS
     public func debugClose() {
         close()
     }
+    #endif
 }

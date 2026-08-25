@@ -14,6 +14,11 @@
 # process was never running in the first place). ~/Applications is the
 # same convention this project's own drag-and-drop-free, no-installer
 # design already implies.
+#
+# The configuration decides whether the LAUNCHPAD_DEBUG_* hooks exist at all.
+# They are compiled in only for debug builds (see `debugHooks` in Package.swift),
+# so `build-app.sh release` produces the bundle to hand out and `build-app.sh`
+# on its own produces the one to verify against.
 set -eu
 
 CONFIG="${1:-debug}"

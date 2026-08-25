@@ -786,6 +786,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         return rendered.image
     }
 
+#if LAUNCHPAD_DEBUG_HOOKS
     public func debugSimulatePageDrag(commit: Bool) {
         guard model.pages.count > 1 else {
             DiagnosticsLog.launcher.info("debugSimulatePageDrag: only \(self.model.pages.count, privacy: .public) page(s), nothing to drag between")
@@ -810,7 +811,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             }
         }
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     public func debugOpenFolder(ordinal: Int) {
         guard model.pages.indices.contains(currentPage) else { return }
         let folderIndices = model.pages[currentPage].indices.filter {
@@ -826,7 +829,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         DiagnosticsLog.launcher.info("debugOpenFolder: opening folder #\(ordinal, privacy: .public) at index \(folderIndices[position], privacy: .public)")
         openFolder(folderID)
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     public func debugSimulateItemDrag(mode: String) {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].count > 1,
               let sourceFrame = layout.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame else {
@@ -888,7 +893,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             }
         }
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     private func debugSimulateInterruptedItemDrag() {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].count > 2,
               let firstFrame = layout.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
@@ -931,6 +938,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             }
         }
     }
+    #endif
 
     private static func syntheticMouseEvent(type: NSEvent.EventType, at point: NSPoint, in view: NSView) -> NSEvent {
         let windowPoint = view.convert(point, to: nil)

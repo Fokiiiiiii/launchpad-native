@@ -198,9 +198,6 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
     private func applyContentHeight(_ height: CGFloat) {
         guard let window else { return }
         let clampedHeight = max(height, 200)
-        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_UNINSTALL"] == "1" {
-            DiagnosticsLog.settings.info("UninstallPanelWindowController.applyContentHeight: reported=\(height, privacy: .public) clamped=\(clampedHeight, privacy: .public) currentWindowHeight=\(window.frame.height, privacy: .public)")
-        }
         guard abs(window.frame.height - clampedHeight) > 0.5 else { return }
         let center = NSPoint(x: window.frame.midX, y: window.frame.midY)
         var newFrame = window.frame

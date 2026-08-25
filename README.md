@@ -2424,6 +2424,27 @@ costs microseconds.
 all 92 apps report an alternate name, and in every case it is the filename,
 which the index already holds. 98ms for nothing.
 
+## Keeping the debug hooks out of what ships (2026-08-26)
+
+Verification here leans on hooks driven from outside the process —
+`LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG`, `LAUNCHPAD_DEBUG_OPEN_FIRST_FOLDER`,
+`LAUNCHPAD_DEBUG_SHOW_SETTINGS` and a dozen others. They open panels,
+synthesize drags and, in a few cases, write to the real layout file. None of
+that belongs in a build anyone else runs: an environment variable should not be
+able to reorder someone's grid.
+
+`LAUNCHPAD_DEBUG_HOOKS` is defined only for debug configurations, and every
+hook sits behind it. `Scripts/build-app.sh release` builds what gets handed
+out; `Scripts/build-app.sh` on its own builds what gets verified. Confirmed by
+checking the shipped binary — no `LAUNCHPAD_DEBUG` string and no
+`debugSimulate` symbol survives — and by running both bundles with
+`LAUNCHPAD_DEBUG_TYPE_SEARCH_FIELD` set: the debug bundle types into the search
+field, the release bundle ignores the variable entirely.
+
+Tests are unaffected: they build in debug, so the hooks and the `…ForTesting`
+accessors are available to them, and `.app` bundles never contained test code
+to begin with.
+
 ## Requirements
 
 - macOS 26+, Apple Silicon

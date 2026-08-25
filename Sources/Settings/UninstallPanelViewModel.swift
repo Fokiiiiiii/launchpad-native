@@ -71,9 +71,6 @@ public final class UninstallPanelViewModel: ObservableObject {
             grouped[kind, default: []].append(row)
         }
         rowsBySection = grouped
-        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_UNINSTALL"] == "1" {
-            DiagnosticsLog.settings.info("UninstallPanelViewModel.init: isSystemProtected=\(record.isSystemProtected, privacy: .public), plan.count=\(plan.count, privacy: .public), rowsBySection counts=\(grouped.map { "\($0.key): \($0.value.count)" }.joined(separator: ", "), privacy: .public)")
-        }
         Task { await computeSizes() }
     }
 
@@ -103,9 +100,6 @@ public final class UninstallPanelViewModel: ObservableObject {
                 rows[index].icon = NSWorkspace.shared.icon(forFile: path.path)
             }
             rowsBySection[kind] = rows
-            if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SHOW_UNINSTALL"] == "1" {
-                DiagnosticsLog.settings.info("UninstallPanelViewModel.computeSizes: kind=\(String(describing: kind), privacy: .public) icons=\(rows.map { $0.icon != nil ? "1" : "0" }.joined(separator: ","), privacy: .public)")
-            }
         }
         isComputingSizes = false
         let total = rowsBySection.values.flatMap { $0 }.filter(\.isChecked).reduce(Int64(0)) { $0 + ($1.sizeInBytes ?? 0) }

@@ -280,11 +280,6 @@ final class GridCellItem: NSCollectionViewItem {
         hosting.isHidden = false
         hosting.rootView = FolderIconView(icons: icons, size: displayedIconSizeValue)
         hosting.layoutSubtreeIfNeeded()
-        if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_FOLDER_FRAME"] == "1" {
-            DispatchQueue.main.async {
-                DiagnosticsLog.grid.info("folderFrameDebug: iconView.frame=\(String(describing: self.iconView.frame), privacy: .public), hosting.frame=\(String(describing: hosting.frame), privacy: .public), iconSize=\(iconSize, privacy: .public), currentIconSizeValue=\(self.currentIconSizeValue, privacy: .public)")
-            }
-        }
         label.isHidden = false
         label.stringValue = name
         applySelection(isSelected)

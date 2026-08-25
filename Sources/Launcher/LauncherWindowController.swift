@@ -150,42 +150,54 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         viewModel.setShowMenuBarApplications(gridModel.showMenuBarApplications)
     }
 
+#if LAUNCHPAD_DEBUG_HOOKS
     /// Debug-only — see `AppDelegate`'s `LAUNCHPAD_DEBUG_SEARCH_QUERY` doc
     /// comment for why this exists (driving/screenshotting the search
     /// results layout without Accessibility/GUI-scripting permission).
     public func debugSetSearchQuery(_ query: String) {
         viewController?.debugSetSearchQuery(query)
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     /// Debug-only — see `AppDelegate`'s `LAUNCHPAD_DEBUG_CLICK_SEARCH_FIELD`
     /// doc comment.
     public func debugSimulateSearchFieldClick() {
         viewController?.debugSimulateSearchFieldClick()
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     /// Debug-only — see `AppDelegate`'s `LAUNCHPAD_DEBUG_TYPE_SEARCH_FIELD`
     /// doc comment (Round 13 §E).
     public func debugSimulateSearchFieldTyping(_ text: String) {
         viewController?.debugSimulateSearchFieldTyping(text)
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     /// Debug-only — see `GridViewController.debugSimulatePageDrag`'s doc
     /// comment for why this exists.
     public func debugSimulatePageDrag(commit: Bool) {
         viewController?.debugSimulatePageDrag(commit: commit)
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     /// Debug-only — see `GridViewController.debugOpenFolder`'s doc
     /// comment for why this exists.
     public func debugOpenFolder(ordinal: Int) {
         viewController?.debugOpenFolder(ordinal: ordinal)
     }
+    #endif
 
+#if LAUNCHPAD_DEBUG_HOOKS
     /// Debug-only — see `GridViewController.debugSimulateItemDrag`'s doc
     /// comment for why this exists.
     public func debugSimulateItemDrag(mode: String) {
         viewController?.debugSimulateItemDrag(mode: mode)
     }
+    #endif
 
     /// Exposed so composition-root code (`AppDelegate`, the Settings window)
     /// can read/mutate grid settings, custom sources, hidden apps, and
@@ -265,11 +277,13 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         DiagnosticsLog.launcher.info("reclaimKeyIfVisible: requested key, isKeyWindow now \(window.isKeyWindow, privacy: .public)")
     }
 
+#if LAUNCHPAD_DEBUG_HOOKS
     /// Debug-only — see `AppDelegate`'s `LAUNCHPAD_DEBUG_SETTINGS_KEY_RECLAIM`
     /// doc comment.
     public func debugIsWindowKey() -> Bool {
         window?.isKeyWindow ?? false
     }
+    #endif
 
     /// - Parameter isAuthoritative: `false` when `records` came from the
     ///   startup cache rather than a completed scan — see
