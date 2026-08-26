@@ -2,7 +2,7 @@
 
 ## Build & test
 
-See [README.md](README.md#build--run) for prerequisites and the exact
+See [README.md](README.md#build-and-run) for prerequisites and the exact
 build/test commands (this project uses an out-of-iCloud `--scratch-path`
 since it lives under `~/Documents`, which is iCloud-synced).
 
@@ -16,10 +16,10 @@ swift test --scratch-path "$SCRATCH"
 
 ## Scope of changes
 
-- Keep PRs focused on one phase/feature at a time — this project was built
-  in incremental, independently-buildable phases (see `README.md`'s
-  "Status" section), and PRs should follow the same discipline rather than
-  bundling unrelated changes.
+- Keep PRs focused on one change at a time — this project was built in
+  incremental, independently-buildable steps (see
+  [`docs/engineering-log.md`](docs/engineering-log.md)), and PRs should follow
+  the same discipline rather than bundling unrelated changes.
 - Every phase leaves the project buildable and passing tests. A PR that
   doesn't should say so explicitly and why.
 

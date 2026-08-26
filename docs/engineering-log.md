@@ -222,7 +222,7 @@ Repository Finalization) are implemented, scoped to what's actually
 verifiable without Instruments' GUI or an interactive VoiceOver session
 (this project's sandboxed dev environment has no Accessibility permission
 to drive either). Full measurements, methodology, and honestly-disclosed
-gaps are in [`Diagnostics/Performance.md`](Diagnostics/Performance.md) —
+gaps are in [`Diagnostics/Performance.md`](../Diagnostics/Performance.md) —
 warm-open latency, search-filter timing at the 1,000-app target size, idle
 CPU, leak analysis, and a live crash-recovery test all passed their targets.
 Accessibility labels were added to every previously-unlabeled interactive
