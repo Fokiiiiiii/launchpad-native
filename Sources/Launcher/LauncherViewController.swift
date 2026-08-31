@@ -138,6 +138,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchResultsCollectionView.isSelectable = true
         searchResultsCollectionView.backgroundColors = [.clear]
         searchResultsCollectionView.onBackgroundClick = { [weak self] in self?.onDidCancel() }
+        searchResultsCollectionView.menuProvider = { [weak self] indexPath in self?.searchContextMenu(at: indexPath) }
         searchResultsScrollView.hasVerticalScroller = false
         searchResultsScrollView.hasHorizontalScroller = false
         searchResultsScrollView.verticalScrollElasticity = .none
@@ -394,6 +395,74 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     #endif
 
 #if LAUNCHPAD_DEBUG_HOOKS
+    /// Builds a search result's context menu through the same entry point a
+    /// real right-click uses — `menu(for:)`, with an event carrying the cell's
+    /// real coordinates — and logs what came back, plus which view actually
+    /// owns that point.
+    ///
+    /// Deliberately stops short of letting AppKit pop the menu up: that parks
+    /// the app in a modal tracking loop nothing here can dismiss.
+    func debugSimulateSearchResultRightClick() {
+        guard let window = view.window else {
+            DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: no window")
+            return
+        }
+        // Re-apply whatever is in the field: the catalog usually finishes
+        // loading after the query hook ran, leaving the results empty.
+        applyQuery(searchField.stringValue)
+        searchResultsCollectionView.layoutSubtreeIfNeeded()
+        let indexPath = IndexPath(item: 0, section: 0)
+        DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: query=\(self.searchField.stringValue, privacy: .public), matches=\(self.viewModel.filteredRecords.count, privacy: .public), items=\(self.searchResultsCollectionView.numberOfItems(inSection: 0), privacy: .public), hidden=\(self.searchResultsCollectionView.isHidden, privacy: .public)")
+        guard let cell = searchResultsCollectionView.item(at: indexPath) else {
+            DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: no cell at \(String(describing: indexPath), privacy: .public)")
+            return
+        }
+        let point = searchResultsCollectionView.convert(
+            NSPoint(x: cell.view.frame.midX, y: cell.view.frame.midY),
+            to: nil
+        )
+        let hit = window.contentView?.hitTest(point)
+        DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: point=\(String(describing: point), privacy: .public), hitTest -> \(String(describing: hit), privacy: .public)")
+
+        guard let event = NSEvent.mouseEvent(
+            with: .rightMouseDown,
+            location: point,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1.0
+        ) else {
+            DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: failed to construct synthetic event")
+            return
+        }
+        // AppKit hands a right-click to the hit view and walks up until one
+        // answers with a menu. Log who answers first: a view in between that
+        // carried its own menu would silently take the click.
+        var responder = hit
+        while let current = responder {
+            if let owned = current.menu(for: event) {
+                DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: first view to answer is \(String(describing: current), privacy: .public) with \(owned.items.count, privacy: .public) items")
+                break
+            }
+            responder = current.superview
+        }
+        if responder == nil {
+            DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: no view in the chain answered with a menu")
+        }
+
+        guard let menu = searchResultsCollectionView.menu(for: event) else {
+            DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: menu(for:) returned nil")
+            return
+        }
+        let titles = menu.items.map { $0.isSeparatorItem ? "—" : $0.title }.joined(separator: " | ")
+        DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: \(menu.items.count, privacy: .public) items: \(titles, privacy: .public)")
+    }
+    #endif
+
+#if LAUNCHPAD_DEBUG_HOOKS
     func debugSimulateSearchFieldTyping(_ text: String) {
         guard let window = view.window else {
             DiagnosticsLog.launcher.info("debugSimulateSearchFieldTyping: no window")
@@ -619,6 +688,20 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             applySearchResultsLayoutMetrics()
         }
         updateSearchResultsPresentation()
+    }
+
+    /// The grid's per-app menu, for a search result.
+    ///
+    /// Right-clicking also moves the keyboard selection onto the result, so the
+    /// menu and the highlight agree about which app is being acted on.
+    private func searchContextMenu(at indexPath: IndexPath) -> NSMenu? {
+        let pageRecords = searchRecordsOnCurrentPage()
+        guard pageRecords.indices.contains(indexPath.item) else { return nil }
+        viewModel.select(index: searchCurrentPage * searchPageSize + indexPath.item)
+        return gridViewController.contextMenu(
+            for: pageRecords[indexPath.item],
+            anchorView: searchResultsCollectionView.item(at: indexPath)?.view
+        )
     }
 
     private func launch(_ record: ApplicationRecord) {

@@ -1016,8 +1016,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    private func showWindows(for record: ApplicationRecord, anchorIndexPath: IndexPath) {
-        guard let cell = collectionView.item(at: anchorIndexPath) else { return }
+    private func showWindows(for record: ApplicationRecord, anchorView: NSView) {
         let popover = NSPopover()
         let browserVC = WindowBrowserPopoverController(
             bundleIdentifier: record.bundleIdentifier,
@@ -1028,7 +1027,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         popover.behavior = .transient
         popover.animates = true
         popover.contentSize = NSSize(width: 320, height: 280)
-        popover.show(relativeTo: cell.view.bounds, of: cell.view, preferredEdge: .maxY)
+        popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .maxY)
     }
 
     private func contextMenu(for indexPath: IndexPath) -> NSMenu? {
@@ -1049,23 +1048,38 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             )
         case .app(let id):
             guard let record = model.record(for: id) else { return nil }
-            let actions = ContextMenuBuilder.Actions(
-                open: { [weak self] in self?.onLaunch(record) },
-                openNewInstance: record.canOpenNewInstance ? { [weak self] in
-                    self?.model.recordLaunch(for: record.id)
-                    Task { await self?.model.save() }
-                    AppLauncher.launch(record, createsNewInstance: true)
-                } : nil,
-                showInFinder: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
-                rename: { [weak self] in self?.promptRenameApp(at: indexPath, record: record) },
-                hide: { [weak self] in self?.hideApp(record) },
-                removeFromFolder: nil,
-                getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
-                showWindows: { [weak self] in self?.showWindows(for: record, anchorIndexPath: indexPath) },
-                uninstall: { [weak self] in self?.onRequestUninstall(record.bundleIdentifier) }
-            )
-            return ContextMenuBuilder.menu(for: record, isInFolder: false, actions: actions)
+            return contextMenu(for: record, anchorView: collectionView.item(at: indexPath)?.view)
         }
+    }
+
+    /// The same per-app menu the grid shows, for a record the caller addresses
+    /// however it likes. The search results live in their own collection view
+    /// and have no grid index path, but the menu they need is identical — so
+    /// this is the one definition both surfaces build from.
+    ///
+    /// `anchorView` is what the window-browser popover attaches to. Without one
+    /// the item is left out rather than shown with nowhere to open.
+    public func contextMenu(for record: ApplicationRecord, anchorView: NSView?) -> NSMenu {
+        var showWindows: (() -> Void)?
+        if let anchorView {
+            showWindows = { [weak self] in self?.showWindows(for: record, anchorView: anchorView) }
+        }
+        let actions = ContextMenuBuilder.Actions(
+            open: { [weak self] in self?.onLaunch(record) },
+            openNewInstance: record.canOpenNewInstance ? { [weak self] in
+                self?.model.recordLaunch(for: record.id)
+                Task { await self?.model.save() }
+                AppLauncher.launch(record, createsNewInstance: true)
+            } : nil,
+            showInFinder: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
+            rename: { [weak self] in self?.promptRenameApp(record: record) },
+            hide: { [weak self] in self?.hideApp(record) },
+            removeFromFolder: nil,
+            getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
+            showWindows: showWindows,
+            uninstall: { [weak self] in self?.onRequestUninstall(record.bundleIdentifier) }
+        )
+        return ContextMenuBuilder.menu(for: record, isInFolder: false, actions: actions)
     }
 
     private func promptRenameFolder(at indexPath: IndexPath) {
@@ -1077,7 +1091,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    private func promptRenameApp(at indexPath: IndexPath, record: ApplicationRecord) {
+    private func promptRenameApp(record: ApplicationRecord) {
         presentRenameAlert(currentName: model.displayName(for: record)) { [weak self] newName in
             guard let self else { return }
             self.model.setAlias(newName == record.displayName ? nil : newName, for: record.id)

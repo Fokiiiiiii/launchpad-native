@@ -204,6 +204,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             #endif
 
+            // Pairs with `LAUNCHPAD_DEBUG_SEARCH_QUERY`: builds the context
+            // menu for the first search result the way a right-click would, so
+            // the menu can be checked without GUI-scripting permission.
+#if LAUNCHPAD_DEBUG_HOOKS
+            if ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_RIGHT_CLICK_SEARCH_RESULT"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                    self?.launcherWindowController.debugSimulateSearchResultRightClick()
+                }
+            }
+            #endif
+
 #if LAUNCHPAD_DEBUG_HOOKS
             if let text = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_TYPE_SEARCH_FIELD"], !text.isEmpty {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in

@@ -168,6 +168,14 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     #endif
 
 #if LAUNCHPAD_DEBUG_HOOKS
+    /// Debug-only — see `AppDelegate`'s
+    /// `LAUNCHPAD_DEBUG_RIGHT_CLICK_SEARCH_RESULT` doc comment.
+    public func debugSimulateSearchResultRightClick() {
+        viewController?.debugSimulateSearchResultRightClick()
+    }
+    #endif
+
+#if LAUNCHPAD_DEBUG_HOOKS
     /// Debug-only — see `AppDelegate`'s `LAUNCHPAD_DEBUG_TYPE_SEARCH_FIELD`
     /// doc comment (Round 13 §E).
     public func debugSimulateSearchFieldTyping(_ text: String) {
