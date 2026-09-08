@@ -48,10 +48,11 @@ enum AppSearchMatcher {
     /// "memo" means メモ, not ボイスメモ (whose bundle name is "Voice Memos").
     static func tier(for query: String, in app: SearchableApplication) -> MatchTier? {
         let hasReading = !app.latinReading.isEmpty
+        let hasAlias = !app.alias.isEmpty
 
-        if app.name == query || app.originalName == query { return .exactName }
+        if app.name == query || app.originalName == query || (hasAlias && app.alias == query) { return .exactName }
         if hasReading, app.latinReading == query { return .readingExact }
-        if app.name.hasPrefix(query) || app.originalName.hasPrefix(query) { return .namePrefix }
+        if app.name.hasPrefix(query) || app.originalName.hasPrefix(query) || (hasAlias && app.alias.hasPrefix(query)) { return .namePrefix }
         if hasReading, app.latinReading.hasPrefix(query) || app.latinReadingInitials.hasPrefix(query) {
             return .readingPrefix
         }
@@ -60,7 +61,7 @@ enum AppSearchMatcher {
             return .readingWordStart
         }
         if !app.initials.isEmpty, app.initials.hasPrefix(query) { return .initials }
-        if app.name.contains(query) || app.originalName.contains(query) { return .nameSubstring }
+        if app.name.contains(query) || app.originalName.contains(query) || (hasAlias && app.alias.contains(query)) { return .nameSubstring }
         if hasReading, app.latinReading.contains(query) { return .readingSubstring }
 
         if app.bundleIdentifier.contains(query)
@@ -75,7 +76,8 @@ enum AppSearchMatcher {
         // there, the substring check above already found honestly.
         if isSubsequence(query, of: app.name)
             || isSubsequence(query, of: app.originalName)
-            || isSubsequence(query, of: app.latinReading) {
+            || isSubsequence(query, of: app.latinReading)
+            || (hasAlias && isSubsequence(query, of: app.alias)) {
             return .subsequence
         }
 

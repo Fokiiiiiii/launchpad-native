@@ -328,12 +328,20 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private func applySearchableRecords() {
         viewModel.setShowMenuBarApplications(gridModel.showMenuBarApplications)
         let orderedRecords = gridModel.orderedRecords(from: latestRecords)
+        let searchable: [ApplicationRecord]
         if gridModel.showsHiddenAppsInSearch {
-            viewModel.setRecords(orderedRecords)
+            searchable = orderedRecords
         } else {
             let hiddenValues = Set(gridModel.hiddenApplicationIdentifiers.map(\.value))
-            viewModel.setRecords(orderedRecords.filter { !hiddenValues.contains($0.id.value) })
+            searchable = orderedRecords.filter { !hiddenValues.contains($0.id.value) }
         }
+        var aliases: [StableAppID: String] = [:]
+        for record in searchable {
+            if let alias = gridModel.alias(for: record.id) {
+                aliases[record.id] = alias
+            }
+        }
+        viewModel.setRecords(searchable, aliases: aliases)
     }
 
     /// Called from Settings when `showsHiddenAppsInSearch` changes, so the
@@ -548,7 +556,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // Hidden-app mutations can originate from the grid's context menu,
         // not only Settings. Attach a dedicated observer so an active search
         // query reflects hide/unhide immediately without waiting for a scan.
-        gridModel.onHiddenApplicationsChange = { [weak self] in
+        gridModel.onSearchableRecordsChange = { [weak self] in
             self?.refreshSearchableRecords()
         }
 

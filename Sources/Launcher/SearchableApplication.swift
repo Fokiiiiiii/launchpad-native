@@ -12,6 +12,11 @@ struct SearchableApplication {
     /// Lowercased and diacritic-folded, so "Café" is reachable as "cafe".
     let name: String
     let originalName: String
+    /// The name the user gave this app themselves, folded like the others, or
+    /// empty when they have not renamed it. Kept alongside the catalog names
+    /// rather than replacing them: someone who renames メモ to "notepad"
+    /// should still find it by typing either.
+    let alias: String
     let bundleIdentifier: String
     let fileName: String
     let category: String
@@ -29,11 +34,12 @@ struct SearchableApplication {
 
     /// `originalName` is separable for tests that need a Japanese display
     /// name alongside the English bundle name the real catalog would carry.
-    init(record: ApplicationRecord, originalName: String? = nil) {
+    init(record: ApplicationRecord, originalName: String? = nil, alias: String? = nil) {
         self.record = record
         let name = Self.fold(record.displayName)
         self.name = name
         self.originalName = Self.fold(originalName ?? record.originalDisplayName)
+        self.alias = alias.map(Self.fold) ?? ""
         self.bundleIdentifier = Self.fold(record.bundleIdentifier)
         self.fileName = Self.fold(record.bundleURL.deletingPathExtension().lastPathComponent)
         self.category = Self.fold(record.category ?? "")

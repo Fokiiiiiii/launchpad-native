@@ -85,3 +85,26 @@ func record(
     vm.moveSelection(by: 1)
     #expect(changeCount == 2)
 }
+
+/// A renamed app has to be reachable by the name the user actually sees. The
+/// alias lives in the layout, not the catalog, so the index has to be handed
+/// it explicitly — the catalog name keeps working too.
+@Test @MainActor func aRenamedAppIsFoundByTheNameTheUserGaveIt() {
+    let vm = LauncherViewModel()
+    let notes = record("メモ", id: "com.apple.Notes")
+    let other = record("Numbers", id: "com.apple.Numbers")
+    vm.setRecords([notes, other], aliases: [notes.id: "notepad"])
+
+    vm.setQuery("notepad")
+    #expect(vm.filteredRecords.map(\.id) == [notes.id], "the alias should match")
+
+    vm.setQuery("note")
+    #expect(vm.filteredRecords.first?.id == notes.id, "a prefix of the alias should rank it first")
+
+    vm.setQuery("メモ")
+    #expect(vm.filteredRecords.map(\.id) == [notes.id], "the catalog name must keep working after a rename")
+
+    // An app with no alias is unaffected by the extra tier checks.
+    vm.setQuery("numbers")
+    #expect(vm.filteredRecords.map(\.id) == [other.id])
+}

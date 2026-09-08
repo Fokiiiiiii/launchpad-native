@@ -269,3 +269,25 @@ private func record(
     let records = [record("メッセージ", id: "com.apple.mobilesms")]
     #expect(LauncherFiltering.filter(records, query: "memo").isEmpty)
 }
+
+/// The alias takes part in the name tiers, and only there: it should rank like
+/// a name, not fall through to the loosest tier. Every query here is reachable
+/// *only* through the alias — "作業" appears in neither the catalog name nor
+/// the bundle identifier — so each expectation pins one tier on its own.
+@Test func anAliasParticipatesInTheNameTiers() {
+    let app = SearchableApplication(
+        record: record("Notes", id: "com.apple.Notes"),
+        alias: "作業メモ"
+    )
+    #expect(AppSearchMatcher.tier(for: SearchableApplication.fold("作業メモ"), in: app) == .exactName)
+    #expect(AppSearchMatcher.tier(for: SearchableApplication.fold("作業"), in: app) == .namePrefix)
+    #expect(AppSearchMatcher.tier(for: SearchableApplication.fold("業メ"), in: app) == .nameSubstring)
+
+    // The catalog name still matches at its own tier.
+    #expect(AppSearchMatcher.tier(for: "notes", in: app) == .exactName)
+
+    // An app without an alias is untouched by any of it.
+    let plain = SearchableApplication(record: record("Numbers", id: "com.apple.Numbers"))
+    #expect(plain.alias.isEmpty)
+    #expect(AppSearchMatcher.tier(for: SearchableApplication.fold("作業"), in: plain) == nil)
+}

@@ -134,7 +134,12 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     /// fixed function of the row/column geometry), so search results
     /// rendered at a visibly different size than the main grid the moment a
     /// query was typed.
-    func configure(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, visualScale: Double = 1) {
+    /// `displayName` is passed in rather than read off the record: a renamed
+    /// app carries its new name in `GridModel`'s aliases, not in the catalog,
+    /// and the grid and folder panel both go through `GridModel.displayName`.
+    /// This list showing the catalog name instead was how a rename made from
+    /// the search results looked like it had done nothing at all.
+    func configure(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, visualScale: Double = 1, displayName: String? = nil) {
         currentRequestKey = record.iconCacheKey
         let baseSize = CGFloat(iconSize)
         let scale = min(max(CGFloat(visualScale), 0.9), 1.2)
@@ -143,14 +148,15 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
         iconHeightConstraint?.constant = displayedIconSize
         applyHighlightGeometry()
         iconView.image = icon
-        label.stringValue = record.displayName
+        let name = displayName ?? record.displayName
+        label.stringValue = name
         view.wantsLayer = true
         applySelection(isSelected)
         // Expose the same single, actionable element as the main grid so
         // VoiceOver reads the app name, role, and keyboard selection state.
         view.setAccessibilityElement(true)
         view.setAccessibilityRole(.button)
-        view.setAccessibilityLabel(record.displayName)
+        view.setAccessibilityLabel(name)
         view.setAccessibilitySelected(isSelected)
         view.setAccessibilityValue(isSelected ? L10n.selectedAccessibilityValue : nil)
         applyVisualTransforms()

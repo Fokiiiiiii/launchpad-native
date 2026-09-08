@@ -34,10 +34,10 @@ public final class LauncherViewModel {
         refilter()
     }
 
-    public func setRecords(_ records: [ApplicationRecord]) {
+    public func setRecords(_ records: [ApplicationRecord], aliases: [StableAppID: String] = [:]) {
         allRecords = records
         let start = DispatchTime.now()
-        searchIndex = records.map({ SearchableApplication(record: $0) })
+        searchIndex = records.map({ SearchableApplication(record: $0, alias: aliases[$0.id]) })
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.launcher.info(
             "search index built: \(records.count, privacy: .public) records in \(ms, privacy: .public)ms"

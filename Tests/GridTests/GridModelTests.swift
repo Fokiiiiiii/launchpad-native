@@ -45,7 +45,7 @@ private func makeModel(directory: URL) -> GridModel {
     model.reconcile(with: [app])
 
     var changes = 0
-    model.onHiddenApplicationsChange = { changes += 1 }
+    model.onSearchableRecordsChange = { changes += 1 }
     model.hideApplication(app.id)
     #expect(changes == 1)
     model.unhideApplication(StableAppIdentifier(value: "a"))
@@ -856,4 +856,26 @@ private func bundleIDs(_ pages: [[LayoutItem]]) -> [[String]] {
 
     #expect(model.pages.map(\.count) == [4], "a same-page reorder does not change any page's size")
     #expect(model.pages[0][0] == last)
+}
+
+/// The search index is built from the catalog plus the aliases, so renaming an
+/// app has to reach it the same way hiding one does. Without this the rename
+/// landed in the layout but the search list kept the old name until the next
+/// catalog scan.
+@Test @MainActor func renamingAnAppNotifiesTheSearchIndex() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let app = record("Notes", id: "com.apple.Notes")
+    model.reconcile(with: [app])
+
+    var changes = 0
+    model.onSearchableRecordsChange = { changes += 1 }
+    model.setAlias("notepad", for: app.id)
+    #expect(changes == 1)
+    #expect(model.displayName(for: app) == "notepad")
+    model.setAlias(nil, for: app.id)
+    #expect(changes == 2)
+    #expect(model.displayName(for: app) == "Notes")
 }

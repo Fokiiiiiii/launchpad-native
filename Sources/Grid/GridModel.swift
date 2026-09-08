@@ -25,7 +25,11 @@ public final class GridModel {
     /// Fired specifically when the hidden-app set changes. LauncherWindowController
     /// uses this narrower signal to refresh the searchable snapshot immediately
     /// after a context-menu hide/unhide, without coupling GridModel to search UI.
-    public var onHiddenApplicationsChange: (() -> Void)?
+    /// Fires when something the search index is built from changes — the
+    /// hidden-app set, or an app's alias. Distinct from `onChange`, which the
+    /// grid uses to redraw itself and which the launcher's search list does
+    /// not observe.
+    public var onSearchableRecordsChange: (() -> Void)?
 
     public init(layoutStore: LayoutStore) {
         self.layoutStore = layoutStore
@@ -719,7 +723,7 @@ public final class GridModel {
         let validIDs = Set(recordsByIDValue.keys).subtracting(hiddenValues)
         pruneMissingItems(validIDs: validIDs)
         onChange?()
-        onHiddenApplicationsChange?()
+        onSearchableRecordsChange?()
     }
 
     public func unhideApplication(_ identifier: StableAppIdentifier) {
@@ -728,7 +732,7 @@ public final class GridModel {
             appendToLastPage(.app(identifier))
         }
         onChange?()
-        onHiddenApplicationsChange?()
+        onSearchableRecordsChange?()
     }
 
     public var hiddenApplicationIdentifiers: [StableAppIdentifier] {
@@ -748,6 +752,7 @@ public final class GridModel {
             document.aliases.removeValue(forKey: identifier)
         }
         onChange?()
+        onSearchableRecordsChange?()
     }
 
     public func alias(for id: StableAppID) -> String? {
