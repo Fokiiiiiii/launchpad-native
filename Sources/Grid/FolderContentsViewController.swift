@@ -425,6 +425,24 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
                     AppLauncher.launch(record, createsNewInstance: true)
                 } : nil,
                 onShowInFinder: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
+                onRename: { [weak self] in
+                    guard let self else { return }
+                    RenamePrompt.run(currentName: self.model.displayName(for: record)) { newName in
+                        self.model.setAlias(newName == record.displayName ? nil : newName, for: record.id)
+                        Task { await self.model.save() }
+                        self.refresh()
+                    }
+                },
+                onHide: { [weak self] in
+                    guard let self else { return }
+                    // Hiding prunes the app out of pages and folders; if this
+                    // folder is left empty it dissolves, and the panel refreshes
+                    // to nothing — the same end state as taking the last item
+                    // out of it by hand.
+                    self.model.hideApplication(record.id)
+                    Task { await self.model.save() }
+                    self.refresh()
+                },
                 onRemoveFromFolder: { [weak self] in
                     guard let self else { return }
                     self.onItemDraggedOut(entry.page, entry.index)

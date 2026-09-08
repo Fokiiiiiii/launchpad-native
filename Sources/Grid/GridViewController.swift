@@ -1223,25 +1223,24 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             showInFinder: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
             rename: { [weak self] in self?.promptRenameApp(record: record) },
             hide: { [weak self] in self?.hideApp(record) },
-            removeFromFolder: nil,
             getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
             showWindows: showWindows,
             uninstall: { [weak self] in self?.onRequestUninstall(record.bundleIdentifier) }
         )
-        return ContextMenuBuilder.menu(for: record, isInFolder: false, actions: actions)
+        return ContextMenuBuilder.menu(for: record, actions: actions)
     }
 
     private func promptRenameFolder(at indexPath: IndexPath) {
         guard case .folder(let folderID) = model.pages[currentPage][indexPath.item],
               let folder = model.folders[folderID] else { return }
-        presentRenameAlert(currentName: folder.name) { [weak self] newName in
+        RenamePrompt.run(currentName: folder.name) { [weak self] newName in
             self?.model.renameFolder(folderID, to: newName)
             Task { await self?.model.save() }
         }
     }
 
     private func promptRenameApp(record: ApplicationRecord) {
-        presentRenameAlert(currentName: model.displayName(for: record)) { [weak self] newName in
+        RenamePrompt.run(currentName: model.displayName(for: record)) { [weak self] newName in
             guard let self else { return }
             self.model.setAlias(newName == record.displayName ? nil : newName, for: record.id)
             Task { await self.model.save() }
@@ -1253,18 +1252,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         Task { await model.save() }
     }
 
-    private func presentRenameAlert(currentName: String, completion: @escaping (String) -> Void) {
-        let alert = NSAlert()
-        alert.messageText = L10n.renameAlertTitle
-        let field = NSTextField(string: currentName)
-        field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
-        alert.accessoryView = field
-        alert.addButton(withTitle: L10n.renameConfirmButton)
-        alert.addButton(withTitle: L10n.cancelButton)
-        if alert.runModal() == .alertFirstButtonReturn {
-            completion(field.stringValue)
-        }
-    }
 
     // MARK: Item drag
 

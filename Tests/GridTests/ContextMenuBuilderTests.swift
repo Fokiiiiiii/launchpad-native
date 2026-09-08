@@ -28,12 +28,10 @@ private func contextMenuRecord() -> ApplicationRecord {
     let record = contextMenuRecord()
     let withoutDockAction = ContextMenuBuilder.menu(
         for: record,
-        isInFolder: false,
         actions: .init(open: {}, showInFinder: {}, rename: {}, hide: {}, getInfo: {})
     )
     let withDockAction = ContextMenuBuilder.menu(
         for: record,
-        isInFolder: false,
         actions: .init(open: {}, showInFinder: {}, addToDock: {}, rename: {}, hide: {}, getInfo: {})
     )
 

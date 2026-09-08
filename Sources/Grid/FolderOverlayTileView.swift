@@ -10,6 +10,8 @@ struct FolderOverlayTile: Identifiable {
     let onLaunch: () -> Void
     let onOpenNewInstance: (() -> Void)?
     let onShowInFinder: () -> Void
+    let onRename: () -> Void
+    let onHide: () -> Void
     let onRemoveFromFolder: () -> Void
     let onDragStart: () -> Void
     let onDragHoverEntered: () -> Void
@@ -103,6 +105,11 @@ struct FolderOverlayTileView: View {
             }
             Button { tile.onShowInFinder() } label: { Label(L10n.menuShowInFinder, systemImage: "folder") }
             Divider()
+            // Same items, same order as the grid's menu. Leaving rename and
+            // hide out meant an app kept in a folder could only be renamed or
+            // hidden by finding it through search or dragging it back out.
+            Button { tile.onRename() } label: { Label(L10n.menuRename, systemImage: "pencil") }
+            Button { tile.onHide() } label: { Label(L10n.menuHide, systemImage: "eye.slash") }
             Button { tile.onRemoveFromFolder() } label: { Label(L10n.menuRemoveFromFolder, systemImage: "folder.badge.minus") }
         }
     }

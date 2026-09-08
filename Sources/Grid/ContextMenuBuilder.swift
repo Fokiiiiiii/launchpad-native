@@ -12,13 +12,12 @@ public enum ContextMenuBuilder {
         public var addToDock: (() -> Void)? = nil
         public var rename: () -> Void
         public var hide: () -> Void
-        public var removeFromFolder: (() -> Void)?
         public var getInfo: () -> Void
         public var showWindows: (() -> Void)?
         public var uninstall: (() -> Void)?
     }
 
-    public static func menu(for record: ApplicationRecord, isInFolder: Bool, actions: Actions) -> NSMenu {
+    public static func menu(for record: ApplicationRecord, actions: Actions) -> NSMenu {
         let menu = NSMenu()
 
         menu.addItem(makeItem(L10n.menuOpen, symbolName: "arrow.up.forward.app", action: actions.open))
@@ -36,9 +35,6 @@ public enum ContextMenuBuilder {
         menu.addItem(.separator())
         menu.addItem(makeItem(L10n.menuRename, symbolName: "pencil", action: actions.rename))
         menu.addItem(makeItem(L10n.menuHide, symbolName: "eye.slash", action: actions.hide))
-        if isInFolder, let removeFromFolder = actions.removeFromFolder {
-            menu.addItem(makeItem(L10n.menuRemoveFromFolder, symbolName: "folder.badge.minus", action: removeFromFolder))
-        }
 
         menu.addItem(.separator())
         if let showWindows = actions.showWindows {
