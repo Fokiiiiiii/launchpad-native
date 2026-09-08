@@ -57,8 +57,13 @@ public actor ApplicationScanner {
         let known = knownSignatures()
         var merged: [StableAppID: ApplicationRecord] = [:]
         for source in sources.sorted(by: { $0.priority < $1.priority }) {
-            for record in await ApplicationBundleReader.scan(source: source, knownSignatures: known) {
-                merged[record.id] = record
+            switch await ApplicationBundleReader.scanOutcome(source: source, knownSignatures: known) {
+            case .scanned(let records):
+                for record in records {
+                    merged[record.id] = record
+                }
+            case .unreadable:
+                carryForward(source: source, into: &merged)
             }
         }
         let changed = merged != snapshot.recordsByID
@@ -71,6 +76,27 @@ public actor ApplicationScanner {
             broadcast()
         }
         return snapshot
+    }
+
+    /// Keeps whatever a source last contributed when this scan could not read
+    /// it.
+    ///
+    /// A scan result is authoritative: subscribers hand it to
+    /// `GridModel.pruneMissingItems`, which removes anything missing from the
+    /// user's pages and folders and saves. So a source that momentarily cannot
+    /// be enumerated — an ejected drive, a network mount that is down — must
+    /// not arrive as "every app in it was uninstalled". Carrying the previous
+    /// records forward keeps the catalog honest until the source is readable
+    /// again, and a genuinely deleted app still disappears the moment its
+    /// source can be read and no longer lists it.
+    private func carryForward(source: ApplicationSource, into merged: inout [StableAppID: ApplicationRecord]) {
+        let carried = snapshot.recordsByID.values.filter { $0.sourceID == source.id }
+        for record in carried {
+            merged[record.id] = record
+        }
+        DiagnosticsLog.catalog.error(
+            "Source \(source.id, privacy: .public) could not be read; kept \(carried.count, privacy: .public) previously known records rather than reporting them uninstalled"
+        )
     }
 
     /// What the current snapshot — restored from disk at launch, or left by
@@ -181,8 +207,13 @@ public actor ApplicationScanner {
         let affectedSourceIDs = Set(affectedSources.map(\.id))
         var merged = snapshot.recordsByID.filter { !affectedSourceIDs.contains($0.value.sourceID) }
         for source in affectedSources {
-            for record in await ApplicationBundleReader.scan(source: source, knownSignatures: known) {
-                merged[record.id] = record
+            switch await ApplicationBundleReader.scanOutcome(source: source, knownSignatures: known) {
+            case .scanned(let records):
+                for record in records {
+                    merged[record.id] = record
+                }
+            case .unreadable:
+                carryForward(source: source, into: &merged)
             }
         }
         guard merged != snapshot.recordsByID else { return }

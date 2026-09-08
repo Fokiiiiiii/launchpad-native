@@ -21,11 +21,40 @@ enum ApplicationBundleReader {
         }
     }
 
+    /// What scanning one source produced.
+    ///
+    /// `unreadable` means the root itself could not be enumerated — a source
+    /// on an unmounted volume, a folder that has been deleted, or one this
+    /// process is not allowed to read. That is a different fact from "the
+    /// folder is there and holds no apps", and collapsing the two is what let
+    /// an unplugged drive erase every app it contributed: the scan reported no
+    /// records, `pruneMissingItems` read that as "uninstalled", and the pages
+    /// and folders were rewritten without them.
+    enum ScanOutcome: Sendable {
+        case scanned([ApplicationRecord])
+        case unreadable
+    }
+
+    /// Convenience for callers that have nothing to fall back on. An
+    /// unreadable source reads as empty here — only use it where that
+    /// distinction genuinely does not matter.
     static func scan(
         source: ApplicationSource,
         knownSignatures: [String: KnownSignature] = [:]
     ) async -> [ApplicationRecord] {
-        let appURLs = bundleURLs(in: source)
+        switch await scanOutcome(source: source, knownSignatures: knownSignatures) {
+        case .scanned(let records):
+            return records
+        case .unreadable:
+            return []
+        }
+    }
+
+    static func scanOutcome(
+        source: ApplicationSource,
+        knownSignatures: [String: KnownSignature] = [:]
+    ) async -> ScanOutcome {
+        guard let appURLs = bundleURLs(in: source) else { return .unreadable }
 
         // Reading a bundle is independent per app and dominated by
         // `localizedInfoDictionary`, which walks the bundle's resources to
@@ -44,14 +73,24 @@ enum ApplicationBundleReader {
             for await (index, record) in group {
                 if let record { byIndex[index] = record }
             }
-            return appURLs.indices.compactMap { byIndex[$0] }
+            return .scanned(appURLs.indices.compactMap { byIndex[$0] })
         }
     }
 
     /// `FileManager`'s directory enumerator cannot be iterated from an
     /// asynchronous context, so the walk stays in its own synchronous step.
-    private static func bundleURLs(in source: ApplicationSource) -> [URL] {
+    ///
+    /// Returns nil when the root cannot be read at all — see `ScanOutcome`.
+    private static func bundleURLs(in source: ApplicationSource) -> [URL]? {
         let fm = FileManager.default
+
+        // Checked before enumerating because `enumerator(at:)` is lazy and
+        // hands back a non-nil enumerator that then yields nothing for a path
+        // that is not there — indistinguishable from an empty folder.
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: source.rootURL.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return nil }
+
         var appURLs: [URL] = []
 
         if source.recursive {
@@ -59,7 +98,7 @@ enum ApplicationBundleReader {
                 at: source.rootURL,
                 includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles]
-            ) else { return [] }
+            ) else { return nil }
             for case let url as URL in enumerator {
                 if url.pathExtension == "app" {
                     appURLs.append(url)
@@ -71,7 +110,7 @@ enum ApplicationBundleReader {
                 at: source.rootURL,
                 includingPropertiesForKeys: nil,
                 options: [.skipsHiddenFiles]
-            ) else { return [] }
+            ) else { return nil }
             appURLs = contents.filter { $0.pathExtension == "app" }
         }
 
