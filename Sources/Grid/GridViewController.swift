@@ -842,6 +842,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             debugSimulateInterruptedItemDrag()
             return
         }
+        if mode == "pageturn-release" {
+            debugSimulatePageTurnRelease()
+            return
+        }
         let targetIndex = mode == "folder" ? 1 : model.pages[currentPage].count - 1
         guard let targetFrame = layout.layoutAttributesForItem(at: IndexPath(item: targetIndex, section: 0))?.frame else { return }
         // "folder" aims dead center (within the ~60% folder-candidate
@@ -892,6 +896,68 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 }
             }
         }
+    }
+    #endif
+
+#if LAUNCHPAD_DEBUG_HOOKS
+    /// Drags to the page edge, waits for the mid-drag page turn to start, then
+    /// releases *while it is still sliding* — the window in which the turn's
+    /// settle block bails out because the drag is already over.
+    ///
+    /// Logs the collection view's translation afterwards: anything but 0 means
+    /// the grid is parked a page off-screen with nothing but wallpaper
+    /// showing, which is exactly the state this hook exists to catch.
+    private func debugSimulatePageTurnRelease() {
+        guard model.pages.count > 1,
+              currentPage < model.pages.count - 1,
+              model.pages.indices.contains(currentPage),
+              !model.pages[currentPage].isEmpty,
+              let sourceFrame = layout.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+              let window = collectionView.window else {
+            DiagnosticsLog.grid.notice("debugSimulatePageTurnRelease: needs a next page with items, and a window")
+            return
+        }
+        let startPage = currentPage
+        let start = NSPoint(x: sourceFrame.midX, y: sourceFrame.midY)
+        // Well inside the trailing edge zone, so the dwell timer arms a turn.
+        let edge = NSPoint(x: collectionView.bounds.width - 8, y: sourceFrame.midY)
+        let hit = window.contentView?.hitTest(collectionView.convert(start, to: nil))
+        DiagnosticsLog.grid.notice("debugSimulatePageTurnRelease: starting at page \(startPage, privacy: .public), grab point hits \(String(describing: hit), privacy: .public)")
+        window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDown, at: start, in: collectionView))
+        for step in 1...6 {
+            let t = CGFloat(step) / 6
+            let point = NSPoint(x: start.x + (edge.x - start.x) * t, y: start.y + (edge.y - start.y) * t)
+            window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDragged, at: point, in: collectionView))
+        }
+
+        // Just past the dwell delay: the turn has committed and its spring is
+        // still running (response 0.30, so its settle block is a good 0.5s
+        // out). Releasing here is the whole point of the hook.
+        DispatchQueue.main.asyncAfter(deadline: .now() + ItemDrag.itemDragEdgeHoverDelay + 0.02) { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseUp, at: edge, in: self.collectionView))
+                DiagnosticsLog.grid.notice("debugSimulatePageTurnRelease: sent mouseUp, activeDrag=\(self.itemDrag.isDragging, privacy: .public), page=\(self.currentPage, privacy: .public), x=\(self.debugCollectionTranslationX, privacy: .public)")
+                // Read back before the turn's own settle block would have run:
+                // this is the window the bug lived in.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    Task { @MainActor in
+                        DiagnosticsLog.grid.notice("debugSimulatePageTurnRelease: mid-transition x=\(self.debugCollectionTranslationX, privacy: .public) (width=\(self.collectionView.bounds.width, privacy: .public))")
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    Task { @MainActor in
+                        DiagnosticsLog.grid.notice("debugSimulatePageTurnRelease: page \(startPage, privacy: .public) -> \(self.currentPage, privacy: .public), final x=\(self.debugCollectionTranslationX, privacy: .public), activeDrag=\(self.itemDrag.isDragging, privacy: .public)")
+                    }
+                }
+            }
+        }
+    }
+
+    private var debugCollectionTranslationX: CGFloat {
+        (collectionView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat)
+            ?? (collectionView.layer?.value(forKeyPath: "transform.translation.x") as? CGFloat)
+            ?? 0
     }
     #endif
 

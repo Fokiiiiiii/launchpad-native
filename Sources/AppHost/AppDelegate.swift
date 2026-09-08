@@ -249,7 +249,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 #if LAUNCHPAD_DEBUG_HOOKS
             if let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SIMULATE_ITEM_DRAG"] {
-                launcherWindowController.debugSimulateItemDrag(mode: mode)
+                // Deferred, like the search-field hooks: fired straight after
+                // show() the synthetic events landed before the grid had its
+                // final geometry, so nothing reached GridCollectionView and
+                // the hook reported a clean run without ever having dragged.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    self?.launcherWindowController.debugSimulateItemDrag(mode: mode)
+                }
             }
             #endif
 

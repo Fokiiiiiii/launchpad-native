@@ -688,10 +688,6 @@ final class ItemDragController {
     /// edge zone before the dwell timer fires doesn't read as an abrupt cut
     /// — this is deliberately the *only* place a bare peek offset is reset
     /// without an accompanying commit, so it needs its own settle animation
-    /// Springs the peek back out (not an instant snap) so backing out of the
-    /// edge zone before the dwell timer fires doesn't read as an abrupt cut
-    /// — this is deliberately the *only* place a bare peek offset is reset
-    /// without an accompanying commit, so it needs its own settle animation
     /// (the page-turn commit path in `commitPageTurnDuringDrag` handles its
     /// own transition instead of going through this).
     private func clearEdgePeek(session: ItemDrag.ItemDragSession) {
@@ -705,8 +701,27 @@ final class ItemDragController {
         session.lastPeekTime = nil
     }
 
-
-    /// (the page-turn commit path in `commitPageTurnDuringDrag` handles its
+    /// Undoes a page turn's offset when the drag ends before the turn settles.
+    ///
+    /// `commitPageTurnDuringDrag` slides the whole collection view a page's
+    /// width and leaves `commitPageChange` — which runs only if the drag is
+    /// still live — to put it back at zero. Release the button inside that
+    /// window and nothing else does it: `clearEdgePeek` returns early because
+    /// the turn took the peek image out of the session, the 15s safety net and
+    /// `resetSearch` only look at the page-*swipe* state, and `reloadData`
+    /// never touches the layer's transform. The grid was left parked a full
+    /// page off-screen — wallpaper and nothing else — until the user paged
+    /// somewhere else by hand. Whoever applies the offset has to be matched by
+    /// someone who removes it on every exit.
+    private func finishPendingPageTurn(session: ItemDrag.ItemDragSession) {
+        guard session.pageTurnInFlight else { return }
+        session.pageTurnInFlight = false
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        collectionView.layer?.removeAnimation(forKey: "itemDragPageTurnOut")
+        collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
+        CATransaction.commit()
+    }
 
     private func commitPageTurnDuringDrag(session: ItemDrag.ItemDragSession, direction: Int) {
         let targetPage = currentPage + direction
@@ -733,6 +748,7 @@ final class ItemDragController {
         session.lastPeekTime = nil
 
         collectionView.wantsLayer = true
+        session.pageTurnInFlight = true
         let spring = GridSpring.animation(keyPath: "transform.translation.x", from: presentationX, to: offset, damping: 0.98, response: 0.30, initialVelocity: relativeVelocity)
         collectionView.layer?.add(spring, forKey: "itemDragPageTurnOut")
         collectionView.layer?.setValue(offset, forKeyPath: "transform.translation.x")
@@ -761,7 +777,17 @@ final class ItemDragController {
                 // ownership of `peekImageView` from `session` above, so
                 // nothing else will clean it up if this early-returns.
                 peekImageView?.removeFromSuperview()
-                guard let self, self.activeItemDrag === session, session.generation == self.itemDragGeneration else { return }
+                guard let self else { return }
+                guard self.activeItemDrag === session, session.generation == self.itemDragGeneration else {
+                    // Superseded or already ended. `commitPageChange` is what
+                    // would have reset the offset this function applied, and
+                    // it is not going to run — so undo it here rather than
+                    // leaving the grid off-screen. Idempotent with the
+                    // teardown path, whichever gets here first.
+                    self.finishPendingPageTurn(session: session)
+                    return
+                }
+                session.pageTurnInFlight = false
                 self.callbacks.commitPageChange(targetPage)
 
                 session.pendingRawSlot = -1
@@ -810,6 +836,7 @@ final class ItemDragController {
         session.invalidateTimers()
         activeItemDrag = nil
         clearEdgePeek(session: session)
+        finishPendingPageTurn(session: session)
         clearFolderZoneIndicator(session: session, animated: false)
         lastAnimatedValueByLayer.removeAll()
 
@@ -886,6 +913,7 @@ final class ItemDragController {
         session.invalidateTimers()
         activeItemDrag = nil
         clearEdgePeek(session: session)
+        finishPendingPageTurn(session: session)
         clearFolderZoneIndicator(session: session, animated: false)
         lastAnimatedValueByLayer.removeAll()
         // See endItemDrag's doc comment: reset before stopWobble(), not

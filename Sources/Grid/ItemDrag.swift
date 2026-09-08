@@ -62,6 +62,16 @@ enum ItemDrag {
         /// re-targets a peek that's still easing.
         var lastPeekOffset: CGFloat?
         var lastPeekTime: CFTimeInterval?
+        /// True from the moment a mid-drag page turn slides the collection
+        /// view a full page's width until its settle block puts it back.
+        ///
+        /// The turn is the one place that moves the collection view itself
+        /// rather than a peek image, and the only thing that undoes it is
+        /// `commitPageChange` — inside a block guarded on the drag still being
+        /// live. Letting go inside that window makes the guard bail, so the
+        /// drag's own teardown has to finish the job; this is what tells it
+        /// there is a turn to finish.
+        var pageTurnInFlight = false
         /// Real, confirmed report ("グループ化しようとするとアプリが逃げる
         /// ...わかりやすくできない？"): a standalone overlay (same pattern
         /// as `floatingView`/`edgePeekImageView` — never a sublayer added to
