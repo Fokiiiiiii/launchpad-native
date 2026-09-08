@@ -879,3 +879,109 @@ private func bundleIDs(_ pages: [[LayoutItem]]) -> [[String]] {
     #expect(changes == 2)
     #expect(model.displayName(for: app) == "Notes")
 }
+
+/// `removeFromFolder` compacts the folder's pages after taking an item out;
+/// pruning did not, so a folder that lost apps to a rescan kept a hole in
+/// whichever page they were on. The folder is paged, so the user swipes to a
+/// half-empty page — or past a completely empty one — until the next launch.
+@Test @MainActor func pruningAFolderCompactsItsPages() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    var settings = model.gridSettings
+    settings.folderGridSize = 2
+    model.updateGridSettings(settings)
+
+    let all = (0..<6).map { record("App \($0)", id: "app\($0)") }
+    model.reconcile(with: all)
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+    guard case .folder(let folderID) = model.pages[0][0] else {
+        Issue.record("expected a folder")
+        return
+    }
+    // Fill it past one page: capacity 2, so 6 apps land as [2, 2, 2].
+    for _ in 0..<4 {
+        model.createOrJoinFolder(sourcePage: 0, sourceIndex: 1, destinationPage: 0, destinationIndex: 0)
+    }
+    #expect(model.folders[folderID]?.pages.map(\.count) == [2, 2, 2], "the fixture should span three folder pages")
+    let secondPage = try #require(model.folders[folderID]?.pages[1])
+
+    // One of the apps on the middle page disappears from the catalog.
+    guard case .app(let victim) = secondPage[0] else {
+        Issue.record("expected an app")
+        return
+    }
+    model.reconcile(with: all.filter { $0.id.value != victim.value })
+
+    let pages = try #require(model.folders[folderID]?.pages)
+    #expect(pages.map(\.count) == [2, 2, 1], "pages: \(pages.map(\.count)) — the hole was left where the app was removed")
+    #expect(pages.flatMap { $0 }.count == 5)
+}
+
+/// The cascade must push off what was already on the page, never the item the
+/// user just dropped: the drag settles onto a slot on *this* page, so sending
+/// the dropped item away makes the icon appear to fly off the slot it landed
+/// on, and the animation points at a different app.
+@Test @MainActor func droppingAtTheEndOfAFullPageKeepsTheDroppedItemThere() async {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    var settings = model.gridSettings
+    settings.columns = 2
+    settings.rows = 2 // capacity 4
+    model.updateGridSettings(settings)
+
+    let records = (0..<6).map { record("App \($0)", id: "app\($0)") }
+    model.reconcile(with: records)
+    #expect(model.pages.map(\.count) == [4, 2])
+
+    let moved = model.pages[1][0]
+    let previousLast = model.pages[0][3]
+    // Past the last slot of a page that is already full — what
+    // `ItemDragController` passes when the drop lands beyond the last icon.
+    model.moveItem(fromPage: 1, fromIndex: 0, toPage: 0, toIndex: 4)
+
+    #expect(model.pages[0].contains(moved), "the dropped item must stay on the page it was dropped on")
+    #expect(model.pages[0].last == moved)
+    #expect(model.pages[1].first == previousLast, "the page's own last item is the one that gets displaced")
+    #expect(model.pages[0].count == 4)
+    #expect(model.pages.flatMap { $0 }.count == 6)
+}
+
+/// Dragging an app out of a folder is the other way onto a page, and it had no
+/// capacity check at all — the same disappearing act as a drop onto a full page.
+@Test @MainActor func draggingOutOfAFolderOntoAFullPageCascades() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    var settings = model.gridSettings
+    settings.columns = 2
+    settings.rows = 2 // capacity 4
+    model.updateGridSettings(settings)
+
+    // Three loose apps plus a folder holding two: page 0 is exactly full.
+    let records = (0..<5).map { record("App \($0)", id: "app\($0)") }
+    model.reconcile(with: records)
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+    // Folding two apps into one tile left a gap and pushed the fifth app onto
+    // page 1; bring it back so page 0 is exactly full.
+    model.moveItem(fromPage: 1, fromIndex: 0, toPage: 0, toIndex: 3)
+    #expect(model.pages[0].count == 4, "the fixture should leave page 0 exactly full")
+    guard case .folder(let folderID) = model.pages[0].first(where: { if case .folder = $0 { return true } else { return false } }) else {
+        Issue.record("expected a folder on page 0")
+        return
+    }
+
+    model.removeFromFolder(folderID, folderPage: 0, folderIndex: 0, toPage: 0)
+
+    #expect(
+        model.pages[0].count == 4,
+        "page 0 holds \(model.pages[0].count) with a capacity of 4 — the extra one is drawn outside the viewport"
+    )
+    #expect(model.pages.count > 1 && model.pages[1].count == 1, "the displaced item should land on the next page")
+    let placed = model.pages.flatMap { $0 }
+    #expect(placed.count == 5)
+}

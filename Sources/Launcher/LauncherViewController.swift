@@ -700,11 +700,13 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private func searchContextMenu(at indexPath: IndexPath) -> NSMenu? {
         let pageRecords = searchRecordsOnCurrentPage()
         guard pageRecords.indices.contains(indexPath.item) else { return nil }
+        // Read the cell first: selecting reaches `viewModel.onChange`, which
+        // reloads this collection view, and a reloaded cell is no longer the
+        // one at this index path — the window-browser popover would lose the
+        // view it attaches to and the menu would quietly drop that item.
+        let anchorView = searchResultsCollectionView.item(at: indexPath)?.view
         viewModel.select(index: searchCurrentPage * searchPageSize + indexPath.item)
-        return gridViewController.contextMenu(
-            for: pageRecords[indexPath.item],
-            anchorView: searchResultsCollectionView.item(at: indexPath)?.view
-        )
+        return gridViewController.contextMenu(for: pageRecords[indexPath.item], anchorView: anchorView)
     }
 
     private func launch(_ record: ApplicationRecord) {

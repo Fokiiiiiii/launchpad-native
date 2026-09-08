@@ -481,6 +481,13 @@ public final class GridModel {
                     return isValid
                 }
             }
+            if prunedFromFolder > 0 {
+                // Same reason `removeFromFolder` compacts: filtering in place
+                // leaves a hole in whichever page lost items, and the folder
+                // is paged, so the user swipes to a half-empty page — or past
+                // an entirely empty one — until the next launch repacks it.
+                folder.pages = Self.folderPagesRepacked(folder.pages, capacity: gridSettings.folderGridSize)
+            }
             folders[folderID] = folder
             if prunedFromFolder > 0 {
                 DiagnosticsLog.grid.notice("Pruned \(prunedFromFolder, privacy: .public) item(s) from folder \"\(folder.name, privacy: .public)\": \(removedFromFolder, privacy: .private)")
@@ -516,7 +523,16 @@ public final class GridModel {
         guard pages.indices.contains(fromPage), pages[fromPage].indices.contains(fromIndex) else { return }
         let item = pages[fromPage].remove(at: fromIndex)
         while pages.count <= toPage { pages.append([]) }
-        let clampedIndex = min(max(toIndex, 0), pages[toPage].count)
+        var clampedIndex = min(max(toIndex, 0), pages[toPage].count)
+        // Landing past the last slot of an already-full page would make the
+        // dropped item itself the one the cascade pushes onto the next page:
+        // the icon would appear to fly off the slot it was just dropped on,
+        // and the settle animation — which targets a slot on *this* page —
+        // would point at a different app. Whatever was already there is the
+        // right thing to displace.
+        if pages[toPage].count >= capacityPerPage {
+            clampedIndex = min(clampedIndex, max(capacityPerPage - 1, 0))
+        }
         pages[toPage].insert(item, at: clampedIndex)
         cascadeOverflow(from: toPage)
         onChange?()
@@ -659,6 +675,10 @@ public final class GridModel {
 
         while pages.count <= toPage { pages.append([]) }
         pages[toPage].append(item)
+        // Dragging out of a folder is the other way an item reaches a page,
+        // and the page it lands on can already be full — same disappearing
+        // act as a drop, so it needs the same cascade.
+        cascadeOverflow(from: toPage)
 
         if isFolderEmpty(folderID) {
             dissolveFolder(folderID)

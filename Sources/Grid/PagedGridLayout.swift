@@ -2,13 +2,17 @@ import AppKit
 import Persistence
 
 /// A real custom `NSCollectionViewLayout` (not `NSCollectionViewFlowLayout`,
-/// and never SwiftUI `LazyVGrid`, per the spec). Each NSCollectionView
-/// *section* is one page; within a section, items are arranged in a fixed
-/// `columns x rows` grid read from `GridSettings`, and pages are laid out
-/// left-to-right as one continuous horizontally-scrollable strip — real
-/// Launchpad's page model, minus the hand-tuned rubber-band/velocity paging
-/// physics (tracked as a follow-up polish pass; functional paging via
-/// scrolling and the page-jump API below is what Phase 4 requires).
+/// and never SwiftUI `LazyVGrid`, per the spec). Items are arranged in a fixed
+/// `columns x rows` grid read from `GridSettings`, sized to the scroll view's
+/// viewport so a page always fills it exactly and never scrolls.
+///
+/// Sections are placed left to right a page-width apart, but the grid only
+/// ever hands this layout one of them: `GridViewController` keeps a single
+/// section holding `model.pages[currentPage]` (see its data-source section)
+/// and changes pages by swapping that content and animating a transform — not
+/// by moving a scroll position, which stays at zero throughout. There is no
+/// page-jump API here; paging lives in `GridViewController.jumpToPage` and, for
+/// drag-driven turns, in `ItemDragController`.
 final class PagedGridLayout: NSCollectionViewLayout {
     var settings: GridSettings = .default {
         // `GridViewController.reload()` assigns this on every model change —
@@ -87,5 +91,4 @@ final class PagedGridLayout: NSCollectionViewLayout {
         newBounds.size != pageSize
     }
 
-    /// The visible-rect origin for jumping directly to page `index`, used by
 }
