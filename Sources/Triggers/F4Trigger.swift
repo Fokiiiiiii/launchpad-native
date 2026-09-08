@@ -34,10 +34,22 @@ public final class F4Trigger {
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: mask,
-            callback: { _, _, event, userInfo -> Unmanaged<CGEvent>? in
+            callback: { _, type, event, userInfo -> Unmanaged<CGEvent>? in
                 guard let userInfo else { return Unmanaged.passRetained(event) }
                 let trigger = Unmanaged<F4Trigger>.fromOpaque(userInfo).takeUnretainedValue()
-                return trigger.handle(event: event)
+                // The system switches a tap off if its callback ever takes too
+                // long, or on certain user input. Nothing turns it back on by
+                // itself: without this the key silently stops working for the
+                // rest of the process's life while `isActive` still says true.
+                // Same handling as the gesture tap.
+                switch type {
+                case .tapDisabledByTimeout, .tapDisabledByUserInput:
+                    trigger.reenableTap()
+                    DiagnosticsLog.triggers.error("F4 event tap was disabled by the system (\(type.rawValue)); re-enabled it")
+                    return Unmanaged.passRetained(event)
+                default:
+                    return trigger.handle(event: event)
+                }
             },
             userInfo: selfPointer
         ) else {
@@ -58,6 +70,9 @@ public final class F4Trigger {
     public func stop() {
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
+            // Matches the gesture tap: without invalidating the port, the
+            // Mach port outlives the run-loop source removal.
+            CFMachPortInvalidate(tap)
         }
         if let runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
@@ -65,6 +80,12 @@ public final class F4Trigger {
         tap = nil
         runLoopSource = nil
         isActive = false
+    }
+
+    private func reenableTap() {
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: true)
+        }
     }
 
     private func handle(event: CGEvent) -> Unmanaged<CGEvent>? {
