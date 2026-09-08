@@ -272,6 +272,41 @@ public final class MultitouchGestureTrigger {
         )
     }
 
+    /// Re-attaches when the set of multitouch devices no longer matches the
+    /// one `start()` saw.
+    ///
+    /// The list is read exactly once, at start, and a callback is registered
+    /// per device. A trackpad that arrives afterwards — paired over Bluetooth,
+    /// or recreated by the system across a sleep/wake cycle — has no callback
+    /// on it, so gestures made on it do nothing while Settings still reports
+    /// the trigger as on. Calling `start()` again does not help by itself: it
+    /// returns early while any handles are still held.
+    ///
+    /// Counting is the whole test. Comparing the handles themselves would be
+    /// stricter, but the pointers come from the private framework's own array
+    /// and a swap that keeps the count identical is not something this can
+    /// distinguish; a device appearing or disappearing always changes it.
+    @discardableResult
+    public func restartIfDeviceSetChanged() -> Bool {
+        guard !deviceHandles.isEmpty else { return false }
+        guard let count = currentDeviceCount(), count != deviceHandles.count else { return false }
+        DiagnosticsLog.triggers.info(
+            "Multitouch devices changed (\(self.deviceHandles.count, privacy: .public) -> \(count, privacy: .public)); re-attaching the listener"
+        )
+        stop()
+        start()
+        return true
+    }
+
+    private func currentDeviceCount() -> Int? {
+        typealias MTDeviceCreateListFn = @convention(c) () -> Unmanaged<CFArray>?
+        guard let handle = frameworkHandle ?? dlopen("/System/Library/PrivateFrameworks/MultitouchSupport.framework/MultitouchSupport", RTLD_NOW),
+              let createListSym = dlsym(handle, "MTDeviceCreateList") else { return nil }
+        let createList = unsafeBitCast(createListSym, to: MTDeviceCreateListFn.self)
+        guard let list = createList()?.takeRetainedValue() else { return 0 }
+        return CFArrayGetCount(list)
+    }
+
     public func stop() {
         gestureEventTap.stop()
         typealias MTDeviceStopFn = @convention(c) (UnsafeMutableRawPointer) -> Int32

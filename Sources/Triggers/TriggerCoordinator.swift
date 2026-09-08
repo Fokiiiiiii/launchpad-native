@@ -1,3 +1,4 @@
+import AppKit
 import Diagnostics
 import Persistence
 
@@ -33,6 +34,9 @@ public final class TriggerCoordinator {
     private let multitouch: MultitouchGestureTrigger
     private let trackpadPreferenceStore: TrackpadPreferenceStore
     private var activeGestureConflictBackup: GestureConflictBackup?
+    /// Watches for sleep/wake so the multitouch listener can re-attach to a
+    /// device set that changed while the machine was asleep.
+    private var wakeObserver: NSObjectProtocol?
     /// Optional candidate ordering supplied by a caller that coalesces rapid
     /// Settings edits. Legacy callers omit it and retain the existing apply
     /// behavior; a lower token is ignored before any trigger or preference
@@ -297,6 +301,7 @@ public final class TriggerCoordinator {
             let multitouchReport = multitouch.start()
             multitouchActive = multitouchReport.rawListenerActive
             multitouchEventArbitrationActive = multitouchReport.eventArbitrationActive
+            observeWake()
             if !multitouchActive {
                 DiagnosticsLog.triggers.error("Multitouch gesture listener failed to start")
                 if let backup = activeGestureConflictBackup {
@@ -324,11 +329,38 @@ public final class TriggerCoordinator {
         return report
     }
 
+    /// Re-attaches the multitouch listener if the devices changed.
+    ///
+    /// Called on wake, and again whenever the launcher is shown: waking covers
+    /// the common case, and the launcher check covers a trackpad paired while
+    /// the machine was awake, where the user's first move is to open the
+    /// launcher some other way and wonder why the gesture stopped working.
+    public func refreshMultitouchDevices() {
+        multitouch.restartIfDeviceSetChanged()
+    }
+
+    private func observeWake() {
+        guard wakeObserver == nil else { return }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refreshMultitouchDevices()
+            }
+        }
+    }
+
     public func stopAll() {
         hotkey.unregister()
         hotCorner.stop()
         f4.stop()
         multitouch.stop()
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+            self.wakeObserver = nil
+        }
         if let backup = activeGestureConflictBackup {
             if ConflictingGestureManager.restore(backup, store: trackpadPreferenceStore) {
                 activeGestureConflictBackup = nil

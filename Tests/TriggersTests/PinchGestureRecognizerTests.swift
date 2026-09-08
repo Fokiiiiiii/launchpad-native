@@ -307,3 +307,12 @@ private func pair(spread: Float) -> [TouchSample] {
     recognizer.ingest(duplicated(spread: 3.0))
     #expect(spreadCount == 0, "a run of duplicate-ID frames was treated as a real spread")
 }
+
+/// The re-attach path must stay inert until the listener has actually started:
+/// it calls `stop()` then `start()`, and doing that from a cold trigger would
+/// bring the multitouch listener up behind the settings that say it is off.
+@Test @MainActor func reattachingIsANoOpWhenTheListenerWasNeverStarted() {
+    let trigger = MultitouchGestureTrigger(onPinchClose: {}, onSpreadOpen: {})
+    #expect(trigger.restartIfDeviceSetChanged() == false)
+    #expect(trigger.isActive == false)
+}

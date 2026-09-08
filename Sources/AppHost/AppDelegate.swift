@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var launcherWindowController = LauncherWindowController(iconCache: iconCache, layoutStore: layoutStore)
     private lazy var triggerCoordinator = TriggerCoordinator(
         onActivate: { [weak self] in
-            self?.launcherWindowController.toggle()
+            self?.toggleLauncherFromTrigger()
         },
         onPinchClose: { [weak self] in
             self?.openLauncherFromMultitouch()
@@ -460,6 +460,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let forceAllTriggers = false
         #endif
         return TriggerSettingsPolicy.normalized(requested, forceAllTriggers: forceAllTriggers)
+    }
+
+    /// Opening by key or hot corner is the moment to notice a trackpad paired
+    /// since the multitouch listener attached: the gesture that would normally
+    /// reveal the problem is the one that stopped working, so the user reaches
+    /// for another way in.
+    private func toggleLauncherFromTrigger() {
+        triggerCoordinator.refreshMultitouchDevices()
+        launcherWindowController.toggle()
     }
 
     private func openLauncherFromMultitouch() {
