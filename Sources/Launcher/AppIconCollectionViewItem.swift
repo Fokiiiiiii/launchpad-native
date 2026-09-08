@@ -139,6 +139,12 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     /// and the grid and folder panel both go through `GridModel.displayName`.
     /// This list showing the catalog name instead was how a rename made from
     /// the search results looked like it had done nothing at all.
+#if LAUNCHPAD_DEBUG_HOOKS
+    /// What this cell is actually showing — see the search hooks in
+    /// `LauncherViewController`.
+    var debugLabelText: String { label.stringValue }
+    #endif
+
     func configure(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, visualScale: Double = 1, displayName: String? = nil) {
         currentRequestKey = record.iconCacheKey
         let baseSize = CGFloat(iconSize)

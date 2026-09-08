@@ -421,6 +421,9 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             NSPoint(x: cell.view.frame.midX, y: cell.view.frame.midY),
             to: nil
         )
+        if let appCell = cell as? AppIconCollectionViewItem {
+            DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: cell label=\(appCell.debugLabelText, privacy: .public)")
+        }
         let hit = window.contentView?.hitTest(point)
         DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: point=\(String(describing: point), privacy: .public), hitTest -> \(String(describing: hit), privacy: .public)")
 
