@@ -243,3 +243,87 @@ private func swipe(_ panel: FolderContentsViewController, dx: Double) {
     #expect(panel.currentPageForTesting == 0)
     #expect(panel.visibleTileCountForTesting == 5)
 }
+
+// MARK: - Keyboard selection
+
+/// Opening a folder used to be a dead end for the keyboard: up/down did
+/// nothing, Return did nothing, and the only way to launch what was inside was
+/// to reach for the mouse.
+@Test @MainActor func arrowKeysMoveAKeyboardSelectionInsideAFolder() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let (model, folderID) = await modelWithFolder(itemCount: 9, directory: dir)
+    let panel = makePanel(model: model, folderID: folderID, columns: 3)
+    #expect(panel.selectedTileIDForTesting == nil, "nothing is selected until a key asks for it")
+
+    // Down starts the selection, since there is nowhere to move from yet.
+    #expect(panel.handleVerticalArrowKey(delta: 1) == true)
+    let first = panel.visibleTileIDsForTesting[0]
+    #expect(panel.selectedTileIDForTesting == first)
+
+    // Right walks along the row.
+    #expect(panel.handleArrowKey(delta: 1) == true)
+    #expect(panel.selectedTileIDForTesting == panel.visibleTileIDsForTesting[1])
+
+    // Down moves a whole row at 3 columns.
+    #expect(panel.handleVerticalArrowKey(delta: 1) == true)
+    #expect(panel.selectedTileIDForTesting == panel.visibleTileIDsForTesting[4])
+
+    // Past the last row it stays put rather than wrapping or clearing.
+    #expect(panel.handleVerticalArrowKey(delta: 1) == true)
+    #expect(panel.handleVerticalArrowKey(delta: 1) == true)
+    #expect(panel.selectedTileIDForTesting == panel.visibleTileIDsForTesting[7])
+}
+
+@Test @MainActor func returnLaunchesTheSelectedAppInAFolder() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let (model, folderID) = await modelWithFolder(itemCount: 5, directory: dir)
+
+    var launched: [String] = []
+    let panel = FolderContentsViewController(
+        model: model,
+        folderID: folderID,
+        iconCache: IconCache(),
+        iconSize: 96,
+        columns: 3,
+        panelWidth: 600,
+        maximumHeight: 800,
+        onLaunch: { launched.append($0.bundleIdentifier) },
+        onItemDraggedOut: { _, _ in }
+    )
+    panel.loadViewIfNeeded()
+
+    #expect(panel.activateSelection() == false, "Return with no selection must fall through")
+    #expect(launched.isEmpty)
+
+    _ = panel.handleVerticalArrowKey(delta: 1)
+    #expect(panel.activateSelection() == true)
+    #expect(launched.count == 1)
+}
+
+/// With a selection, left/right walk it along the row and carry it across the
+/// page boundary; with none they page, which is what they did before.
+@Test @MainActor func theSelectionCrossesPagesAtTheEndsOfARow() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let (model, folderID) = await modelWithFolder(itemCount: 14, directory: dir)
+    let panel = makePanel(model: model, folderID: folderID)
+    #expect(panel.visibleTileCountForTesting == 9)
+
+    // Put the selection on the last tile of page 0, then step off the end.
+    _ = panel.handleVerticalArrowKey(delta: 1)
+    for _ in 0..<8 { _ = panel.handleArrowKey(delta: 1) }
+    #expect(panel.selectedTileIDForTesting == panel.visibleTileIDsForTesting.last)
+    #expect(panel.currentPageForTesting == 0)
+
+    _ = panel.handleArrowKey(delta: 1)
+    for _ in 0..<60 where panel.visibleTileCountForTesting != 5 {
+        try await Task.sleep(for: .milliseconds(25))
+    }
+    #expect(panel.currentPageForTesting == 1)
+    #expect(
+        panel.selectedTileIDForTesting == panel.visibleTileIDsForTesting.first,
+        "entering a page forwards should land on its first tile, not leave the selection behind"
+    )
+}

@@ -108,6 +108,12 @@ final class FolderOverlayPresenter {
         backdrop.onArrowKey = { [weak self] delta in
             self?.contentsViewController?.handleArrowKey(delta: delta) ?? false
         }
+        backdrop.onVerticalArrowKey = { [weak self] delta in
+            self?.contentsViewController?.handleVerticalArrowKey(delta: delta) ?? false
+        }
+        backdrop.onActivateSelection = { [weak self] in
+            self?.contentsViewController?.activateSelection() ?? false
+        }
 
         // Sinks the grid back without hiding it. The panel itself is a light,
         // legible surface, so it separates from what is behind it without
@@ -203,6 +209,10 @@ private final class FolderOverlayBackdropView: NSView {
     /// Returns whether the panel consumed the key, so an unhandled arrow still
     /// falls through to whatever would normally have received it.
     var onArrowKey: ((Int) -> Bool)?
+    /// Up/down move the keyboard selection between rows; Return opens what is
+    /// selected. Same "did the panel take it" contract as `onArrowKey`.
+    var onVerticalArrowKey: ((Int) -> Bool)?
+    var onActivateSelection: (() -> Bool)?
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -220,6 +230,18 @@ private final class FolderOverlayBackdropView: NSView {
 
     override func moveRight(_ sender: Any?) {
         if onArrowKey?(1) != true { super.moveRight(sender) }
+    }
+
+    override func moveUp(_ sender: Any?) {
+        if onVerticalArrowKey?(-1) != true { super.moveUp(sender) }
+    }
+
+    override func moveDown(_ sender: Any?) {
+        if onVerticalArrowKey?(1) != true { super.moveDown(sender) }
+    }
+
+    override func insertNewline(_ sender: Any?) {
+        if onActivateSelection?() != true { super.insertNewline(sender) }
     }
 
     override func keyDown(with event: NSEvent) {

@@ -354,14 +354,68 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         goToPage(currentFolderPage + delta)
     }
 
-    /// Left/right arrows move between folder pages. The backdrop is first
-    /// responder while a folder is open (that is what makes Escape close it),
-    /// and it forwards unhandled keys down to this panel.
+    /// Left/right arrows. With a keyboard selection they walk it along the
+    /// row and carry it onto the next page at the ends; with none they page,
+    /// which is all they have ever done.
+    ///
+    /// The backdrop is first responder while a folder is open (that is what
+    /// makes Escape close it), and it forwards unhandled keys down here.
     func handleArrowKey(delta: Int) -> Bool {
-        guard folderPages.count > 1 else { return false }
-        goToAdjacentPage(delta)
+        guard let index = selectedTileIndex() else {
+            guard folderPages.count > 1 else { return false }
+            goToAdjacentPage(delta)
+            return true
+        }
+        let next = index + delta
+        if gridModel.tiles.indices.contains(next) {
+            gridModel.selectedID = gridModel.tiles[next].id
+            return true
+        }
+        // Off the end: cross to the neighbouring page and enter from the side
+        // the selection left by, so holding an arrow reads as one continuous
+        // walk rather than a jump back to the start.
+        let targetPage = currentFolderPage + delta
+        guard folderPages.indices.contains(targetPage) else { return true }
+        pendingEdgeSelection = delta
+        goToPage(targetPage)
         return true
     }
+
+    /// Up/down arrows move the selection a row at a time, and start it on the
+    /// first tile when there is none yet — the only way to get a selection
+    /// with the keyboard alone.
+    func handleVerticalArrowKey(delta: Int) -> Bool {
+        guard !gridModel.tiles.isEmpty else { return false }
+        guard let index = selectedTileIndex() else {
+            gridModel.selectedID = gridModel.tiles.first?.id
+            return true
+        }
+        let next = index + delta * max(columns, 1)
+        if gridModel.tiles.indices.contains(next) {
+            gridModel.selectedID = gridModel.tiles[next].id
+        }
+        return true
+    }
+
+    /// Return opens whatever the keyboard is on. Reports whether it did, so an
+    /// unhandled Return still falls through with no selection.
+    @discardableResult
+    func activateSelection() -> Bool {
+        guard let id = gridModel.selectedID,
+              let tile = gridModel.tiles.first(where: { $0.id == id }) else { return false }
+        tile.onLaunch()
+        return true
+    }
+
+    private func selectedTileIndex() -> Int? {
+        guard let id = gridModel.selectedID else { return nil }
+        return gridModel.tiles.firstIndex(where: { $0.id == id })
+    }
+
+    /// Which edge of the page being entered the selection should land on:
+    /// positive means it walked forward and arrives at the first tile.
+    /// Consumed by `refresh()`, which is where the new tiles come into being.
+    private var pendingEdgeSelection: Int?
 
     /// Test hooks: a panel showing one page at a time has no other observable
     /// surface for "which page, and what is on it" — same reasoning as
@@ -369,6 +423,8 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     var pageCountForTesting: Int { folderPages.count }
     var visibleTileCountForTesting: Int { gridModel.tiles.count }
     var currentPageForTesting: Int { currentFolderPage }
+    var selectedTileIDForTesting: String? { gridModel.selectedID }
+    var visibleTileIDsForTesting: [String] { gridModel.tiles.map(\.id) }
     /// How many visible tiles have actually received an icon. Zero while a
     /// folder is still loading; zero *forever* is the signature of an icon
     /// fetch resolving against a controller nothing kept alive.
@@ -463,6 +519,13 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
             }
         }
         gridModel.tiles = tiles
+        // A page change rebuilds the tiles asynchronously, after its animation
+        // — so a selection meant for the page being entered has to wait for
+        // the tiles it refers to to exist.
+        if let entering = pendingEdgeSelection {
+            pendingEdgeSelection = nil
+            gridModel.selectedID = entering > 0 ? tiles.first?.id : tiles.last?.id
+        }
         view.window?.layoutIfNeeded()
     }
 

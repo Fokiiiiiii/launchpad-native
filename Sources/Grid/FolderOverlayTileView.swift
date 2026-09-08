@@ -64,6 +64,10 @@ struct FolderOverlayTileView: View {
     /// view's existing "don't subscribe to more than you need" shape
     /// (`hovering` is likewise purely local `@State`).
     let isDragging: Bool
+    /// Whether the keyboard selection is on this tile. Drawn as a filled
+    /// rounded plate behind the icon and label, the same idea as the grid's
+    /// own selection tile.
+    let isSelected: Bool
 
     @State private var hovering = false
 
@@ -82,6 +86,13 @@ struct FolderOverlayTileView: View {
                     .frame(maxWidth: iconSize + 56)
             }
             .padding(.top, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(.white.opacity(isSelected ? 0.16 : 0))
+                    .padding(.horizontal, -8)
+                    .padding(.vertical, -4)
+            )
+            .animation(tileSnappy, value: isSelected)
             .contentShape(Rectangle())
         }
         .buttonStyle(TileButtonStyle(hovering: hovering))
@@ -146,6 +157,10 @@ final class FolderOverlayGridModel: ObservableObject {
     /// instead of round-tripping the dragged `NSItemProvider`'s payload
     /// asynchronously on every hover frame.
     @Published var draggingID: String?
+    /// id of the tile the keyboard is on, or `nil` while the panel has no
+    /// keyboard selection. Separate from `draggingID` because the two can
+    /// legitimately point at different tiles.
+    @Published var selectedID: String?
 }
 
 struct FolderOverlayGridContent: View {
@@ -164,7 +179,12 @@ struct FolderOverlayGridContent: View {
             spacing: 26
         ) {
             ForEach(model.tiles) { tile in
-                FolderOverlayTileView(tile: tile, iconSize: iconSize, isDragging: tile.id == model.draggingID)
+                FolderOverlayTileView(
+                    tile: tile,
+                    iconSize: iconSize,
+                    isDragging: tile.id == model.draggingID,
+                    isSelected: tile.id == model.selectedID
+                )
             }
         }
         // Left-aligned, not centered: the panel is a fixed width, so a folder
