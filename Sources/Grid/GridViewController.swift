@@ -93,10 +93,30 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.isSelectable = true
         collectionView.backgroundColors = [.clear]
         collectionView.menuProvider = { [weak self] indexPath in self?.contextMenu(for: indexPath) }
-        collectionView.onSwipePage = { [weak self] delta in self?.jumpToAdjacentPage(delta: delta) }
-        collectionView.onSwipeBegan = { [weak self] in self?.beginPageDrag() }
-        collectionView.onSwipeChanged = { [weak self] delta in self?.updatePageDrag(deltaX: delta) }
-        collectionView.onSwipeEnded = { [weak self] delta, velocity in self?.endPageDrag(deltaX: delta, velocity: velocity) }
+        // All four bail while an icon is being dragged. A page change from
+        // here does not tell the drag session about itself, so the dragged
+        // item's cell — hidden on its own page by `beginItemDrag` — is rebuilt
+        // at full opacity by `reloadData`, and the user sees the app twice:
+        // once under the pointer, once back in its old slot. The page-swipe
+        // machinery also drives the collection view's own transform, which the
+        // drag's edge peek is already using. Dragging to a page edge is the
+        // supported way to change pages mid-drag.
+        collectionView.onSwipePage = { [weak self] delta in
+            guard let self, !self.itemDrag.isDragging else { return }
+            self.jumpToAdjacentPage(delta: delta)
+        }
+        collectionView.onSwipeBegan = { [weak self] in
+            guard let self, !self.itemDrag.isDragging else { return }
+            self.beginPageDrag()
+        }
+        collectionView.onSwipeChanged = { [weak self] delta in
+            guard let self, !self.itemDrag.isDragging else { return }
+            self.updatePageDrag(deltaX: delta)
+        }
+        collectionView.onSwipeEnded = { [weak self] delta, velocity in
+            guard let self, !self.itemDrag.isDragging else { return }
+            self.endPageDrag(deltaX: delta, velocity: velocity)
+        }
         collectionView.onItemMouseDown = { [weak self] indexPath, event in self?.itemDrag.handleItemMouseDown(indexPath: indexPath, event: event) }
         collectionView.onItemMouseDragged = { [weak self] event in self?.itemDrag.handleItemMouseDragged(event: event) }
         collectionView.onItemMouseUp = { [weak self] event in self?.itemDrag.handleItemMouseUp(event: event) }
@@ -448,6 +468,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private func jumpToPage(_ index: Int) {
         guard model.pages.indices.contains(index), index != currentPage || collectionView.numberOfSections == 0 else { return }
+        // Page dots and the arrow keys reach here too, and mid-drag they have
+        // the same problem as a swipe — see the swipe wiring in `loadView`.
+        guard !itemDrag.isDragging else { return }
         let start = DispatchTime.now()
         pageTransitionGeneration &+= 1
         let generation = pageTransitionGeneration
@@ -846,6 +869,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             debugSimulatePageTurnRelease()
             return
         }
+        if mode == "wheel-during-drag" {
+            debugSimulateWheelDuringDrag()
+            return
+        }
         let targetIndex = mode == "folder" ? 1 : model.pages[currentPage].count - 1
         guard let targetFrame = layout.layoutAttributesForItem(at: IndexPath(item: targetIndex, section: 0))?.frame else { return }
         // "folder" aims dead center (within the ~60% folder-candidate
@@ -892,6 +919,62 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                         let pageCounts = self.model.pages.map(\.count)
                         let folderCount = self.model.folders.count
                         DiagnosticsLog.grid.notice("debugSimulateItemDrag: settled — page counts=\(pageCounts, privacy: .public), folder count=\(folderCount, privacy: .public), activeDrag=\(self.itemDrag.isDragging, privacy: .public)")
+                    }
+                }
+            }
+        }
+    }
+    #endif
+
+#if LAUNCHPAD_DEBUG_HOOKS
+    /// Starts an item drag, then asks for a discrete page change the way a
+    /// mouse wheel notch does, and logs whether the page moved.
+    ///
+    /// It must not: a page change from that path never tells the drag session,
+    /// so the dragged item's own cell comes back at full opacity and the app
+    /// appears twice. Repeats the same call once the drag is over to show the
+    /// paging itself still works.
+    private func debugSimulateWheelDuringDrag() {
+        guard model.pages.count > 1,
+              currentPage < model.pages.count - 1,
+              model.pages.indices.contains(currentPage),
+              !model.pages[currentPage].isEmpty,
+              let sourceFrame = layout.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+              let window = collectionView.window else {
+            DiagnosticsLog.grid.notice("debugSimulateWheelDuringDrag: needs a next page with items, and a window")
+            return
+        }
+        let startPage = currentPage
+        let start = NSPoint(x: sourceFrame.midX, y: sourceFrame.midY)
+        // Stays away from both the edge zones and any other icon's centre, so
+        // the drag is a plain reorder with no page turn or folder candidate.
+        let middle = NSPoint(x: collectionView.bounds.midX, y: sourceFrame.midY)
+        window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDown, at: start, in: collectionView))
+        for step in 1...6 {
+            let t = CGFloat(step) / 6
+            let point = NSPoint(x: start.x + (middle.x - start.x) * t, y: start.y + (middle.y - start.y) * t)
+            window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseDragged, at: point, in: collectionView))
+        }
+        DiagnosticsLog.grid.notice("debugSimulateWheelDuringDrag: dragging=\(self.itemDrag.isDragging, privacy: .public), page=\(self.currentPage, privacy: .public)")
+        collectionView.onSwipePage?(1)
+
+        // `jumpToPage` fades out before it swaps the page, so `currentPage`
+        // is read after that has had time to happen — reading it straight
+        // after the call reports the old page either way and proves nothing.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                DiagnosticsLog.grid.notice("debugSimulateWheelDuringDrag: after a wheel notch mid-drag, page=\(self.currentPage, privacy: .public) (started at \(startPage, privacy: .public)), dragging=\(self.itemDrag.isDragging, privacy: .public)")
+                window.sendEvent(Self.syntheticMouseEvent(type: .leftMouseUp, at: middle, in: self.collectionView))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    Task { @MainActor in
+                        DiagnosticsLog.grid.notice("debugSimulateWheelDuringDrag: drop settled, dragging=\(self.itemDrag.isDragging, privacy: .public), page=\(self.currentPage, privacy: .public)")
+                        self.collectionView.onSwipePage?(1)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                            Task { @MainActor in
+                                DiagnosticsLog.grid.notice("debugSimulateWheelDuringDrag: same wheel notch with no drag, page=\(self.currentPage, privacy: .public)")
+                            }
+                        }
                     }
                 }
             }
