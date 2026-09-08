@@ -776,3 +776,84 @@ private func bundleIDs(_ pages: [[LayoutItem]]) -> [[String]] {
     #expect(model.folders[folderID]?.pages.count == 1)
     #expect(model.folders[folderID]?.pages[0].count == 2)
 }
+
+/// Dropping onto a page that is already full used to make it one item longer
+/// than the grid can draw, so the item pushed past the last slot was laid out
+/// below the viewport and disappeared until the next launch repacked the whole
+/// layout.
+@Test @MainActor func droppingOntoAFullPagePushesTheOverflowOntoTheNextPage() async {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    var settings = model.gridSettings
+    settings.columns = 2
+    settings.rows = 2 // capacity 4
+    model.updateGridSettings(settings)
+
+    let records = (0..<6).map { index in
+        record("App \(index)", id: "com.example.app\(index)")
+    }
+    model.reconcile(with: records)
+    #expect(model.pages.map(\.count) == [4, 2], "the fixture should start with one full page and one partial")
+
+    let movedID = model.pages[1][1]
+    let displacedID = model.pages[0][3]
+    model.moveItem(fromPage: 1, fromIndex: 1, toPage: 0, toIndex: 0)
+
+    #expect(
+        model.pages[0].count == 4,
+        "page 0 holds \(model.pages[0].count) items with a capacity of 4 — the extra one is drawn outside the viewport"
+    )
+    #expect(model.pages[0][0] == movedID)
+    #expect(model.pages[1].first == displacedID, "the item pushed off page 0 should land at the head of page 1")
+    #expect(model.pages.flatMap { $0 }.count == 6, "nothing may be lost while absorbing the drop")
+}
+
+@Test @MainActor func overflowFromAFullLastPageOpensANewOne() async {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    var settings = model.gridSettings
+    settings.columns = 2
+    settings.rows = 1 // capacity 2
+    model.updateGridSettings(settings)
+
+    let records = (0..<4).map { index in
+        record("Full \(index)", id: "com.example.full\(index)")
+    }
+    model.reconcile(with: records)
+    #expect(model.pages.map(\.count) == [2, 2])
+
+    // Forward, onto a full last page: the item pushed off the end has nowhere
+    // to go, so a page has to open for it. (Moving the other way instead frees
+    // a slot on the source page, which absorbs the overflow — hence the
+    // direction here.)
+    model.moveItem(fromPage: 0, fromIndex: 0, toPage: 1, toIndex: 0)
+
+    #expect(model.pages.map(\.count) == [1, 2, 1], "the cascade should add a page at the end rather than overfill the last one")
+    #expect(model.pages.flatMap { $0 }.count == 4)
+}
+
+@Test @MainActor func reorderingWithinAFullPageIsUnaffected() async {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    var settings = model.gridSettings
+    settings.columns = 2
+    settings.rows = 2 // capacity 4
+    model.updateGridSettings(settings)
+
+    let records = (0..<4).map { index in
+        record("Same \(index)", id: "com.example.same\(index)")
+    }
+    model.reconcile(with: records)
+    let last = model.pages[0][3]
+
+    model.moveItem(fromPage: 0, fromIndex: 3, toPage: 0, toIndex: 0)
+
+    #expect(model.pages.map(\.count) == [4], "a same-page reorder does not change any page's size")
+    #expect(model.pages[0][0] == last)
+}

@@ -514,7 +514,37 @@ public final class GridModel {
         while pages.count <= toPage { pages.append([]) }
         let clampedIndex = min(max(toIndex, 0), pages[toPage].count)
         pages[toPage].insert(item, at: clampedIndex)
+        cascadeOverflow(from: toPage)
         onChange?()
+    }
+
+    /// Pushes whatever no longer fits off the end of a page onto the next one,
+    /// carrying on for as long as pages overflow and adding a page at the end
+    /// if it runs out — the way the real Launchpad absorbs a drop onto a full
+    /// page.
+    ///
+    /// Without this, dropping onto a full page simply made it one item longer.
+    /// The layout places item *n* at row `n / columns` and the viewport shows
+    /// exactly `rows` rows with no scrolling, so the item pushed past the last
+    /// slot was laid out below the visible area and vanished — an app the user
+    /// could no longer see or launch. It came back only on the next launch,
+    /// where `loadDocument` repacks every page, which is itself the disruptive
+    /// operation `updateGridSettings` deliberately avoids running on its own.
+    private func cascadeOverflow(from page: Int) {
+        var index = page
+        while pages.indices.contains(index), pages[index].count > capacityPerPage {
+            let overflow = pages[index].removeLast()
+            if index + 1 == pages.count {
+                pages.append([overflow])
+            } else {
+                pages[index + 1].insert(overflow, at: 0)
+            }
+            // Only move on once this page fits: it can be over by more than
+            // one if the capacity shrank while items were already placed.
+            if pages[index].count <= capacityPerPage {
+                index += 1
+            }
+        }
     }
 
     /// The folder-internal equivalent of `moveItem`, scoped to one page inside
