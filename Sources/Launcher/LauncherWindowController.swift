@@ -66,14 +66,16 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         NSApp.presentationOptions = active
             ? Self.launcherPresentationOptions(
                 hideDock: gridModel.hideDockWhileLauncherOpen,
-                menuBarHiddenPrivately: menuBarVisibility.isAvailable
+                menuBarHiddenPrivately: menuBarVisibility.isAvailable,
+                suppressesScreenCorners: Self.suppressesScreenCorners
             )
             : []
         let menuBarStatus = menuBarVisibility.setHidden(active)
         if active, let menuBarStatus, menuBarStatus != 0 {
             NSApp.presentationOptions = Self.launcherPresentationOptions(
                 hideDock: gridModel.hideDockWhileLauncherOpen,
-                menuBarHiddenPrivately: false
+                menuBarHiddenPrivately: false,
+                suppressesScreenCorners: Self.suppressesScreenCorners
             )
         }
         if menuBarStatus == nil {
@@ -90,14 +92,35 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         )
     }
 
+    /// `suppressesScreenCorners` keeps the system's hot corners quiet while the
+    /// launcher is open (macOS 27 and later). Dragging an icon to a page edge
+    /// to turn the page ends near a screen corner often enough that Mission
+    /// Control or Quick Note would fire mid-drag. The option only takes effect
+    /// alongside `.autoHideDock` or `.hideDock`, so it is added only where one
+    /// of those is already in the set — with the Dock left fully visible there
+    /// is nothing for it to attach to.
     static func launcherPresentationOptions(
         hideDock: Bool,
-        menuBarHiddenPrivately: Bool
+        menuBarHiddenPrivately: Bool,
+        suppressesScreenCorners: Bool = false
     ) -> NSApplication.PresentationOptions {
+        var options: NSApplication.PresentationOptions
         if menuBarHiddenPrivately {
-            return hideDock ? [.hideDock] : []
+            options = hideDock ? [.hideDock] : []
+        } else {
+            options = hideDock ? [.autoHideMenuBar, .hideDock] : [.autoHideMenuBar, .autoHideDock]
         }
-        return hideDock ? [.autoHideMenuBar, .hideDock] : [.autoHideMenuBar, .autoHideDock]
+        if suppressesScreenCorners, !options.isDisjoint(with: [.autoHideDock, .hideDock]) {
+            if #available(macOS 27, *) {
+                options.insert(.disableScreenCornerInteractions)
+            }
+        }
+        return options
+    }
+
+    private static var suppressesScreenCorners: Bool {
+        if #available(macOS 27, *) { return true }
+        return false
     }
 
     public func prepareForTermination() {

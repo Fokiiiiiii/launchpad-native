@@ -253,6 +253,34 @@ func searchEmptyStateOnlyParticipatesInAccessibilityWhenVisible() {
     ) == [.autoHideMenuBar, .hideDock])
 }
 
+/// macOS 27 keeps the system's hot corners quiet while the launcher is open,
+/// but the option only takes effect alongside a Dock option. The tests above
+/// pin the pre-27 sets, which leave the corners alone.
+@Test @MainActor func screenCornersAreSuppressedWhereADockOptionAllowsIt() {
+    guard #available(macOS 27, *) else { return }
+    #expect(LauncherWindowController.launcherPresentationOptions(
+        hideDock: false,
+        menuBarHiddenPrivately: false,
+        suppressesScreenCorners: true
+    ) == [.autoHideMenuBar, .autoHideDock, .disableScreenCornerInteractions])
+    #expect(LauncherWindowController.launcherPresentationOptions(
+        hideDock: true,
+        menuBarHiddenPrivately: false,
+        suppressesScreenCorners: true
+    ) == [.autoHideMenuBar, .hideDock, .disableScreenCornerInteractions])
+    #expect(LauncherWindowController.launcherPresentationOptions(
+        hideDock: true,
+        menuBarHiddenPrivately: true,
+        suppressesScreenCorners: true
+    ) == [.hideDock, .disableScreenCornerInteractions])
+    // The Dock stays fully visible here, so there is nothing to attach to.
+    #expect(LauncherWindowController.launcherPresentationOptions(
+        hideDock: false,
+        menuBarHiddenPrivately: true,
+        suppressesScreenCorners: true
+    ) == [])
+}
+
 @Test @MainActor func menuBarVisibilitySymbolsResolveOnMacOS26() {
     guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26 else { return }
     #expect(SystemMenuBarVisibility().isAvailable)
