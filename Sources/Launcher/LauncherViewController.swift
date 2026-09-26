@@ -63,9 +63,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         let root = BackgroundClickCatcherView()
         root.onBackgroundClick = { [weak self] in self?.onDidCancel() }
 
-        let searchBarGlass = GlassSurfaceFactory.makeBackground(cornerRadius: 18)
-        searchBarGlass.translatesAutoresizingMaskIntoConstraints = false
-
         searchIcon.translatesAutoresizingMaskIntoConstraints = false
         // 12.5pt medium + opacity 0.65 — the reference's own
         // `Image(systemName: "magnifyingglass").font(.system(size: 12.5,
@@ -217,11 +214,14 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         // `SearchField` exactly (see the controls' own doc comments above).
         let searchBar = NSView()
         searchBar.translatesAutoresizingMaskIntoConstraints = false
-        searchBar.addSubview(searchBarGlass)
-        searchBar.addSubview(searchIcon)
-        searchBar.addSubview(searchField)
-        searchBar.addSubview(clearSearchButton)
-        searchBar.addSubview(quickMenuButton)
+        // On macOS 27 the controls live inside the glass so it can respond to
+        // them; before that it stays a sibling behind them. Either way the
+        // constraints below anchor to `searchBar`.
+        let searchControls = GlassSurfaceFactory.installControlSurface(in: searchBar, cornerRadius: 18)
+        searchControls.addSubview(searchIcon)
+        searchControls.addSubview(searchField)
+        searchControls.addSubview(clearSearchButton)
+        searchControls.addSubview(quickMenuButton)
 
         root.addSubview(searchBar)
         root.addSubview(gridViewController.view)
@@ -236,11 +236,6 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             searchBar.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             searchBar.widthAnchor.constraint(equalToConstant: 300),
             searchBar.heightAnchor.constraint(equalToConstant: 36),
-
-            searchBarGlass.leadingAnchor.constraint(equalTo: searchBar.leadingAnchor),
-            searchBarGlass.trailingAnchor.constraint(equalTo: searchBar.trailingAnchor),
-            searchBarGlass.topAnchor.constraint(equalTo: searchBar.topAnchor),
-            searchBarGlass.bottomAnchor.constraint(equalTo: searchBar.bottomAnchor),
 
             // 12pt leading inset — the reference's `.padding(.leading, 12)`.
             searchIcon.leadingAnchor.constraint(equalTo: searchBar.leadingAnchor, constant: 12),
@@ -339,6 +334,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     func focusSearch() {
         view.window?.makeFirstResponder(searchField)
     }
+
+/// The controls on the search pill, for checking that clicks still reach
+    /// them wherever the glass behind them sits in the hierarchy.
+    var searchPillControlsForTesting: [NSView] { [searchField, clearSearchButton, quickMenuButton] }
 
 #if LAUNCHPAD_DEBUG_HOOKS
     func debugSetSearchQuery(_ query: String) {

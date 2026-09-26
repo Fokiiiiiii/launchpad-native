@@ -32,6 +32,54 @@ public enum GlassSurfaceFactory {
         return background
     }
 
+    /// Puts a glass surface behind a group of controls and returns the view
+    /// the controls belong in.
+    ///
+    /// On macOS 27 the glass is interactive: it responds visibly while the
+    /// controls on it are used. That only works when the glass *contains* the
+    /// controls, so there the returned view is the glass's `contentView` — the
+    /// one place `NSGlassEffectView` guarantees a consistent order. Earlier
+    /// systems keep the decorative, non-interactive glass as the bottom
+    /// sibling behind the controls, exactly as before, and the returned view
+    /// is `container` itself.
+    ///
+    /// `outset` lets the glass reach past the container on each side, for a
+    /// pill drawn a little larger than the controls it frames.
+    @discardableResult
+    public static func installControlSurface(
+        in container: NSView,
+        cornerRadius: CGFloat,
+        outset: NSEdgeInsets = NSEdgeInsets(),
+        dark: Bool = false,
+        tint: NSColor? = nil
+    ) -> NSView {
+        let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        if #available(macOS 27, *), !reduceTransparency {
+            let glass = NSGlassEffectView()
+            glass.cornerRadius = cornerRadius
+            glass.tintColor = tint ?? NSColor.black.withAlphaComponent(dark ? 0.35 : 0.08)
+            glass.effectIsInteractive = true
+            // Same layer shape as every other surface here. Without it,
+            // rendering the grid offscreen — as its tests do — stopped drawing
+            // any icon once this glass was in the hierarchy (seen on macOS 27).
+            configureShape(glass, cornerRadius: cornerRadius)
+            glass.translatesAutoresizingMaskIntoConstraints = false
+            let host = NSView()
+            host.translatesAutoresizingMaskIntoConstraints = false
+            glass.contentView = host
+            container.addSubview(glass, positioned: .below, relativeTo: nil)
+            pin(glass, to: container, outset: outset)
+            pin(host, to: glass)
+            return host
+        }
+
+        let background = makeBackground(cornerRadius: cornerRadius, dark: dark, tint: tint)
+        background.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(background, positioned: .below, relativeTo: nil)
+        pin(background, to: container, outset: outset)
+        return container
+    }
+
     public static func makeCardBackground(
         cornerRadius: CGFloat,
         tint: NSColor = NSColor.white.withAlphaComponent(0.07),
@@ -109,12 +157,12 @@ public enum GlassSurfaceFactory {
         }
     }
 
-    private static func pin(_ child: NSView, to parent: NSView) {
+    private static func pin(_ child: NSView, to parent: NSView, outset: NSEdgeInsets = NSEdgeInsets()) {
         NSLayoutConstraint.activate([
-            child.topAnchor.constraint(equalTo: parent.topAnchor),
-            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor),
-            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor),
-            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
+            child.topAnchor.constraint(equalTo: parent.topAnchor, constant: -outset.top),
+            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: -outset.left),
+            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: outset.right),
+            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: outset.bottom)
         ])
     }
 }

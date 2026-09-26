@@ -27,6 +27,8 @@ public final class PageControlView: NSView {
     private var dotButtons: [NSButton] = []
     /// Test-only dot count.
     var dotButtonCountForTesting: Int { dotButtons.count }
+    /// Every button a click can land on, in visual order.
+    var buttonsForTesting: [NSButton] { [previousButton] + dotButtons + [nextButton] }
     private let dotStack = NSStackView()
     private let previousButton = NSButton()
     private let nextButton = NSButton()
@@ -42,23 +44,19 @@ public final class PageControlView: NSView {
         configureChevron(nextButton, symbol: "chevron.right", label: L10n.nextPageAccessibilityLabel, action: #selector(nextTapped))
 
         // A small glass pill behind the chevrons/dots (Photos' floating page
-        // control is the reference) — a decorative sibling, added first so it
-        // sits behind the buttons, never their container (same hit-testing
-        // same non-interactive-surface rule as the launcher's search pill).
-        let glassPill = GlassSurfaceFactory.makeBackground(cornerRadius: 18)
-        glassPill.translatesAutoresizingMaskIntoConstraints = false
-
-        addSubview(glassPill)
-        addSubview(previousButton)
-        addSubview(dotStack)
-        addSubview(nextButton)
+        // control is the reference), reaching a little past the buttons. On
+        // macOS 27 it contains them so it can respond as they are used; before
+        // that it is a decorative sibling behind them, as the search pill is.
+        let controls = GlassSurfaceFactory.installControlSurface(
+            in: self,
+            cornerRadius: 18,
+            outset: NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+        )
+        controls.addSubview(previousButton)
+        controls.addSubview(dotStack)
+        controls.addSubview(nextButton)
 
         NSLayoutConstraint.activate([
-            glassPill.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -8),
-            glassPill.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 8),
-            glassPill.topAnchor.constraint(equalTo: topAnchor, constant: -4),
-            glassPill.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 4),
-
             previousButton.leadingAnchor.constraint(equalTo: leadingAnchor),
             previousButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             previousButton.widthAnchor.constraint(equalToConstant: 32),

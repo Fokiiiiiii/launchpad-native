@@ -285,3 +285,48 @@ func searchEmptyStateOnlyParticipatesInAccessibilityWhenVisible() {
     guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26 else { return }
     #expect(SystemMenuBarVisibility().isAvailable)
 }
+
+/// The search pill's controls must still take their own clicks now that the
+/// glass contains them on macOS 27. A search field that could not be clicked
+/// was a real, user-reported failure here.
+@Test @MainActor func searchPillControlsStayClickableOnTheirGlass() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("launchpad-search-pill-test-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = GridModel(layoutStore: LayoutStore(directory: directory))
+    let viewController = LauncherViewController(
+        viewModel: LauncherViewModel(),
+        gridModel: model,
+        iconCache: IconCache(cacheDirectory: directory.appendingPathComponent("icons", isDirectory: true)),
+        onDidLaunch: {},
+        onDidCancel: {},
+        onOpenSettings: {}
+    )
+    let window = NSWindow(
+        contentRect: NSRect(x: -30_000, y: -30_000, width: 1_280, height: 800),
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    window.contentView = viewController.view
+    viewController.view.frame = NSRect(x: 0, y: 0, width: 1_280, height: 800)
+    viewController.view.layoutSubtreeIfNeeded()
+
+    // The clear button only shows while there is a query.
+    let controls = viewController.searchPillControlsForTesting.filter { !$0.isHidden }
+    #expect(controls.count >= 2)
+    for control in controls {
+        let center = control.convert(NSPoint(x: control.bounds.midX, y: control.bounds.midY), to: nil)
+        let hit = try #require(viewController.view.hitTest(center))
+        #expect(hit === control || hit.isDescendant(of: control), "a click on \(type(of: control)) landed on \(hit)")
+        // The glass can only respond to the controls it contains.
+        if #available(macOS 27, *), !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            let glass = sequence(first: control.superview, next: { $0?.superview })
+                .compactMap { $0 as? NSGlassEffectView }
+                .first
+            #expect(glass?.effectIsInteractive == true, "on macOS 27 the search pill's glass should contain its controls")
+        }
+    }
+}
