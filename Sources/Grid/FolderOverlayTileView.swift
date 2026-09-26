@@ -1,6 +1,5 @@
 import AppKit
 import Localization
-import Persistence
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -17,7 +16,6 @@ struct FolderOverlayTile: Identifiable {
     let onDragStart: () -> Void
     let onDragHoverEntered: () -> Void
     let onDropCommit: () -> Bool
-    let menuIconVisibility: MenuIconVisibility
 }
 
 private struct TileReorderDropDelegate: DropDelegate {
@@ -112,36 +110,18 @@ struct FolderOverlayTileView: View {
         }
         .onDrop(of: [.text], delegate: TileReorderDropDelegate(onHoverEntered: tile.onDragHoverEntered, onCommit: tile.onDropCommit))
         .contextMenu {
-            Button { tile.onLaunch() } label: { menuLabel(L10n.menuOpen, symbol: "arrow.up.forward.app") }
+            Button { tile.onLaunch() } label: { Label(L10n.menuOpen, systemImage: "arrow.up.forward.app") }
             if let onOpenNewInstance = tile.onOpenNewInstance {
-                Button { onOpenNewInstance() } label: { menuLabel(L10n.menuOpenNewInstance, symbol: "macwindow.badge.plus") }
+                Button { onOpenNewInstance() } label: { Label(L10n.menuOpenNewInstance, systemImage: "macwindow.badge.plus") }
             }
-            Button { tile.onShowInFinder() } label: { menuLabel(L10n.menuShowInFinder, symbol: "folder") }
+            Button { tile.onShowInFinder() } label: { Label(L10n.menuShowInFinder, systemImage: "folder") }
             Divider()
             // Same items, same order as the grid's menu. Leaving rename and
             // hide out meant an app kept in a folder could only be renamed or
             // hidden by finding it through search or dragging it back out.
-            Button { tile.onRename() } label: { menuLabel(L10n.menuRename, symbol: "pencil") }
-            Button { tile.onHide() } label: { menuLabel(L10n.menuHide, symbol: "eye.slash") }
-            Button { tile.onRemoveFromFolder() } label: { menuLabel(L10n.menuRemoveFromFolder, symbol: "folder.badge.minus") }
-        }
-    }
-
-    /// The icon follows the user's menu-icon setting — see `MenuIcon` for why
-    /// `.visible` needs an image rather than the plain symbol here.
-    @ViewBuilder
-    private func menuLabel(_ title: String, symbol: String) -> some View {
-        switch tile.menuIconVisibility {
-        case .hidden:
-            Text(title)
-        case .automatic:
-            Label(title, systemImage: symbol)
-        case .visible:
-            if let image = MenuIcon.swiftUIImage(symbolName: symbol, visibility: .visible) {
-                Label { Text(title) } icon: { Image(nsImage: image) }
-            } else {
-                Label(title, systemImage: symbol)
-            }
+            Button { tile.onRename() } label: { Label(L10n.menuRename, systemImage: "pencil") }
+            Button { tile.onHide() } label: { Label(L10n.menuHide, systemImage: "eye.slash") }
+            Button { tile.onRemoveFromFolder() } label: { Label(L10n.menuRemoveFromFolder, systemImage: "folder.badge.minus") }
         }
     }
 

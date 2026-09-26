@@ -4,13 +4,14 @@ import Testing
 
 @Test @MainActor func pageControlChevronsTrackPageBoundariesAndAccessibility() {
     let control = PageControlView(frame: .zero)
+    control.numberOfPages = 3
     // Not `control.subviews`: on macOS 27 the buttons live inside the glass.
     let buttons = control.buttonsForTesting
-    guard let previous = buttons.first, let next = buttons.last, buttons.count >= 2 else {
-        Issue.record("the page control has no chevrons")
-        return
-    }
-    control.numberOfPages = 3
+    #expect(control.dotButtonCountForTesting == 3)
+    #expect(buttons.count == 5, "one chevron on each side of the three dots")
+    guard buttons.count == 5 else { return }
+    let previous = buttons[0]
+    let next = buttons[4]
 
     #expect(previous.isHidden == false)
     #expect(next.isHidden == false)

@@ -204,12 +204,13 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         titleShadow.shadowOffset = NSSize(width: 0, height: -2)
         titleField.shadow = titleShadow
 
-        let hosting = NSHostingView(rootView: FolderOverlayGridContent(
+        let hosting = FolderGridHostingView(rootView: FolderOverlayGridContent(
             model: gridModel,
             columns: columns,
             iconSize: CGFloat(iconSize),
             onDragCancelled: { [weak self] in self?.cancelTileDrag() }
         ))
+        hosting.menuIconVisibility = { [weak self] in self?.model.menuIconVisibility ?? .automatic }
         hosting.translatesAutoresizingMaskIntoConstraints = false
         // Defense in depth alongside the explicit pinning below and the forced
         // layoutIfNeeded() calls in refresh() — never let SwiftUI's own
@@ -425,6 +426,7 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     var currentPageForTesting: Int { currentFolderPage }
     var selectedTileIDForTesting: String? { gridModel.selectedID }
     var visibleTileIDsForTesting: [String] { gridModel.tiles.map(\.id) }
+    var gridHostForTesting: NSView? { gridHost }
     /// How many visible tiles have actually received an icon. Zero while a
     /// folder is still loading; zero *forever* is the signature of an icon
     /// fetch resolving against a controller nothing kept alive.
@@ -506,8 +508,7 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
                 },
                 onDragStart: { [weak self] in self?.beginTileDrag(id: tileID) },
                 onDragHoverEntered: { [weak self] in self?.hoverTileDrag(targetID: tileID) },
-                onDropCommit: { [weak self] in self?.commitTileDrag() ?? false },
-                menuIconVisibility: model.menuIconVisibility
+                onDropCommit: { [weak self] in self?.commitTileDrag() ?? false }
             ))
             if cachedIcon == nil {
                 Task { @MainActor [weak self] in
@@ -678,5 +679,24 @@ private final class FolderPanelRootView: NSView {
 
     override func scrollWheel(with event: NSEvent) {
         onScroll?(event)
+    }
+}
+
+/// The folder's tiles, with their menus showing icons the way the menu-icon
+/// setting asks.
+///
+/// SwiftUI cannot say whether a menu shows its images, and it builds a tile's
+/// menu when it draws the tile rather than when the menu opens — so a setting
+/// changed while the folder stays open would otherwise not reach it. AppKit
+/// asks this view for the menu on every right-click and Control-click, and
+/// presents the very menu returned here, so the setting is applied to it at
+/// that moment.
+private final class FolderGridHostingView: NSHostingView<FolderOverlayGridContent> {
+    var menuIconVisibility: () -> MenuIconVisibility = { .automatic }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let menu = super.menu(for: event) else { return nil }
+        MenuIcon.apply(menuIconVisibility(), to: menu)
+        return menu
     }
 }

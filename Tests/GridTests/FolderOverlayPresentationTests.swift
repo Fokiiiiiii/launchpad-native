@@ -209,3 +209,68 @@ private func openFolder(
     // And what drew is picture-like, not a flat wash of placeholders.
     #expect((variation.max() ?? 0) > 0.15, "the panel drew, but uniformly — variation by band: \(variation)")
 }
+
+/// Asks the folder's grid for a tile's context menu the way a right-click does,
+/// trying points across the grid until one lands on a tile. Only builds the
+/// menu; nothing is shown.
+@MainActor
+private func tileMenu(in grid: NSView, window: NSWindow) -> NSMenu? {
+    for fy in stride(from: 0.1, through: 0.9, by: 0.1) {
+        for fx in stride(from: 0.05, through: 0.95, by: 0.1) {
+            let point = grid.convert(NSPoint(x: grid.bounds.width * fx, y: grid.bounds.height * fy), to: nil)
+            guard let event = NSEvent.mouseEvent(
+                with: .rightMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+            ), let menu = grid.menu(for: event), !menu.items.isEmpty else { continue }
+            return menu
+        }
+    }
+    return nil
+}
+
+/// The folder's menus come from SwiftUI, which builds them when it draws the
+/// tiles. The setting has to reach them as they open anyway — including when
+/// it changes while the folder stays open, with Settings over the launcher —
+/// and on macOS 27 "show" has to be asked of AppKit, which hides menu images
+/// by default.
+@Test @MainActor func aFolderTilesMenuFollowsTheMenuIconSettingAsItOpens() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let (model, folderID) = await modelWithFolder(itemCount: 3, directory: dir)
+    let (window, host) = makeHost(size: NSSize(width: 1_680, height: 1_050))
+    defer { window.orderOut(nil) }
+    let presenter = FolderOverlayPresenter(model: model, iconCache: IconCache())
+    presenter.open(
+        folderID,
+        in: host,
+        metrics: FolderOverlayPresenter.Metrics(iconSize: 96, configuredColumns: 6),
+        onLaunch: { _ in },
+        onItemDraggedOut: { _, _ in },
+        onDidClose: {}
+    )
+    let panel = try #require(presenter.presentedPanelForTesting)
+    let grid = try #require(panel.gridHostForTesting)
+    window.layoutIfNeeded()
+
+    // No refresh between the changes: the panel is drawn once and stays open.
+    model.setMenuIconVisibility(.hidden)
+    let hidden = try #require(tileMenu(in: grid, window: window), "no tile answered a right-click")
+    #expect(hidden.items.allSatisfy { $0.image == nil })
+
+    model.setMenuIconVisibility(.visible)
+    let visible = try #require(tileMenu(in: grid, window: window))
+    let visibleItems = visible.items.filter { !$0.isSeparatorItem }
+    #expect(!visibleItems.isEmpty)
+    #expect(visibleItems.allSatisfy { $0.image != nil })
+    if #available(macOS 27, *) {
+        #expect(visibleItems.allSatisfy { $0.preferredImageVisibility == .visible })
+    }
+
+    model.setMenuIconVisibility(.automatic)
+    let automatic = try #require(tileMenu(in: grid, window: window))
+    let automaticItems = automatic.items.filter { !$0.isSeparatorItem }
+    #expect(automaticItems.allSatisfy { $0.image != nil })
+    if #available(macOS 27, *) {
+        #expect(automaticItems.allSatisfy { $0.preferredImageVisibility == .automatic })
+    }
+}

@@ -211,8 +211,9 @@ public final class GridModel {
         document.menuIconVisibility
     }
 
-    /// No `onChange`: menus are built each time they open, so the next one
-    /// picks this up without the grid redrawing.
+    /// No `onChange`: every menu takes the setting as it opens — the grid's
+    /// are built then, and the folder panel applies it to the menu SwiftUI
+    /// hands over (`FolderGridHostingView`) — so nothing needs redrawing.
     public func setMenuIconVisibility(_ value: MenuIconVisibility) {
         document.menuIconVisibility = value
     }

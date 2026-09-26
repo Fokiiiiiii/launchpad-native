@@ -207,11 +207,11 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
         // Plain positioning container (not glass itself) — holds the glass
         // shape plus every real interactive control (icon, field, quick-menu
-        // button) as siblings drawn on top of it, so the pill reads as one
-        // floating piece of glass while every click still hits a normal
-        // AppKit control directly. One pill holding all three, not a
-        // separate chip for the quick-menu button, matches the reference's
-        // `SearchField` exactly (see the controls' own doc comments above).
+        // button), so the pill reads as one floating piece of glass while
+        // every click still hits a normal AppKit control directly. One pill
+        // holding all three, not a separate chip for the quick-menu button,
+        // matches the reference's `SearchField` exactly (see the controls' own
+        // doc comments above).
         let searchBar = NSView()
         searchBar.translatesAutoresizingMaskIntoConstraints = false
         // On macOS 27 the controls live inside the glass so it can respond to
@@ -335,7 +335,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         view.window?.makeFirstResponder(searchField)
     }
 
-/// The controls on the search pill, for checking that clicks still reach
+    /// The controls on the search pill, for checking that clicks still reach
     /// them wherever the glass behind them sits in the hierarchy.
     var searchPillControlsForTesting: [NSView] { [searchField, clearSearchButton, quickMenuButton] }
 

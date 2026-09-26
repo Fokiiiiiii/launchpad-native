@@ -2,9 +2,11 @@ import AppKit
 
 /// Shared macOS glass surfaces used across feature modules.
 ///
-/// These views are decorative siblings, never content containers. Disabling
-/// hit testing avoids NSGlassEffectView's internal ordering from intercepting
-/// controls rendered above the surface.
+/// The backgrounds are decorative siblings, never content containers, and
+/// decline hit testing so NSGlassEffectView's internal ordering cannot
+/// intercept controls drawn above them. The one exception is
+/// `installControlSurface` on macOS 27: an interactive glass can only react to
+/// controls it holds, so there the glass is their container.
 @MainActor
 public enum GlassSurfaceFactory {
     public static func makeBackground(
