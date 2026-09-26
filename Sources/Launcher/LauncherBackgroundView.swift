@@ -1,7 +1,13 @@
 import AppKit
 import Diagnostics
+#if LAUNCHPAD_DEBUG_HOOKS
+import ImageIO
+#endif
 import Persistence
 import QuartzCore
+#if LAUNCHPAD_DEBUG_HOOKS
+import UniformTypeIdentifiers
+#endif
 
 final class LauncherBackgroundView: NSView {
     struct GlassMaterialParameters: Equatable {
@@ -240,8 +246,35 @@ final class LauncherBackgroundView: NSView {
             }
             self.wallpaperLayer.contents = image
             self.wallpaperTask = nil
+#if LAUNCHPAD_DEBUG_HOOKS
+            Self.debugDumpWallpaper(image)
+#endif
         }
     }
+
+#if LAUNCHPAD_DEBUG_HOOKS
+    /// Debug-only: `LAUNCHPAD_DEBUG_DUMP_WALLPAPER=<path.png>` writes out the
+    /// image this view just put on screen. A screenshot cannot stand in for
+    /// it: a dimmed or locked display captures as black, and on macOS 27
+    /// reading the desktop back needs the Screen Recording permission this app
+    /// deliberately does not ask for.
+    private static func debugDumpWallpaper(_ image: CGImage) {
+        guard let path = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_DUMP_WALLPAPER"], !path.isEmpty,
+              let destination = CGImageDestinationCreateWithURL(
+                  URL(fileURLWithPath: path) as CFURL,
+                  UTType.png.identifier as CFString,
+                  1,
+                  nil
+              ) else {
+            return
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        let written = CGImageDestinationFinalize(destination)
+        DiagnosticsLog.launcher.info(
+            "debugDumpWallpaper: \(image.width, privacy: .public)x\(image.height, privacy: .public), written=\(written, privacy: .public)"
+        )
+    }
+#endif
 
     func update(configuration: Configuration) {
         self.configuration = configuration

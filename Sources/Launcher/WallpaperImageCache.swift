@@ -1,5 +1,6 @@
 import AppKit
 @preconcurrency import AVFoundation
+import ColorSync
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Diagnostics
@@ -48,18 +49,24 @@ struct WallpaperWindowCandidate: Equatable, Sendable {
 
 /// Resolves the image that macOS is actually using for a display.
 ///
-/// WindowServer wallpaper windows are preferred by the runtime overload below
-/// because `NSWorkspace` may expose `DefaultDesktop.heic` while the rendered
-/// desktop is supplied by Dock. The file-backed path remains available as an
-/// explicit fallback when window capture is unavailable.
+/// File sources come first — the workspace image, then the artwork of the
+/// provider the system wallpaper store names, then the configured Aerial — and
+/// a WindowServer wallpaper window is captured only when none of them is
+/// usable. `NSWorkspace` reports `DefaultDesktop.heic` for any desktop an
+/// extension draws, which is why that placeholder never counts as a source.
 enum WallpaperSourceResolver {
     private static let videoExtensions: Set<String> = ["mov", "mp4", "m4v"]
     private static let wallpaperLayerThreshold = -2_000_000_000
 
-    static func resolve(desktopURL: URL?, configuredURL: URL?) -> WallpaperSource {
+    static func resolve(
+        desktopURL: URL?,
+        configuredURL: URL?,
+        providerArtworkURL: URL? = nil
+    ) -> WallpaperSource {
         resolve(
             desktopURL: desktopURL,
             configuredURL: configuredURL,
+            providerArtworkURL: providerArtworkURL,
             isUsableFile: isUsableFile
         )
     }
@@ -69,12 +76,22 @@ enum WallpaperSourceResolver {
     static func resolve(
         desktopURL: URL?,
         configuredURL: URL?,
+        providerArtworkURL: URL? = nil,
         isUsableFile: (URL) -> Bool
     ) -> WallpaperSource {
         if let desktopURL,
            isUsableFile(desktopURL),
            !isDefaultDesktopURL(desktopURL) {
             return source(for: desktopURL)
+        }
+
+        // Ahead of the configured Aerial on purpose. `SystemWallpaperURL` can
+        // outlive the wallpaper it named — on the machine this was found on it
+        // still pointed at an Aerial that the macOS 27 update had deleted,
+        // while the store said the desktop was the new default. The store is
+        // what describes the desktop as it is now.
+        if let providerArtworkURL, isUsableFile(providerArtworkURL) {
+            return WallpaperSource(kind: .staticImage, url: providerArtworkURL)
         }
 
         if let configuredURL,
@@ -93,19 +110,25 @@ enum WallpaperSourceResolver {
     static func resolve(
         desktopURL: URL?,
         configuredURL: URL?,
+        providerArtworkURL: URL? = nil,
         windowCandidates: [WallpaperWindowCandidate],
         targetBounds: CGRect?,
+        hasScreenCaptureAccess: Bool = false,
         isUsableFile: (URL) -> Bool
     ) -> WallpaperSource {
         let fileSource = resolve(
             desktopURL: desktopURL,
             configuredURL: configuredURL,
+            providerArtworkURL: providerArtworkURL,
             isUsableFile: isUsableFile
         )
         guard fileSource.kind == .unavailable else { return fileSource }
 
+        let capturable = hasScreenCaptureAccess
+            ? windowCandidates
+            : windowCandidates.filter(isReadableWithoutCaptureAccess)
         if let candidate = selectWallpaperWindow(
-            candidates: windowCandidates,
+            candidates: capturable,
             targetBounds: targetBounds
         ) {
             let captureBounds: CGRect
@@ -129,16 +152,34 @@ enum WallpaperSourceResolver {
     static func resolve(
         desktopURL: URL?,
         configuredURL: URL?,
+        providerArtworkURL: URL? = nil,
         windowCandidates: [WallpaperWindowCandidate],
-        targetBounds: CGRect?
+        targetBounds: CGRect?,
+        hasScreenCaptureAccess: Bool
     ) -> WallpaperSource {
         resolve(
             desktopURL: desktopURL,
             configuredURL: configuredURL,
+            providerArtworkURL: providerArtworkURL,
             windowCandidates: windowCandidates,
             targetBounds: targetBounds,
+            hasScreenCaptureAccess: hasScreenCaptureAccess,
             isUsableFile: isUsableFile
         )
+    }
+
+    /// Whether WindowServer hands this window's real pixels to a process
+    /// without Screen Recording access.
+    ///
+    /// Up to macOS 26 the desktop was drawn into Dock-owned windows, which came
+    /// back as the picture — the premise this capture path was built on. macOS
+    /// 27 moved it into `WindowManager`, and without the permission those
+    /// windows come back as a flat grey stand-in, or, mid-transition, a grey
+    /// strip on transparency: never nil, and never the wallpaper. Judging that
+    /// from the pixels proved unreliable (the partial stand-in is not a single
+    /// colour), so the owner decides, and anything else is not captured at all.
+    static func isReadableWithoutCaptureAccess(_ candidate: WallpaperWindowCandidate) -> Bool {
+        candidate.ownerName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "dock"
     }
 
     static func isWallpaperWindowCandidate(
@@ -230,12 +271,91 @@ enum WallpaperSourceResolver {
     }
 }
 
+/// Reads macOS's own record of which wallpaper each display shows.
+///
+/// macOS 27's default wallpaper is drawn by an ExtensionKit extension rather
+/// than read from a file. `NSWorkspace` reports only the `DefaultDesktop.heic`
+/// placeholder for it, and the WindowServer windows it is drawn into now
+/// belong to `WindowManager`, which hands a process without Screen Recording
+/// access a flat grey stand-in instead of the picture. The store is the one
+/// place a process without extra permissions can read that says which
+/// provider is drawing the desktop, and the default provider's artwork ships
+/// inside its extension as a light and a dark still.
+enum SystemWallpaperStore {
+    static let defaultProviderIdentifier = "com.apple.NeptuneOneExtension"
+
+    private static let defaultProviderResources = URL(
+        fileURLWithPath: "/System/Library/ExtensionKit/Extensions/NeptuneOneWallpaper.appex/Contents/Resources",
+        isDirectory: true
+    )
+
+    static var storeURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.apple.wallpaper/Store/Index.plist")
+    }
+
+    /// The still the default provider draws for an appearance. Checked against
+    /// the rendered desktop in dark mode, where it shows the dark still; the
+    /// light one is inferred from the pair shipping side by side. A choice the
+    /// user made in the wallpaper settings that pins one of the two regardless
+    /// of the system appearance is not read.
+    static func defaultProviderArtwork(prefersDark: Bool) -> URL {
+        defaultProviderResources.appendingPathComponent(prefersDark ? "TahoeDark.heic" : "TahoeLight.heic")
+    }
+
+    static func load() -> [String: Any]? {
+        guard let data = try? Data(contentsOf: storeURL) else { return nil }
+        return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+    }
+
+    /// The provider drawing the desktop on the display identified by
+    /// `displayUUID`, when every choice in the store that could apply to it
+    /// names the same one; nil otherwise.
+    ///
+    /// Which Space is current is not something public API reveals, and the
+    /// store keeps an entry for every Space it has ever seen. Rather than
+    /// guess, a display counts as settled only when all of them agree, so a
+    /// desktop set differently per Space never borrows another Space's
+    /// wallpaper. The store-wide entries are consulted only when nothing is
+    /// recorded for the display itself.
+    static func desktopProvider(in store: [String: Any], displayUUID: String?) -> String? {
+        var providers: Set<String> = []
+        if let displayUUID {
+            let displays = store["Displays"] as? [String: Any]
+            providers.formUnion(desktopProviders(of: displays?[displayUUID]))
+            let spaces = store["Spaces"] as? [String: Any] ?? [:]
+            for case let space as [String: Any] in spaces.values {
+                // A Space's own entry for this display replaces its default.
+                let perDisplay = (space["Displays"] as? [String: Any])?[displayUUID]
+                providers.formUnion(desktopProviders(of: perDisplay ?? space["Default"]))
+            }
+        }
+        if providers.isEmpty {
+            providers.formUnion(desktopProviders(of: store["AllSpacesAndDisplays"]))
+        }
+        if providers.isEmpty {
+            providers.formUnion(desktopProviders(of: store["SystemDefault"]))
+        }
+        return providers.count == 1 ? providers.first : nil
+    }
+
+    private static func desktopProviders(of entry: Any?) -> [String] {
+        guard let entry = entry as? [String: Any],
+              let desktop = entry["Desktop"] as? [String: Any],
+              let content = desktop["Content"] as? [String: Any],
+              let choices = content["Choices"] as? [[String: Any]] else {
+            return []
+        }
+        return choices.compactMap { $0["Provider"] as? String }
+    }
+}
+
 /// Provides the blurred desktop-wallpaper image `LauncherBackgroundView` uses.
 ///
-/// The source is resolved from the display's WindowServer wallpaper window
-/// first, then from the normal workspace image and read-only
-/// `com.apple.wallpaper` Aerial setting. A movie is sampled once at a bounded
-/// time; it is never played or retained as a video layer.
+/// The source is chosen by `WallpaperSourceResolver`: a file wherever macOS
+/// exposes one, and a WindowServer wallpaper window only as a last resort. A
+/// movie is sampled once at a bounded time; it is never played or retained as
+/// a video layer.
 @MainActor
 enum WallpaperImageCache {
     private struct CacheKey: Hashable {
@@ -323,6 +443,8 @@ enum WallpaperImageCache {
     private struct ResolvedSources {
         let source: WallpaperSource
         let fallbackSource: WallpaperSource?
+        let storeProvider: String?
+        let hasScreenCaptureAccess: Bool
     }
 
     /// Takes the AppKit-derived inputs as parameters rather than an
@@ -333,14 +455,27 @@ enum WallpaperImageCache {
     /// and the display bounds has to happen on the caller's side.
     nonisolated private static func resolveSources(
         desktopURL: URL?,
-        targetBounds: CGRect?
+        targetBounds: CGRect?,
+        displayUUID: String?,
+        prefersDarkArtwork: Bool
     ) -> ResolvedSources {
         let configuredURL = configuredWallpaperURL()
+        let storeProvider = SystemWallpaperStore.load().flatMap {
+            SystemWallpaperStore.desktopProvider(in: $0, displayUUID: displayUUID)
+        }
+        let providerArtworkURL = storeProvider == SystemWallpaperStore.defaultProviderIdentifier
+            ? SystemWallpaperStore.defaultProviderArtwork(prefersDark: prefersDarkArtwork)
+            : nil
+        // A preflight check only: it never prompts, and this app does not ask
+        // for the permission.
+        let hasScreenCaptureAccess = CGPreflightScreenCaptureAccess()
         let source = WallpaperSourceResolver.resolve(
             desktopURL: desktopURL,
             configuredURL: configuredURL,
+            providerArtworkURL: providerArtworkURL,
             windowCandidates: wallpaperWindowCandidates(),
-            targetBounds: targetBounds
+            targetBounds: targetBounds,
+            hasScreenCaptureAccess: hasScreenCaptureAccess
         )
         let fallbackSource: WallpaperSource?
         if source.kind == .windowCapture {
@@ -349,12 +484,27 @@ enum WallpaperImageCache {
             // the utility task can try it without touching AppKit again.
             fallbackSource = WallpaperSourceResolver.resolve(
                 desktopURL: desktopURL,
-                configuredURL: configuredURL
+                configuredURL: configuredURL,
+                providerArtworkURL: providerArtworkURL
             )
         } else {
             fallbackSource = nil
         }
-        return ResolvedSources(source: source, fallbackSource: fallbackSource)
+        return ResolvedSources(
+            source: source,
+            fallbackSource: fallbackSource,
+            storeProvider: storeProvider,
+            hasScreenCaptureAccess: hasScreenCaptureAccess
+        )
+    }
+
+    /// The identifier the wallpaper store keys displays by.
+    nonisolated private static func displayUUID(for displayID: CGDirectDisplayID) -> String? {
+        guard displayID != 0,
+              let uuid = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue() else {
+            return nil
+        }
+        return CFUUIDCreateString(nil, uuid) as String?
     }
 
     nonisolated private static func wallpaperWindowCandidates() -> [WallpaperWindowCandidate] {
@@ -405,8 +555,16 @@ enum WallpaperImageCache {
         )?.uint32Value ?? 0
         let desktopURL = NSWorkspace.shared.desktopImageURL(for: screen)
         let targetBounds = windowServerBounds(for: screen)
+        let storeDisplayUUID = displayUUID(for: displayID)
+        let prefersDarkArtwork = NSApplication.shared.effectiveAppearance
+            .bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let resolution = await Task.detached(priority: .userInitiated) {
-            let resolved = resolveSources(desktopURL: desktopURL, targetBounds: targetBounds)
+            let resolved = resolveSources(
+                desktopURL: desktopURL,
+                targetBounds: targetBounds,
+                displayUUID: storeDisplayUUID,
+                prefersDarkArtwork: prefersDarkArtwork
+            )
             let attributes = resolved.source.url.flatMap {
                 try? FileManager.default.attributesOfItem(atPath: $0.path)
             }
@@ -431,7 +589,7 @@ enum WallpaperImageCache {
             radius: radius
         )
         DiagnosticsLog.launcher.info(
-            "wallpaper descriptor: sourceKind=\(source.kind.rawValue, privacy: .public), displayID=\(displayID, privacy: .public), windowID=\(source.windowID ?? 0, privacy: .public), resolvedURL=\(source.url?.path ?? "<unavailable>", privacy: .private), radius=\(radius, privacy: .public), cacheHit=\(cache[key] != nil, privacy: .public)"
+            "wallpaper descriptor: sourceKind=\(source.kind.rawValue, privacy: .public), displayID=\(displayID, privacy: .public), windowID=\(source.windowID ?? 0, privacy: .public), storeProvider=\(resolved.storeProvider ?? "<none>", privacy: .public), captureAccess=\(resolved.hasScreenCaptureAccess, privacy: .public), resolvedURL=\(source.url?.path ?? "<unavailable>", privacy: .private), radius=\(radius, privacy: .public), cacheHit=\(cache[key] != nil, privacy: .public)"
         )
         return Descriptor(
             key: key,
