@@ -93,6 +93,32 @@ public final class OutsideClickDismissMonitor {
     }
 }
 
+/// How round a panel's card is.
+///
+/// On macOS 27 a panel takes the radius the system gives its own windows, so
+/// it looks like one of them. AppKit reports that radius through its corner
+/// API: a view filling a titled window that asks for `.containerConcentric`
+/// corners gets `effectiveCornerRadii` of 16 on every corner — measured on
+/// macOS 27.0, with the panels' own `[.titled, .closable, .fullSizeContentView]`
+/// style and with a standard window alike. A borderless window reports 0, so
+/// Settings, being borderless, cannot ask for it and uses this value too.
+/// `PanelCornerTests` measures it again, so the constant cannot drift from
+/// the system unnoticed. Earlier systems keep each panel's own radius.
+public enum PanelCorner {
+    public static let macOS27WindowRadius: CGFloat = 16
+
+    public static func radius(beforeMacOS27 radius: CGFloat) -> CGFloat {
+        if #available(macOS 27, *) {
+            return Self.radius(beforeMacOS27: radius, onMacOS27: true)
+        }
+        return Self.radius(beforeMacOS27: radius, onMacOS27: false)
+    }
+
+    static func radius(beforeMacOS27 radius: CGFloat, onMacOS27: Bool) -> CGFloat {
+        onMacOS27 ? macOS27WindowRadius : radius
+    }
+}
+
 /// Places a panel in the middle of the screen the launcher is on, falling
 /// back to AppKit's own centering when there is no screen to aim at.
 @MainActor

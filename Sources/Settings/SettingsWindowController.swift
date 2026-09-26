@@ -108,7 +108,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let root = NSView(frame: NSRect(origin: .zero, size: SettingsWindowMetrics.size))
         let background = GlassSurfaceFactory.makeCardBackground(
-            cornerRadius: 13,
+            cornerRadius: PanelCorner.radius(beforeMacOS27: 13),
             tint: NSColor(srgbRed: 28 / 255, green: 28 / 255, blue: 30 / 255, alpha: 0.86),
             borderAlpha: 0.12,
             shadowOpacity: 0.66,

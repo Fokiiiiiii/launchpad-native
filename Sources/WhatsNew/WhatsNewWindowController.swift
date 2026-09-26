@@ -39,7 +39,7 @@ public final class WhatsNewWindowController: NSObject, NSWindowDelegate {
 
         let root = NSView()
         let background = GlassSurfaceFactory.makeCardBackground(
-            cornerRadius: 22,
+            cornerRadius: PanelCorner.radius(beforeMacOS27: 22),
             borderAlpha: 0.13,
             shadowOpacity: 0.60,
             shadowRadius: 55,
