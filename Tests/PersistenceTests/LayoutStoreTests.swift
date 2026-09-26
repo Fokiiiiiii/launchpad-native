@@ -143,6 +143,7 @@ import Testing
     json.removeValue(forKey: "dateAddedByID")
     json.removeValue(forKey: "lastUsedByID")
     json.removeValue(forKey: "showMenuBarApplications")
+    json.removeValue(forKey: "menuIconVisibility")
     var gridSettings = json["gridSettings"] as! [String: Any]
     gridSettings.removeValue(forKey: "sortMode")
     gridSettings.removeValue(forKey: "iconScale")
@@ -170,6 +171,7 @@ import Testing
     #expect(loaded.triggerSettings.gestureConflictBackup == nil)
     #expect(loaded.dateAddedByID.isEmpty)
     #expect(loaded.lastUsedByID.isEmpty)
+    #expect(loaded.menuIconVisibility == .automatic)
 }
 
 @Test func secondSaveDoesNotLoseDataIfInterrupted() async throws {

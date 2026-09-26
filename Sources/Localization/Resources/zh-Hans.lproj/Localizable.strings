@@ -39,6 +39,11 @@
 "settings.grid.iconscale.hint" = "「智能」会为当前网格推荐合适的图标大小。手动调整后将变为「自定」。实际上限会根据单元格间距自动调整。";
 "settings.grid.reorganize" = "重新排列";
 "settings.grid.hidedock" = "隐藏程序坞";
+"settings.display.menuicons" = "菜单图标";
+"settings.display.menuicons.automatic" = "自动";
+"settings.display.menuicons.visible" = "显示";
+"settings.display.menuicons.hidden" = "隐藏";
+"settings.display.menuicons.hint" = "“自动”跟随 macOS：在 macOS 26 中显示，从 macOS 27 起默认隐藏。";
 "settings.appicon.limitednotice" = "此设置仅更改运行中应用在程序坞、应用切换器和菜单栏的图标。默认的 LSUIElement 构建没有程序坞图标，且更改会在重新启动后失效。";
 "settings.appicon.style.classic" = "经典";
 "settings.appicon.style.monochrome" = "单色";

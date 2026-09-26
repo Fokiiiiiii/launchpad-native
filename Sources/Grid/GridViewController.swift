@@ -1193,7 +1193,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                     guard let self else { return }
                     self.model.ungroupFolder(folderID)
                     Task { await self.model.save() }
-                }
+                },
+                iconVisibility: model.menuIconVisibility
             )
         case .app(let id):
             guard let record = model.record(for: id) else { return nil }
@@ -1227,7 +1228,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             showWindows: showWindows,
             uninstall: { [weak self] in self?.onRequestUninstall(record.bundleIdentifier) }
         )
-        return ContextMenuBuilder.menu(for: record, actions: actions)
+        return ContextMenuBuilder.menu(for: record, actions: actions, iconVisibility: model.menuIconVisibility)
     }
 
     private func promptRenameFolder(at indexPath: IndexPath) {

@@ -39,6 +39,11 @@
 "settings.grid.iconscale.hint" = "スマート推奨は現在のグリッドに合わせてアイコンサイズを決めます。手動変更はカスタムになります。実効上限はセル間隔に合わせて自動調整されます。";
 "settings.grid.reorganize" = "整理する";
 "settings.grid.hidedock" = "Dockを隠す";
+"settings.display.menuicons" = "メニューのアイコン";
+"settings.display.menuicons.automatic" = "自動";
+"settings.display.menuicons.visible" = "表示";
+"settings.display.menuicons.hidden" = "非表示";
+"settings.display.menuicons.hint" = "「自動」は macOS に合わせます。macOS 26 では表示、macOS 27 以降は標準で非表示です。";
 "settings.appicon.limitednotice" = "実行中アプリのDock／Appスイッチャーとメニューバーアイコンだけが変わります。LSUIElementの常駐アプリなので通常はDockアイコンがなく、変更は再起動すると元に戻ります。";
 "settings.appicon.style.classic" = "クラシック";
 "settings.appicon.style.monochrome" = "モノクロ";

@@ -506,7 +506,8 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
                 },
                 onDragStart: { [weak self] in self?.beginTileDrag(id: tileID) },
                 onDragHoverEntered: { [weak self] in self?.hoverTileDrag(targetID: tileID) },
-                onDropCommit: { [weak self] in self?.commitTileDrag() ?? false }
+                onDropCommit: { [weak self] in self?.commitTileDrag() ?? false },
+                menuIconVisibility: model.menuIconVisibility
             ))
             if cachedIcon == nil {
                 Task { @MainActor [weak self] in

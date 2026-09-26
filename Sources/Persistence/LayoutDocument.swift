@@ -62,6 +62,18 @@ public enum AppIconStyle: String, Codable, Sendable, CaseIterable {
     case diagonal
 }
 
+/// Whether the app's context menus show an SF Symbol beside each item.
+///
+/// macOS 27 hides symbol images in menus by default. `automatic` leaves that
+/// to the system — shown on macOS 26, typically hidden on 27 — while
+/// `visible` and `hidden` settle it either way. Raw-`String`, so a case added
+/// later decodes the same way `SortMode` does.
+public enum MenuIconVisibility: String, Codable, Sendable, CaseIterable {
+    case automatic
+    case visible
+    case hidden
+}
+
 /// Whether the launcher's full-screen backdrop (`LauncherBackgroundView`)
 /// shows the real desktop wallpaper directly, or a dimmed/tinted "glass"
 /// treatment over it. Adding new raw-`String` cases here is backward
@@ -453,6 +465,7 @@ public struct LayoutDocument: Codable, Sendable {
     /// Only meaningful when `backgroundMode == .wallpaper`; see
     /// `LauncherBackgroundView.Configuration.blursWallpaper`.
     public var blursWallpaper: Bool
+    public var menuIconVisibility: MenuIconVisibility
 
     public init(
         schemaVersion: Int,
@@ -473,7 +486,8 @@ public struct LayoutDocument: Codable, Sendable {
         showsHiddenAppsInSearch: Bool = false,
         backgroundMode: LauncherBackgroundMode = .glass,
         glassMaterialIntensity: Double = 0.35,
-        blursWallpaper: Bool = true
+        blursWallpaper: Bool = true,
+        menuIconVisibility: MenuIconVisibility = .automatic
     ) {
         self.schemaVersion = schemaVersion
         self.layoutMode = layoutMode
@@ -494,10 +508,11 @@ public struct LayoutDocument: Codable, Sendable {
         self.backgroundMode = backgroundMode
         self.glassMaterialIntensity = glassMaterialIntensity
         self.blursWallpaper = blursWallpaper
+        self.menuIconVisibility = menuIconVisibility
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, layoutMode, gridSettings, pages, folders, aliases, hiddenApplicationIDs, customSources, triggerSettings, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle, showsMenuBarIcon, showMenuBarApplications, showsHiddenAppsInSearch, backgroundMode, glassMaterialIntensity, blursWallpaper
+        case schemaVersion, layoutMode, gridSettings, pages, folders, aliases, hiddenApplicationIDs, customSources, triggerSettings, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle, showsMenuBarIcon, showMenuBarApplications, showsHiddenAppsInSearch, backgroundMode, glassMaterialIntensity, blursWallpaper, menuIconVisibility
     }
 
     public init(from decoder: Decoder) throws {
@@ -521,6 +536,7 @@ public struct LayoutDocument: Codable, Sendable {
         backgroundMode = try container.decodeIfPresent(LauncherBackgroundMode.self, forKey: .backgroundMode) ?? .glass
         glassMaterialIntensity = try container.decodeIfPresent(Double.self, forKey: .glassMaterialIntensity) ?? 0.35
         blursWallpaper = try container.decodeIfPresent(Bool.self, forKey: .blursWallpaper) ?? true
+        menuIconVisibility = try container.decodeIfPresent(MenuIconVisibility.self, forKey: .menuIconVisibility) ?? .automatic
     }
 
     public static let currentSchemaVersion = 1

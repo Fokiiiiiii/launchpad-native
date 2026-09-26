@@ -162,6 +162,14 @@ public final class SettingsViewModel: ObservableObject {
             persist()
         }
     }
+    @Published public var menuIconVisibility: MenuIconVisibility {
+        didSet {
+            guard menuIconVisibility != oldValue else { return }
+            guard !isRefreshing else { return }
+            model.setMenuIconVisibility(menuIconVisibility)
+            persist()
+        }
+    }
 
     /// State lives in `SMAppService.mainApp.status`, not `LayoutDocument` —
     /// same "OS is the source of truth, this property just reflects it"
@@ -381,6 +389,7 @@ public final class SettingsViewModel: ObservableObject {
         sortMode = grid.sortMode
         hideDockWhileLauncherOpen = model.hideDockWhileLauncherOpen
         appIconStyle = model.appIconStyle
+        menuIconVisibility = model.menuIconVisibility
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
         showsMenuBarIcon = model.showsMenuBarIcon
         showMenuBarApplications = model.showMenuBarApplications
@@ -660,6 +669,7 @@ public final class SettingsViewModel: ObservableObject {
         sortMode = grid.sortMode
         hideDockWhileLauncherOpen = model.hideDockWhileLauncherOpen
         appIconStyle = model.appIconStyle
+        menuIconVisibility = model.menuIconVisibility
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
         showsMenuBarIcon = model.showsMenuBarIcon
         showMenuBarApplications = model.showMenuBarApplications

@@ -39,6 +39,11 @@
 "settings.grid.iconscale.hint" = "«Inteligente» recomienda un tamaño de icono para la cuadrícula actual. Los cambios manuales pasan a «Personalizado». El límite efectivo se adapta al espaciado entre celdas.";
 "settings.grid.reorganize" = "Reorganizar";
 "settings.grid.hidedock" = "Ocultar el Dock";
+"settings.display.menuicons" = "Iconos de los menús";
+"settings.display.menuicons.automatic" = "Automático";
+"settings.display.menuicons.visible" = "Mostrar";
+"settings.display.menuicons.hidden" = "Ocultar";
+"settings.display.menuicons.hint" = "«Automático» sigue a macOS: se muestran en macOS 26 y se ocultan de forma predeterminada a partir de macOS 27.";
 "settings.appicon.limitednotice" = "Esto solo cambia el icono de la app en ejecución en el Dock, el selector de apps y la barra de menús. La versión LSUIElement por omisión no tiene icono en el Dock, y el cambio se pierde al reiniciar la app.";
 "settings.appicon.style.classic" = "Clásico";
 "settings.appicon.style.monochrome" = "Monocromo";

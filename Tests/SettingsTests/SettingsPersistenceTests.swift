@@ -126,6 +126,20 @@ private func reloaded(_ directory: URL, until isSettled: (GridModel) -> Bool) as
 
 // MARK: appearance
 
+@Test @MainActor func menuIconVisibilitySurvivesARelaunch() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = await makeModel(dir)
+    let viewModel = makeViewModel(model)
+    #expect(viewModel.menuIconVisibility == .automatic)
+
+    viewModel.menuIconVisibility = .visible
+
+    #expect(model.menuIconVisibility == .visible, "the menus read the model, so it must change at once")
+    let fresh = try await reloaded(dir) { $0.menuIconVisibility == .visible }
+    #expect(fresh.menuIconVisibility == .visible)
+}
+
 @Test @MainActor func backgroundSettingsSurviveARelaunch() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }

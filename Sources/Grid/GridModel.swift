@@ -207,6 +207,16 @@ public final class GridModel {
         document.blursWallpaper = value
     }
 
+    public var menuIconVisibility: MenuIconVisibility {
+        document.menuIconVisibility
+    }
+
+    /// No `onChange`: menus are built each time they open, so the next one
+    /// picks this up without the grid redrawing.
+    public func setMenuIconVisibility(_ value: MenuIconVisibility) {
+        document.menuIconVisibility = value
+    }
+
     /// Sorts *within* each page and folder page — boundaries and folder
     /// membership are untouched, only the order inside each container changes.
     /// `.dateAdded`/`.lastUsed` read `LayoutDocument`'s stamped timestamps.

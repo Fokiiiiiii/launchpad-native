@@ -68,6 +68,13 @@ public enum L10n {
     public static var sortModeLastUsed: String { string("settings.grid.sortby.lastused", "Last Used") }
     public static var reorganizeButton: String { string("settings.grid.reorganize", "Reorganize") }
     public static var hideDockToggleLabel: String { string("settings.grid.hidedock", "Hide Dock") }
+    public static var menuIconVisibilityLabel: String { string("settings.display.menuicons", "Menu icons") }
+    public static var menuIconVisibilityAutomatic: String { string("settings.display.menuicons.automatic", "Automatic") }
+    public static var menuIconVisibilityVisible: String { string("settings.display.menuicons.visible", "Show") }
+    public static var menuIconVisibilityHidden: String { string("settings.display.menuicons.hidden", "Hide") }
+    public static var menuIconVisibilityHint: String {
+        string("settings.display.menuicons.hint", "Automatic follows macOS: shown on macOS 26, hidden by default from macOS 27.")
+    }
 
     // MARK: Settings — App Icon picker
 

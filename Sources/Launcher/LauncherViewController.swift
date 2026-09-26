@@ -460,7 +460,16 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: menu(for:) returned nil")
             return
         }
-        let titles = menu.items.map { $0.isSeparatorItem ? "—" : $0.title }.joined(separator: " | ")
+        // Each item's image, and on macOS 27 whether AppKit was told to keep
+        // it — the two things the menu-icon setting controls.
+        let titles = menu.items.map { item -> String in
+            guard !item.isSeparatorItem else { return "—" }
+            guard item.image != nil else { return item.title }
+            if #available(macOS 27, *) {
+                return "\(item.title)[img:\(item.preferredImageVisibility.rawValue)]"
+            }
+            return "\(item.title)[img]"
+        }.joined(separator: " | ")
         DiagnosticsLog.launcher.info("debugSimulateSearchResultRightClick: \(menu.items.count, privacy: .public) items: \(titles, privacy: .public)")
     }
     #endif

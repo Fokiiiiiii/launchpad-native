@@ -37,3 +37,30 @@ private func contextMenuRecord() -> ApplicationRecord {
 
     #expect(withDockAction.items.count == withoutDockAction.items.count + 1)
 }
+
+@Test @MainActor func hiddenMenuIconsLeaveEveryItemWithoutAnImage() {
+    let record = contextMenuRecord()
+    let appMenu = ContextMenuBuilder.menu(
+        for: record,
+        actions: .init(open: {}, showInFinder: {}, rename: {}, hide: {}, getInfo: {}),
+        iconVisibility: .hidden
+    )
+    let folderMenu = ContextMenuBuilder.folderMenu(open: {}, rename: {}, ungroup: {}, iconVisibility: .hidden)
+
+    #expect(appMenu.items.allSatisfy { $0.image == nil })
+    #expect(folderMenu.items.allSatisfy { $0.image == nil })
+}
+
+/// The default keeps the symbols the menus have always had, so nothing changes
+/// until the user picks something else.
+@Test @MainActor func menusKeepTheirSymbolsByDefault() {
+    let record = contextMenuRecord()
+    let appMenu = ContextMenuBuilder.menu(
+        for: record,
+        actions: .init(open: {}, showInFinder: {}, rename: {}, hide: {}, getInfo: {})
+    )
+    let items = appMenu.items.filter { !$0.isSeparatorItem }
+
+    #expect(!items.isEmpty)
+    #expect(items.allSatisfy { $0.image != nil })
+}

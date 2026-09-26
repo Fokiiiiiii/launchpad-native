@@ -39,6 +39,11 @@
 "settings.grid.iconscale.hint" = "스마트는 현재 그리드에 맞는 아이콘 크기를 추천합니다. 직접 조절하면 사용자화로 바뀝니다. 실제 상한은 셀 간격에 따라 조정됩니다.";
 "settings.grid.reorganize" = "정리";
 "settings.grid.hidedock" = "Dock 가리기";
+"settings.display.menuicons" = "메뉴 아이콘";
+"settings.display.menuicons.automatic" = "자동";
+"settings.display.menuicons.visible" = "표시";
+"settings.display.menuicons.hidden" = "숨기기";
+"settings.display.menuicons.hint" = "‘자동’은 macOS를 따릅니다. macOS 26에서는 표시되고, macOS 27부터는 기본적으로 숨겨집니다.";
 "settings.appicon.limitednotice" = "실행 중인 앱의 Dock·앱 전환기·메뉴 막대 아이콘만 변경됩니다. 기본 LSUIElement 빌드에는 Dock 아이콘이 없으며, 앱을 다시 실행하면 원래대로 돌아갑니다.";
 "settings.appicon.style.classic" = "클래식";
 "settings.appicon.style.monochrome" = "모노크롬";

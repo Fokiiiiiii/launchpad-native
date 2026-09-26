@@ -39,6 +39,11 @@
 "settings.grid.iconscale.hint" = "„Automatisch“ schlägt eine passende Symbolgröße für das aktuelle Raster vor. Manuelle Änderungen gelten als „Eigene“. Die tatsächliche Obergrenze richtet sich nach dem Zellenabstand.";
 "settings.grid.reorganize" = "Neu anordnen";
 "settings.grid.hidedock" = "Dock ausblenden";
+"settings.display.menuicons" = "Menüsymbole";
+"settings.display.menuicons.automatic" = "Automatisch";
+"settings.display.menuicons.visible" = "Anzeigen";
+"settings.display.menuicons.hidden" = "Ausblenden";
+"settings.display.menuicons.hint" = "„Automatisch“ folgt macOS: unter macOS 26 sichtbar, ab macOS 27 standardmäßig ausgeblendet.";
 "settings.appicon.limitednotice" = "Dies ändert nur das Symbol der laufenden App in Dock, App-Umschalter und Menüleiste. Der standardmäßige LSUIElement-Build hat kein Dock-Symbol, und die Änderung geht beim Neustart verloren.";
 "settings.appicon.style.classic" = "Klassisch";
 "settings.appicon.style.monochrome" = "Monochrom";

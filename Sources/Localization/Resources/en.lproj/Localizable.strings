@@ -39,6 +39,11 @@
 "settings.grid.iconscale.hint" = "Smart recommends an icon size for the current grid. Manual changes use Custom. The effective limit adapts to the cell spacing.";
 "settings.grid.reorganize" = "Reorganize";
 "settings.grid.hidedock" = "Hide Dock";
+"settings.display.menuicons" = "Menu icons";
+"settings.display.menuicons.automatic" = "Automatic";
+"settings.display.menuicons.visible" = "Show";
+"settings.display.menuicons.hidden" = "Hide";
+"settings.display.menuicons.hint" = "Automatic follows macOS: shown on macOS 26, hidden by default from macOS 27.";
 "settings.appicon.limitednotice" = "This changes the running app's Dock/App Switcher and menu-bar icon only. The default LSUIElement build has no Dock icon, and the change resets when the app relaunches.";
 "settings.appicon.style.classic" = "Classic";
 "settings.appicon.style.monochrome" = "Monochrome";

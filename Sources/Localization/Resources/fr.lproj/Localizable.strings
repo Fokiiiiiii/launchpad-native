@@ -39,6 +39,11 @@
 "settings.grid.iconscale.hint" = "« Intelligent » propose une taille d'icône adaptée à la grille actuelle. Toute modification manuelle passe en « Personnalisé ». La limite effective s'adapte à l'espacement des cellules.";
 "settings.grid.reorganize" = "Réorganiser";
 "settings.grid.hidedock" = "Masquer le Dock";
+"settings.display.menuicons" = "Icônes des menus";
+"settings.display.menuicons.automatic" = "Automatique";
+"settings.display.menuicons.visible" = "Afficher";
+"settings.display.menuicons.hidden" = "Masquer";
+"settings.display.menuicons.hint" = "« Automatique » suit macOS : affichées sous macOS 26, masquées par défaut à partir de macOS 27.";
 "settings.appicon.limitednotice" = "Ceci ne change que l'icône de l'app en cours d'exécution dans le Dock, le sélecteur d'apps et la barre des menus. La version LSUIElement par défaut n'a pas d'icône dans le Dock, et le changement est perdu au redémarrage.";
 "settings.appicon.style.classic" = "Classique";
 "settings.appicon.style.monochrome" = "Monochrome";

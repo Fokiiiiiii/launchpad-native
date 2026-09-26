@@ -136,6 +136,23 @@ extension SettingsView {
                             Text(L10n.hideDockToggleLabel)
                         }
                     }
+                    SettingsCardDivider()
+                    SettingsCardRow(minHeight: 34) {
+                        Picker(selection: $viewModel.menuIconVisibility) {
+                            Text(L10n.menuIconVisibilityAutomatic).tag(MenuIconVisibility.automatic)
+                            Text(L10n.menuIconVisibilityVisible).tag(MenuIconVisibility.visible)
+                            Text(L10n.menuIconVisibilityHidden).tag(MenuIconVisibility.hidden)
+                        } label: {
+                            Text(L10n.menuIconVisibilityLabel)
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    Text(L10n.menuIconVisibilityHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 11)
+                        .padding(.bottom, 9)
                 }
                 }
 
