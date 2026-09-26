@@ -44,8 +44,10 @@ what you tick to the Trash.
 
 ## Requirements
 
-macOS 26 or later, Apple Silicon, and a Swift 6 toolchain. Xcode Command Line
-Tools are enough; the full Xcode app is not needed.
+macOS 26 or later, Apple Silicon, and the macOS 27 SDK to build. The app uses
+macOS 27's AppKit additions where it runs on 27, so it has to be compiled
+against that SDK even to run on 26. The SDK comes with Xcode 27; Command Line
+Tools that only carry the 26 SDK cannot build it.
 
 ## Build and run
 
