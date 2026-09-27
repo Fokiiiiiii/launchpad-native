@@ -45,23 +45,7 @@ public final class F4Trigger {
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: mask,
-            callback: { _, type, event, userInfo -> Unmanaged<CGEvent>? in
-                guard let userInfo else { return Unmanaged.passUnretained(event) }
-                let context = Unmanaged<F4TapContext>.fromOpaque(userInfo).takeUnretainedValue()
-                // The system switches a tap off if its callback ever takes too
-                // long, or on certain user input. Nothing turns it back on by
-                // itself: without this the key silently stops working for the
-                // rest of the process's life while `isActive` still says true.
-                // Same handling as the gesture tap.
-                switch type {
-                case .tapDisabledByTimeout, .tapDisabledByUserInput:
-                    context.reenableTap()
-                    DiagnosticsLog.triggers.error("F4 event tap was disabled by the system (\(type.rawValue)); re-enabled it")
-                    return Unmanaged.passUnretained(event)
-                default:
-                    return context.respond(to: event)
-                }
-            },
+            callback: F4Trigger.tapCallback,
             userInfo: Unmanaged.passUnretained(context).toOpaque()
         ), let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             DiagnosticsLog.triggers.error("CGEventTap creation failed (missing Input Monitoring permission for this app bundle?)")
@@ -78,9 +62,34 @@ public final class F4Trigger {
         return true
     }
 
+    /// The tap's callback, run on `EventTapThread`.
+    ///
+    /// A `nonisolated static` on purpose. Written as a closure inside this
+    /// main-actor class's methods, it was main-actor-isolated, and Swift 6
+    /// checks that at the entry of a function it hands to C: the first event
+    /// to reach the tap on its own thread trapped the app.
+    nonisolated static let tapCallback: CGEventTapCallBack = { _, type, event, userInfo in
+        guard let userInfo else { return Unmanaged.passUnretained(event) }
+        let context = Unmanaged<F4TapContext>.fromOpaque(userInfo).takeUnretainedValue()
+        // The system switches a tap off if its callback ever takes too
+        // long, or on certain user input. Nothing turns it back on by
+        // itself: without this the key silently stops working for the
+        // rest of the process's life while `isActive` still says true.
+        // Same handling as the gesture tap.
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            context.reenableTap()
+            DiagnosticsLog.triggers.error("F4 event tap was disabled by the system (\(type.rawValue)); re-enabled it")
+            return Unmanaged.passUnretained(event)
+        default:
+            return context.respond(to: event)
+        }
+    }
+
     public func stop() {
-        let tap = self.tap
-        let source = runLoopSource
+        // Thread-safe CoreFoundation objects, handed to the tap thread below.
+        nonisolated(unsafe) let tap = self.tap
+        nonisolated(unsafe) let source = runLoopSource
         self.tap = nil
         runLoopSource = nil
         tapContext.setTap(nil)

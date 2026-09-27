@@ -52,7 +52,10 @@ final class EventTapThread: @unchecked Sendable {
     /// Runs `block` on the tap thread and returns once it has run. Called from
     /// the tap thread itself, it runs `block` straight away rather than
     /// waiting on itself.
-    func performAndWait(_ block: @escaping () -> Void) {
+    ///
+    /// `@Sendable`, so a block written in main-actor code is not taken to be
+    /// main-actor-isolated while it runs here.
+    func performAndWait(_ block: @escaping @Sendable () -> Void) {
         if isCurrent {
             block()
             return
@@ -67,6 +70,9 @@ final class EventTapThread: @unchecked Sendable {
     }
 
     func add(_ source: CFRunLoopSource) {
+        // CoreFoundation's run-loop objects are thread-safe; Swift cannot
+        // tell, so the ones handed to the tap thread are marked here.
+        nonisolated(unsafe) let source = source
         performAndWait {
             CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         }
@@ -74,6 +80,7 @@ final class EventTapThread: @unchecked Sendable {
 
     /// Removes `source`. Once this returns, none of its callbacks is running.
     func remove(_ source: CFRunLoopSource) {
+        nonisolated(unsafe) let source = source
         performAndWait {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
         }

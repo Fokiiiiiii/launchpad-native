@@ -79,3 +79,37 @@ private func systemDefinedEvent(subtype: Int16, data1: Int) throws -> CGEvent {
     #expect(activations == 1)
     #expect(activatedOnMain)
 }
+
+/// The tap's own callback, called the way the system calls it: on the tap
+/// thread, with the trigger's context as `userInfo`. Written as a closure
+/// inside the main-actor trigger it was main-actor-isolated, and the first
+/// event on the tap thread trapped the app. The callback is read here, on the
+/// main actor, so that a main-actor-isolated one would get this far and trap
+/// below rather than fail to compile.
+@Test @MainActor func theF4TapCallbackRunsOnTheTapThread() async throws {
+    var activations = 0
+    let trigger = F4Trigger(onActivate: { activations += 1 })
+    let callback = F4Trigger.tapCallback
+    nonisolated(unsafe) let userInfo = Unmanaged.passUnretained(trigger.tapContext).toOpaque()
+    nonisolated(unsafe) let volume = try volumeUp()
+    nonisolated(unsafe) let press = try launchPanelKey(down: true)
+    final class Outcome: @unchecked Sendable {
+        var volumeLetThrough = false
+        var pressSwallowed = false
+    }
+    let outcome = Outcome()
+
+    EventTapThread.shared.performAndWait {
+        let proxy = OpaquePointer(bitPattern: 1)!
+        let passed = callback(proxy, volume.type, volume, userInfo)
+        outcome.volumeLetThrough = passed?.takeUnretainedValue() === volume
+        outcome.pressSwallowed = callback(proxy, press.type, press, userInfo) == nil
+    }
+    for _ in 0..<50 where activations == 0 {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+
+    #expect(outcome.volumeLetThrough)
+    #expect(outcome.pressSwallowed)
+    #expect(activations == 1)
+}

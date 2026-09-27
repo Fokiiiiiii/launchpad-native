@@ -90,10 +90,11 @@ public final class GestureEventTapCoordinator {
 
     public func stop() {
         stateLock.lock()
-        let tap = self.tap
+        // Thread-safe CoreFoundation objects, handed to the tap thread below.
+        nonisolated(unsafe) let tap = self.tap
         self.tap = nil
         stateLock.unlock()
-        let source = runLoopSource
+        nonisolated(unsafe) let source = runLoopSource
         runLoopSource = nil
         if tap != nil || source != nil {
             // On the tap's own thread, so no callback is still running once
