@@ -152,7 +152,7 @@ extension SettingsView {
                                 Button {
                                     viewModel.appIconStyle = style
                                 } label: {
-                                    Image(nsImage: AppIconStyleApplier.previewImage(for: style) ?? NSImage())
+                                    Image(nsImage: AppIconStyleApplier.image(for: style, pointSize: 40) ?? NSImage())
                                         .resizable()
                                         .frame(width: 40, height: 40)
                                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))

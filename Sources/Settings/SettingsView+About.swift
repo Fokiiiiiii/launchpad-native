@@ -13,7 +13,7 @@ extension SettingsView {
         ScrollView {
             VStack(alignment: .center, spacing: 0) {
                 Image(
-                    nsImage: AppIconStyleApplier.previewImage(for: viewModel.appIconStyle)
+                    nsImage: AppIconStyleApplier.image(for: viewModel.appIconStyle, pointSize: 76)
                         ?? NSImage(named: NSImage.applicationIconName)
                         ?? NSImage()
                 )
