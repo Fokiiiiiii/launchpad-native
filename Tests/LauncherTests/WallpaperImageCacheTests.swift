@@ -1,5 +1,9 @@
+import CoreGraphics
+import CoreImage
 import Foundation
+import ImageIO
 import Testing
+import UniformTypeIdentifiers
 @testable import Launcher
 
 @Test
@@ -451,4 +455,62 @@ func dockWallpaperIsStillCapturedWithoutScreenCaptureAccess() {
 
     #expect(source.kind == .windowCapture)
     #expect(source.windowID == dockWallpaper.windowID)
+}
+
+/// Writes a flat-coloured image of the given pixel size, optionally tagged with
+/// an EXIF orientation the way a camera stores a photo taken sideways.
+private func writeWallpaper(width: Int, height: Int, type: UTType, orientation: Int? = nil, in directory: URL) throws -> URL {
+    let context = try #require(CGContext(
+        data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ))
+    context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    let image = try #require(context.makeImage())
+    let url = directory.appendingPathComponent("wallpaper.\(type.preferredFilenameExtension ?? "image")")
+    let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, type.identifier as CFString, 1, nil))
+    var properties: [CFString: Any] = [:]
+    if let orientation {
+        properties[kCGImagePropertyOrientation] = orientation
+    }
+    CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+    #expect(CGImageDestinationFinalize(destination))
+    return url
+}
+
+private func temporaryDirectory() throws -> URL {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+
+/// The blur works on a 960-pixel image whatever the source, so a large
+/// wallpaper has to be decoded at that size rather than whole — the default
+/// macOS 27 one is 6016x6016, and decoding it in full cost about 170MB at peak.
+@Test
+func aStaticWallpaperIsDecodedAtTheSizeTheBlurUses() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = try writeWallpaper(width: 3_000, height: 2_000, type: .png, in: directory)
+
+    let image = try #require(await WallpaperImageCache.loadSourceImage(WallpaperSource(kind: .staticImage, url: url)))
+
+    #expect(image.extent.width == WallpaperImageCache.blurInputMaxDimension)
+    #expect(image.extent.height == 640)
+}
+
+/// A photo taken sideways is stored landscape with an orientation tag. The
+/// desktop shows it upright, so the launcher's copy has to be upright too.
+@Test
+func aStaticWallpaperIsShownTheWayItsOrientationSays() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    // 6: the stored pixels are rotated 90 degrees from how the photo is seen.
+    let url = try writeWallpaper(width: 3_000, height: 2_000, type: .jpeg, orientation: 6, in: directory)
+
+    let image = try #require(await WallpaperImageCache.loadSourceImage(WallpaperSource(kind: .staticImage, url: url)))
+
+    #expect(image.extent.width == 640)
+    #expect(image.extent.height == WallpaperImageCache.blurInputMaxDimension)
 }

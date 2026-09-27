@@ -4,6 +4,7 @@ import ColorSync
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Diagnostics
+import ImageIO
 import Darwin
 
 enum WallpaperSourceKind: String, Equatable, Hashable, Sendable {
@@ -645,7 +646,7 @@ enum WallpaperImageCache {
         return blur(fallbackImage, radius: radius)
     }
 
-    nonisolated private static func loadSourceImage(
+    nonisolated static func loadSourceImage(
         _ source: WallpaperSource
     ) async -> CIImage? {
         switch source.kind {
@@ -659,8 +660,11 @@ enum WallpaperImageCache {
             }
             return CIImage(cgImage: captured)
         case .staticImage:
-            guard let url = source.url else { return nil }
-            return CIImage(contentsOf: url)
+            guard let url = source.url,
+                  let image = decodeDownsampled(url, maxPixelSize: blurInputMaxDimension) else {
+                return nil
+            }
+            return CIImage(cgImage: image)
         case .aerialVideo:
             guard let url = source.url,
                   let frame = await videoFrame(from: url) else {
@@ -766,9 +770,40 @@ enum WallpaperImageCache {
         })
     }
 
+    /// The size everything is drawn at before the blur, on the longer side. The
+    /// result is blurred and stretched over the whole screen, so more pixels
+    /// would only make the blur slower.
+    nonisolated static let blurInputMaxDimension: CGFloat = 960
+
+    /// Decodes an image file at no more than `maxPixelSize` on its longer side.
+    ///
+    /// `CIImage(contentsOf:)` decoded the whole file only for the blur to shrink
+    /// it: the default macOS 27 wallpaper is a 6016x6016 HEIC, which cost about
+    /// 170MB at peak and half a second that way, against 45MB and a quarter of
+    /// a second decoding straight to the size the blur uses. ImageIO also
+    /// applies the file's orientation, which `CIImage(contentsOf:)` ignored, and
+    /// takes the image a HEIF file marks as its primary one.
+    nonisolated static func decodeDownsampled(_ url: URL, maxPixelSize: CGFloat) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              CGImageSourceGetCount(source) > 0 else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(
+            source,
+            CGImageSourceGetPrimaryImageIndex(source),
+            options as CFDictionary
+        )
+    }
+
     nonisolated private static func blur(_ image: CIImage, radius: CGFloat) -> CGImage? {
         // Downsample to a fixed max dimension before the expensive blur.
-        let maxDimension: CGFloat = 960
+        let maxDimension = blurInputMaxDimension
         let extent = image.extent
         let scale = maxDimension / max(extent.width, extent.height, 1)
         let downsampled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
