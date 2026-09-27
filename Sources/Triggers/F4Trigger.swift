@@ -35,7 +35,7 @@ public final class F4Trigger {
             options: .defaultTap,
             eventsOfInterest: mask,
             callback: { _, type, event, userInfo -> Unmanaged<CGEvent>? in
-                guard let userInfo else { return Unmanaged.passRetained(event) }
+                guard let userInfo else { return Unmanaged.passUnretained(event) }
                 let trigger = Unmanaged<F4Trigger>.fromOpaque(userInfo).takeUnretainedValue()
                 // The system switches a tap off if its callback ever takes too
                 // long, or on certain user input. Nothing turns it back on by
@@ -46,7 +46,7 @@ public final class F4Trigger {
                 case .tapDisabledByTimeout, .tapDisabledByUserInput:
                     trigger.reenableTap()
                     DiagnosticsLog.triggers.error("F4 event tap was disabled by the system (\(type.rawValue)); re-enabled it")
-                    return Unmanaged.passRetained(event)
+                    return Unmanaged.passUnretained(event)
                 default:
                     return trigger.handle(event: event)
                 }
@@ -88,10 +88,15 @@ public final class F4Trigger {
         }
     }
 
-    private func handle(event: CGEvent) -> Unmanaged<CGEvent>? {
-        guard let nsEvent = NSEvent(cgEvent: event) else { return Unmanaged.passRetained(event) }
+    /// Returns the event to let it through, or nil to swallow it. An event
+    /// let through goes back unretained: the tap does not own it, and
+    /// returning it retained (as this used to) kept every system-defined
+    /// event that passed — media keys, and on some mice every button press —
+    /// alive for the rest of the process.
+    func handle(event: CGEvent) -> Unmanaged<CGEvent>? {
+        guard let nsEvent = NSEvent(cgEvent: event) else { return Unmanaged.passUnretained(event) }
         guard let classified = F4EventClassifier.classify(subtype: Int(nsEvent.subtype.rawValue), data1: nsEvent.data1) else {
-            return Unmanaged.passRetained(event)
+            return Unmanaged.passUnretained(event)
         }
         if F4EventClassifier.isLaunchPanelActivation(classified) {
             onActivate()
@@ -102,7 +107,7 @@ public final class F4Trigger {
         if classified.keyCode == F4EventClassifier.launchPanelKeyCode {
             return nil
         }
-        return Unmanaged.passRetained(event)
+        return Unmanaged.passUnretained(event)
     }
 
     // No deinit: same reasoning as GlobalHotkeyTrigger — callers stop() the
