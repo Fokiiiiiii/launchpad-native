@@ -35,6 +35,19 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$BIN" "$APP/Contents/MacOS/AppHost"
+# A release bundle ships without the debug map and local symbols: they were
+# 3MB of a 5.5MB executable. They are kept beside the build as a dSYM, which
+# turns the addresses in a crash report back into names (`atos -o` on the
+# DWARF file inside it). The app's own crash handling never needed them — it
+# logs an uncaught exception's name and reason only — and nothing looks up
+# this executable's symbols at run time (`dlsym` is only used on system
+# frameworks). Debug builds keep everything.
+if [ "$CONFIG" = "release" ]; then
+    DSYM="$SCRATCH/LaunchpadNative.app.dSYM"
+    rm -rf "$DSYM"
+    dsymutil "$BIN" -o "$DSYM"
+    strip -S -x "$APP/Contents/MacOS/AppHost"
+fi
 if [ -f "$ROOT/Resources/AppIcon.icns" ]; then
     cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
