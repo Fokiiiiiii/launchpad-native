@@ -410,6 +410,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         )
         viewController?.resetSearch()
         viewModel.setLastLaunchDates(gridModel.lastLaunchDatesByRecordID)
+        startDismissalMonitors()
 
         animationGeneration += 1
 
@@ -457,6 +458,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
 
     public func hide() {
         guard let window, window.isVisible else {
+            stopDismissalMonitors()
             setLauncherPresentation(active: false)
             return
         }
@@ -505,6 +507,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private func finishHide(window: LauncherWindow, generation: Int) {
         guard animationGeneration == generation else { return }
         window.orderOut(nil)
+        stopDismissalMonitors()
         setLauncherPresentation(active: false)
         window.alphaValue = 1
         if let layer = rootContentView?.layer {
@@ -632,7 +635,6 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         self.window = window
         self.viewController = content
         self.rootContentView = root
-        startOutsideClickMonitorIfNeeded()
         return window
     }
 
@@ -642,10 +644,27 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// mouse-down monitor is an explicit, direct signal: any click that
     /// lands outside this window's frame while it's visible closes it,
     /// independent of key-window bookkeeping.
+    ///
+    /// Both signals are system-wide — they wake this process for every click
+    /// and every app switch anywhere — so they are held only while the
+    /// launcher is on screen: installed by `show()`, removed once a hide has
+    /// finished. They used to be installed with the window and never removed,
+    /// so a closed launcher still woke up, and logged, on each of them all day.
     private var outsideClickMonitor: Any?
     private var appActivationObserver: Any?
 
-    private func startOutsideClickMonitorIfNeeded() {
+    private func stopDismissalMonitors() {
+        if let outsideClickMonitor {
+            NSEvent.removeMonitor(outsideClickMonitor)
+        }
+        outsideClickMonitor = nil
+        if let appActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(appActivationObserver)
+        }
+        appActivationObserver = nil
+    }
+
+    private func startDismissalMonitors() {
         guard outsideClickMonitor == nil else { return }
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             Task { @MainActor [weak self] in
