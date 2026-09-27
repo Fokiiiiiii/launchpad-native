@@ -9,13 +9,18 @@ import Foundation
 /// MultitouchSupport remains the passive source used by the recognizer.  The
 /// event tap is the small, native arbitration layer: it removes the selected
 /// 4- or 5-finger Launchpad gesture from the system stream.
+///
+/// Every gesture on the system passes through this tap, so it runs on
+/// `EventTapThread` rather than the main run loop, where the main thread
+/// being busy held every gesture up with it.
 public final class GestureEventTapCoordinator {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var current: GestureEventTapCoordinator?
     private static let permissionPromptKey = "gestureEventTapPermissionPrompted.v1"
 
+    /// Guards what the callback reads on the tap thread.
     private let stateLock = NSLock()
-    private var selectedFingerCounts: Set<Int> = [4, 5]
+    private var selectedFingerCount = 4
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
@@ -48,7 +53,7 @@ public final class GestureEventTapCoordinator {
         }
 
         stateLock.lock()
-        selectedFingerCounts = [selected]
+        selectedFingerCount = selected
         stateLock.unlock()
 
         // NSEvent gesture events are not represented by CGEventType. The
@@ -72,9 +77,11 @@ public final class GestureEventTapCoordinator {
             return false
         }
 
+        stateLock.lock()
         self.tap = tap
+        stateLock.unlock()
         self.runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        EventTapThread.shared.add(source)
         CGEvent.tapEnable(tap: tap, enable: true)
         isActive = true
         DiagnosticsLog.triggers.info("Gesture event tap enabled for \(selected)-finger Launchpad gestures")
@@ -82,15 +89,25 @@ public final class GestureEventTapCoordinator {
     }
 
     public func stop() {
-        if let source = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
-        if let tap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-            CFMachPortInvalidate(tap)
-        }
+        stateLock.lock()
+        let tap = self.tap
+        self.tap = nil
+        stateLock.unlock()
+        let source = runLoopSource
         runLoopSource = nil
-        tap = nil
+        if tap != nil || source != nil {
+            // On the tap's own thread, so no callback is still running once
+            // this returns.
+            EventTapThread.shared.performAndWait {
+                if let source {
+                    CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+                }
+                if let tap {
+                    CGEvent.tapEnable(tap: tap, enable: false)
+                    CFMachPortInvalidate(tap)
+                }
+            }
+        }
         isActive = false
         clearCurrent()
     }
@@ -103,13 +120,16 @@ public final class GestureEventTapCoordinator {
         Self.lock.unlock()
     }
 
-    private func selectedFingerCountsSnapshot() -> Set<Int> {
+    private func selectedFingerCountSnapshot() -> Int {
         stateLock.lock()
         defer { stateLock.unlock() }
-        return selectedFingerCounts
+        return selectedFingerCount
     }
 
     private func reenableTap() {
+        stateLock.lock()
+        let tap = self.tap
+        stateLock.unlock()
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: true)
         }
@@ -138,7 +158,7 @@ public final class GestureEventTapCoordinator {
                 return Unmanaged.passUnretained(event)
             }
             let fingerCount = nsEvent.allTouches().count
-            return coordinator.selectedFingerCountsSnapshot().contains(fingerCount)
+            return coordinator.selectedFingerCountSnapshot() == fingerCount
                 ? nil
                 : Unmanaged.passUnretained(event)
         default:
