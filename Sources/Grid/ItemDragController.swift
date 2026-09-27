@@ -51,8 +51,9 @@ final class ItemDragController {
         let commitPageChange: (Int) -> Void
         let prefetchIcons: (Int) -> Void
         /// The given page as a view over the grid, for the peek to move a page
-        /// away with its layer's translation — see `NeighborPage`.
-        let neighborPage: (_ page: Int) -> NSView?
+        /// away with its layer's translation, leaving `hiddenIndex` empty —
+        /// see `NeighborPage`.
+        let neighborPage: (_ page: Int, _ hiddenIndex: Int?) -> NSView?
         let activateItem: (IndexPath) -> Void
         let clearKeyboardSelection: () -> Void
     }
@@ -662,7 +663,15 @@ final class ItemDragController {
 
         if session.edgePeekView == nil {
             callbacks.prefetchIcons(currentPage + direction)
-            guard let peek = callbacks.neighborPage(currentPage + direction) else { return }
+            let peekPage = currentPage + direction
+            // Peeking back at the page the item came from: its own cell is
+            // still there in the model, under the icon the user is holding.
+            let hiddenIndex = ItemDrag.sourceIndex(
+                onPage: peekPage,
+                sourcePage: session.sourcePage,
+                sourceOriginalIndex: session.sourceOriginalIndex
+            )
+            guard let peek = callbacks.neighborPage(peekPage, hiddenIndex) else { return }
             view.addSubview(peek, positioned: .above, relativeTo: scrollView)
             peek.layoutSubtreeIfNeeded()
             session.edgePeekView = peek
@@ -690,9 +699,23 @@ final class ItemDragController {
     private func clearEdgePeek(session: ItemDrag.ItemDragSession) {
         guard let peekView = session.edgePeekView else { return }
         let lastOffset = session.lastPeekOffset ?? 0
-        collectionView.layer?.add(GridSpring.animation(keyPath: "transform.translation.x", from: lastOffset, to: 0, damping: 0.98, response: 0.20), forKey: "edgePeekRevert")
+        let spring = GridSpring.animation(keyPath: "transform.translation.x", from: lastOffset, to: 0, damping: 0.98, response: 0.20)
+        collectionView.layer?.add(spring, forKey: "edgePeekRevert")
         collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
-        peekView.removeFromSuperview()
+        // The peek rides back out with the grid, a page away from it, rather
+        // than vanishing from the edge while the grid is still returning.
+        if let layer = peekView.layer {
+            let current = (layer.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? lastOffset
+            let resting = current - lastOffset
+            layer.add(GridSpring.animation(keyPath: "transform.translation.x", from: current, to: resting, damping: 0.98, response: 0.20), forKey: "edgePeekRevert")
+            layer.setValue(resting, forKeyPath: "transform.translation.x")
+        }
+        let settleDuration = min(max(spring.settlingDuration, 0.12), 0.55)
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) {
+            Task { @MainActor in
+                peekView.removeFromSuperview()
+            }
+        }
         session.edgePeekView = nil
         session.lastPeekOffset = nil
         session.lastPeekTime = nil

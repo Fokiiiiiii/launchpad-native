@@ -36,6 +36,11 @@ enum NeighborPage {
     /// cold one shows its missing icons empty until the live grid takes over
     /// at the end of the drag.
     ///
+    /// - Parameter hiddenIndex: a slot to leave empty — the item-drag peek's
+    ///   own item, when the page it peeks at is the one the item was picked up
+    ///   from. The model does not change until the drop, so without this the
+    ///   page would show the item under the one the user is still holding.
+    ///
     /// The caller adds the result to its view and lays it out.
     static func makeView(
         items: [LayoutItem],
@@ -45,7 +50,8 @@ enum NeighborPage {
         iconSize: Double,
         visualScale: CGFloat,
         size: NSSize,
-        scrollViewFrame: NSRect
+        scrollViewFrame: NSRect,
+        hidingItemAt hiddenIndex: Int? = nil
     ) -> NSView {
         let layout = PagedGridLayout()
         layout.settings = model.gridSettings
@@ -59,7 +65,8 @@ enum NeighborPage {
             iconCache: iconCache,
             itemIdentifier: itemIdentifier,
             iconSize: iconSize,
-            visualScale: visualScale
+            visualScale: visualScale,
+            hiddenIndex: hiddenIndex
         )
         collectionView.dataSource = dataSource
 
@@ -106,6 +113,11 @@ private final class NeighborPageView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// Not even its cells: VoiceOver would find a second set of app buttons,
+    /// their frames laid over the live grid's, since a layer's translation is
+    /// invisible to accessibility too.
+    override func accessibilityChildren() -> [Any]? { [] }
 }
 
 /// A minimal data source for one neighbouring page. Deliberately separate from
@@ -118,14 +130,16 @@ private final class NeighborPageDataSource: NSObject, NSCollectionViewDataSource
     private let itemIdentifier: NSUserInterfaceItemIdentifier
     private let iconSize: Double
     private let visualScale: Double
+    private let hiddenIndex: Int?
 
-    init(items: [LayoutItem], model: GridModel, iconCache: IconCache, itemIdentifier: NSUserInterfaceItemIdentifier, iconSize: Double, visualScale: Double = 1) {
+    init(items: [LayoutItem], model: GridModel, iconCache: IconCache, itemIdentifier: NSUserInterfaceItemIdentifier, iconSize: Double, visualScale: Double, hiddenIndex: Int?) {
         self.items = items
         self.model = model
         self.iconCache = iconCache
         self.itemIdentifier = itemIdentifier
         self.iconSize = iconSize
         self.visualScale = visualScale
+        self.hiddenIndex = hiddenIndex
     }
 
     func numberOfSections(in collectionView: NSCollectionView) -> Int { 1 }
@@ -156,6 +170,9 @@ private final class NeighborPageDataSource: NSObject, NSCollectionViewDataSource
             let icons = Array(records.prefix(9)).compactMap { iconCache.cachedIconIfAvailable(for: $0) }
             cell.configureAsFolder(name: name, isSelected: false, iconSize: iconSize, visualScale: visualScale, icons: icons, requestKey: "folder:\(folderID.value)")
         }
+        // Layer opacity, the way the live grid hides the dragged item's cell.
+        cell.view.wantsLayer = true
+        cell.view.layer?.opacity = indexPath.item == hiddenIndex ? 0 : 1
         return cell
     }
 }

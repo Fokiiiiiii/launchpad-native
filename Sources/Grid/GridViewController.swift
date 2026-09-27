@@ -33,9 +33,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private let windowThumbnailService = WindowThumbnailService()
 
 
-    /// Only the one snapshot actually needed (whichever neighbor the drag
-    /// direction reveals), created lazily once direction is known — not
-    /// pre-rendered for both sides up front.
+    /// Only the one neighbouring page actually needed (whichever side the
+    /// drag direction reveals), built once the direction is known — not for
+    /// both sides up front.
     private var dragNeighborView: NSView?
     /// `0` = direction not yet known this gesture, `1` = revealing the next
     /// page, `-1` = revealing the previous page.
@@ -548,8 +548,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     /// Fires once a swipe has been confirmed and has cleared the minimum
     /// engage distance (see `GridCollectionView`). Only arms bookkeeping
-    /// and the hard fallback timer — the actual neighbor snapshot is
-    /// created lazily in `updatePageDrag` once the direction is known.
+    /// and the hard fallback timer — the neighbouring page is built in
+    /// `updatePageDrag` once the direction is known.
     private func beginPageDrag() {
         if dragDirection != 0 || dragNeighborView != nil {
             DiagnosticsLog.grid.notice("beginPageDrag: previous drag still settling, finishing it immediately so this swipe isn't dropped")
@@ -575,8 +575,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     /// Called continuously while the gesture is in progress — `deltaX` is
     /// the *cumulative* horizontal delta since the gesture began, applied
-    /// 1:1 to both the live grid's and (once created) the neighbor
-    /// snapshot's transform, so both track the fingers exactly. Rubber-
+    /// 1:1 to both the live grid's and (once created) the neighbouring
+    /// page's transform, so both track the fingers exactly. Rubber-
     /// bands (apple-design's resistance formula) when there's no adjacent
     /// page to reveal in that direction.
     private func updatePageDrag(deltaX: CGFloat) {
@@ -604,12 +604,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             }
         }
 
-        let hasNeighborImage = dragNeighborView != nil
+        let hasNeighborPage = dragNeighborView != nil
         // An edge pull is a hint, not a second page-sized animation. Using
         // the viewport width as the rubber-band dimension made the terminal
         // page travel far enough to look like a broken page turn.
         let effective: CGFloat
-        if hasNeighborImage {
+        if hasNeighborPage {
             effective = deltaX
         } else {
             let edgePullLimit: CGFloat = 12
@@ -758,7 +758,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     /// Page `page` as a live grid, laid over the current one for a drag to
     /// move a page away — see `NeighborPage`.
-    private func makeNeighborPageView(forPage page: Int) -> NSView? {
+    private func makeNeighborPageView(forPage page: Int, hidingItemAt hiddenIndex: Int? = nil) -> NSView? {
         guard model.pages.indices.contains(page) else { return nil }
         let metrics = currentIconLayoutMetrics
         return NeighborPage.makeView(
@@ -769,13 +769,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             iconSize: metrics.baseSize,
             visualScale: metrics.visualScale,
             size: collectionView.bounds.size,
-            scrollViewFrame: scrollView.frame
+            scrollViewFrame: scrollView.frame,
+            hidingItemAt: hiddenIndex
         )
     }
 
     /// Test hook: a neighbouring page exactly as a drag builds it.
-    func neighborPageForTesting(page: Int) -> NSView? {
-        makeNeighborPageView(forPage: page)
+    func neighborPageForTesting(page: Int, hidingItemAt hiddenIndex: Int? = nil) -> NSView? {
+        makeNeighborPageView(forPage: page, hidingItemAt: hiddenIndex)
     }
 
     /// Test hook: starts a page swipe and moves it by `deltaX`, as the
@@ -1246,7 +1247,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             currentPage: { [unowned self] in currentPage },
             commitPageChange: { [unowned self] page in commitPageChangeDuringItemDrag(to: page) },
             prefetchIcons: { [unowned self] page in prefetchAdjacentPageIcons(including: page) },
-            neighborPage: { [unowned self] page in makeNeighborPageView(forPage: page) },
+            neighborPage: { [unowned self] page, hiddenIndex in makeNeighborPageView(forPage: page, hidingItemAt: hiddenIndex) },
             activateItem: { [unowned self] indexPath in activate(at: indexPath) },
             clearKeyboardSelection: { [unowned self] in clearKeyboardSelection() }
         )
@@ -1288,7 +1289,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// size for the slot, `visualScale` the multiplier the inter-cell gap can
     /// still afford. `GridCellItem` applies the multiplier to the real icon
     /// constraint, so its centered icon+label group and hit region share this
-    /// geometry, as do the page snapshots.
+    /// geometry, as do the neighbouring pages shown during a drag.
     ///
     /// Returned together, not as two properties: every caller needs both, and
     /// two properties meant deriving the same metrics twice per cell.

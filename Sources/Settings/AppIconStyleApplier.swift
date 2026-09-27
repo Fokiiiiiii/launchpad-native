@@ -18,7 +18,8 @@ public enum AppIconStyleApplier {
     /// variant, which stayed in memory for as long as the process lived once
     /// Settings had been opened, and the picker read all four again from disk
     /// on every redraw. Decoding at the drawn size and keeping the result
-    /// makes each one a few dozen kilobytes, read once.
+    /// makes a picker icon about 25KB and the 256pt process icon about 1MB,
+    /// each read once. At most four styles at three sizes are ever kept.
     public static func image(for style: AppIconStyle, pointSize: CGFloat) -> NSImage? {
         guard let directory = Bundle.main.resourceURL?.appendingPathComponent("AppIconVariants") else {
             return nil

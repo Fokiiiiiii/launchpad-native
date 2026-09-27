@@ -40,8 +40,9 @@ final class PagedGridLayout: NSCollectionViewLayout {
         // a prior pass, so reading it back is a self-reinforcing loop with no
         // path to the real viewport once it drifts (measured: content ended up
         // ~63pt taller than the viewport). The clip view is sized purely by Auto
-        // Layout. Falls back when there is no scroll view — the offscreen
-        // snapshot view, which is built at its final size and never scrolled.
+        // Layout. Every grid is in a scroll view — the neighbouring page shown
+        // during a drag too, since a collection view outside one lays out no
+        // cells — so the fallback is only a guard.
         let viewportSize = collectionView.enclosingScrollView?.contentView.bounds.size ?? collectionView.bounds.size
         let viewportHeight = viewportSize.height
         let pageWidth = viewportSize.width

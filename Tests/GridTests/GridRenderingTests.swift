@@ -181,7 +181,7 @@ private final class GridHarness {
     #expect(harness.drawnIconCount() == cells.count, "a recycled cell was left without an icon")
 }
 
-// MARK: - Page snapshot cache
+// MARK: - Neighbouring page
 
 /// The apps a neighbouring page's grid shows, in order, by icon key.
 @MainActor
@@ -265,6 +265,83 @@ private func appKeys(onPage page: Int, of model: GridModel) -> [String] {
     defer { neighbour.removeFromSuperview() }
     let center = NSPoint(x: neighbour.frame.midX, y: neighbour.frame.midY)
     #expect(neighbour.hitTest(center) == nil)
+}
+
+/// Dragging an item back towards the page it came from, the peek shows that
+/// page as the model has it — which, until the drop, still includes the item.
+/// Its cell is left empty, the way the live grid hides it, or the page shows
+/// the app under the icon the user is holding.
+@Test @MainActor func aNeighbourPageCanLeaveTheDraggedItemsSlotEmpty() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 60, directory: dir)
+    defer { harness.teardown() }
+
+    let neighbour = try #require(harness.controller.neighborPageForTesting(page: 1, hidingItemAt: 3))
+    harness.controller.view.addSubview(neighbour)
+    neighbour.layoutSubtreeIfNeeded()
+    defer { neighbour.removeFromSuperview() }
+    let scrollView = neighbour.subviews.compactMap { $0 as? NSScrollView }.first
+    let grid = try #require(scrollView?.documentView as? NSCollectionView)
+
+    let opacities = (0..<grid.numberOfItems(inSection: 0)).map {
+        grid.item(at: IndexPath(item: $0, section: 0))?.view.layer?.opacity
+    }
+    #expect(opacities[3] == 0)
+    #expect(opacities.enumerated().allSatisfy { $0.offset == 3 || $0.element == 1 })
+}
+
+/// Everything accessibility can reach from the view, depth first.
+@MainActor
+private func accessibilityDescendants(of root: Any) -> [Any] {
+    var found: [Any] = []
+    var pending: [Any] = [root]
+    var seen = Set<ObjectIdentifier>()
+    while let element = pending.popLast(), found.count < 5_000 {
+        let object = element as AnyObject
+        guard seen.insert(ObjectIdentifier(object)).inserted else { continue }
+        found.append(element)
+        let children: [Any]?
+        if let view = element as? NSView {
+            children = view.accessibilityChildren()
+        } else if let accessible = element as? NSAccessibilityProtocol {
+            children = accessible.accessibilityChildren()
+        } else {
+            children = nil
+        }
+        pending.append(contentsOf: children ?? [])
+    }
+    return found
+}
+
+/// VoiceOver must not find a second set of app buttons during a drag: the
+/// neighbouring page's frames sit over the live grid's, since a layer's
+/// translation is invisible to accessibility.
+@Test @MainActor func aNeighbourPageIsHiddenFromAccessibility() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 60, directory: dir)
+    defer { harness.teardown() }
+
+    let neighbour = try #require(harness.controller.neighborPageForTesting(page: 1))
+    harness.controller.view.addSubview(neighbour)
+    neighbour.layoutSubtreeIfNeeded()
+    defer { neighbour.removeFromSuperview() }
+
+    // A collection view's cells reach accessibility as its items, not as
+    // their views.
+    func view(of element: Any) -> NSView? {
+        (element as? NSView) ?? (element as? NSCollectionViewItem)?.view
+    }
+    let reachable = accessibilityDescendants(of: harness.controller.view)
+    let fromNeighbour = reachable.filter { element in
+        guard let view = view(of: element) else { return false }
+        return view !== neighbour && view.isDescendant(of: neighbour)
+    }
+    #expect(fromNeighbour.isEmpty, "\(fromNeighbour.count) accessibility elements came from the neighbouring page")
+    // And the live grid's own cells are still there to be found.
+    let liveCells = reachable.filter { $0 is GridCellItem }
+    #expect(liveCells.count == harness.model.pages[0].count)
 }
 
 /// There is no page beyond the last.
