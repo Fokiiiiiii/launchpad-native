@@ -36,7 +36,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// Only the one snapshot actually needed (whichever neighbor the drag
     /// direction reveals), created lazily once direction is known — not
     /// pre-rendered for both sides up front.
-    private var dragNeighborImageView: NSImageView?
+    private var dragNeighborView: NSView?
     /// `0` = direction not yet known this gesture, `1` = revealing the next
     /// page, `-1` = revealing the previous page.
     private var dragDirection = 0
@@ -243,7 +243,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     public func reload() {
-        invalidatePageSnapshots()
         layout.settings = model.gridSettings
         if currentPage >= model.pages.count {
             currentPage = max(model.pages.count - 1, 0)
@@ -552,7 +551,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// and the hard fallback timer — the actual neighbor snapshot is
     /// created lazily in `updatePageDrag` once the direction is known.
     private func beginPageDrag() {
-        if dragDirection != 0 || dragNeighborImageView != nil {
+        if dragDirection != 0 || dragNeighborView != nil {
             DiagnosticsLog.grid.notice("beginPageDrag: previous drag still settling, finishing it immediately so this swipe isn't dropped")
             finishPageDrag(targetPage: pendingPageDragTargetPage ?? currentPage)
         }
@@ -590,25 +589,22 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             dragDirection = deltaX < 0 ? 1 : -1
             let hasNeighbor = dragDirection > 0 ? dragHasNext : dragHasPrev
             DiagnosticsLog.grid.notice("updatePageDrag: direction resolved to \(self.dragDirection, privacy: .public), hasNeighbor=\(hasNeighbor, privacy: .public)")
-            if hasNeighbor, dragNeighborImageView == nil {
+            if hasNeighbor, dragNeighborView == nil {
                 prefetchAdjacentPageIcons(including: currentPage + dragDirection)
-                if let image = renderPageSnapshot(forPage: currentPage + dragDirection, size: collectionView.bounds.size) {
-                    let imageView = PageSnapshotRenderer.makeNeighborImageView(
-                        image: image,
-                        direction: dragDirection,
-                        pageWidth: width,
-                        scrollViewFrame: scrollView.frame
-                    )
-                    view.addSubview(imageView, positioned: .above, relativeTo: scrollView)
-                    dragNeighborImageView = imageView
-                    DiagnosticsLog.grid.notice("updatePageDrag: neighbor snapshot created for page \(self.currentPage + self.dragDirection, privacy: .public)")
+                let start = DispatchTime.now()
+                if let neighbor = makeNeighborPageView(forPage: currentPage + dragDirection) {
+                    view.addSubview(neighbor, positioned: .above, relativeTo: scrollView)
+                    neighbor.layoutSubtreeIfNeeded()
+                    dragNeighborView = neighbor
+                    let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+                    DiagnosticsLog.grid.notice("updatePageDrag: neighbor page created for page \(self.currentPage + self.dragDirection, privacy: .public) in \(ms, privacy: .public)ms")
                 } else {
-                    DiagnosticsLog.grid.notice("updatePageDrag: renderPageSnapshot returned nil for page \(self.currentPage + self.dragDirection, privacy: .public)")
+                    DiagnosticsLog.grid.notice("updatePageDrag: no neighbor page for page \(self.currentPage + self.dragDirection, privacy: .public)")
                 }
             }
         }
 
-        let hasNeighborImage = dragNeighborImageView != nil
+        let hasNeighborImage = dragNeighborView != nil
         // An edge pull is a hint, not a second page-sized animation. Using
         // the viewport width as the rubber-band dimension made the terminal
         // page travel far enough to look like a broken page turn.
@@ -624,7 +620,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         collectionView.layer?.setValue(effective, forKeyPath: "transform.translation.x")
-        dragNeighborImageView?.layer?.setValue(effective, forKeyPath: "transform.translation.x")
+        // The neighbouring page sits over the grid and is kept a page away by
+        // its own translation (see `NeighborPage`).
+        dragNeighborView?.layer?.setValue(CGFloat(dragDirection) * width + effective, forKeyPath: "transform.translation.x")
         CATransaction.commit()
     }
 
@@ -632,7 +630,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
     private func endPageDrag(deltaX: CGFloat, velocity: CGFloat) {
         let width = max(collectionView.bounds.width, 1)
-        let hasNeighbor = dragNeighborImageView != nil
+        let hasNeighbor = dragNeighborView != nil
         let distanceThreshold = Self.pageDragCommitDistance
         let flickVelocityThreshold: CGFloat = 400 // points/sec
 
@@ -664,11 +662,25 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             initialVelocity: relativeVelocity
         )
         collectionView.layer?.add(spring, forKey: "pageDragSettle")
-        dragNeighborImageView?.layer?.add(spring, forKey: "pageDragSettle")
+        // The neighbouring page travels the same distance a page away, so it
+        // gets the same spring shifted by that page; the relative velocity is
+        // unchanged, being a rate over the same distance.
+        let neighborOffset = CGFloat(dragDirection) * width
+        if let neighborLayer = dragNeighborView?.layer {
+            let neighborSpring = GridSpring.animation(
+                keyPath: "transform.translation.x",
+                from: neighborOffset + deltaX,
+                to: neighborOffset + targetTranslation,
+                damping: damping,
+                response: response,
+                initialVelocity: relativeVelocity
+            )
+            neighborLayer.add(neighborSpring, forKey: "pageDragSettle")
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         collectionView.layer?.setValue(targetTranslation, forKeyPath: "transform.translation.x")
-        dragNeighborImageView?.layer?.setValue(targetTranslation, forKeyPath: "transform.translation.x")
+        dragNeighborView?.layer?.setValue(neighborOffset + targetTranslation, forKeyPath: "transform.translation.x")
         CATransaction.commit()
 
         let targetPage = commit ? currentPage + dragDirection : currentPage
@@ -709,8 +721,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         resetScrollPosition()
         pageControl.currentPage = currentPage
-        dragNeighborImageView?.removeFromSuperview()
-        dragNeighborImageView = nil
+        dragNeighborView?.removeFromSuperview()
+        dragNeighborView = nil
         dragDirection = 0
         pendingPageDragTargetPage = nil
         dragGeneration += 1
@@ -724,7 +736,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     public func resetDragStateIfNeeded() {
-        guard dragNeighborImageView != nil || dragDirection != 0 else { return }
+        guard dragNeighborView != nil || dragDirection != 0 else { return }
         forceResetPageDrag()
     }
 
@@ -735,8 +747,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
         CATransaction.commit()
         resetScrollPosition()
-        dragNeighborImageView?.removeFromSuperview()
-        dragNeighborImageView = nil
+        dragNeighborView?.removeFromSuperview()
+        dragNeighborView = nil
         dragDirection = 0
         pendingPageDragTargetPage = nil
         collectionView.reloadData()
@@ -744,69 +756,35 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         dragGeneration += 1
     }
 
-    /// Binds the controller's current geometry to `PageSnapshotRenderer`, which
-    /// holds the rendering itself (and the offscreen host window it needs).
-    /// Rendered neighbour pages, keyed by page and size.
-    ///
-    /// Rendering one costs 320-375ms of blocked main thread — it builds a whole
-    /// throwaway collection view, every cell in it, and draws the result. That
-    /// ran on *every* swipe, so paging quickly was unusable. The same page
-    /// renders identically until the model or the metrics change, so the work
-    /// only has to happen once.
-    private var pageSnapshotCache: [PageSnapshotKey: NSImage] = [:]
-
-    struct PageSnapshotKey: Hashable {
-        let page: Int
-        let width: Int
-        let height: Int
-        let iconSize: Int
-    }
-
-    /// Called wherever the rendered result would no longer match.
-    private func invalidatePageSnapshots() {
-        pageSnapshotCache.removeAll(keepingCapacity: true)
-    }
-
-    /// Test hook: the cache is the whole point of this path, and a re-render
-    /// costs a third of a second of blocked main thread.
-    public func pageSnapshotForTesting(page: Int, size: NSSize) -> NSImage? {
-        renderPageSnapshot(forPage: page, size: size)
-    }
-
-    private func renderPageSnapshot(forPage page: Int, size: NSSize) -> NSImage? {
+    /// Page `page` as a live grid, laid over the current one for a drag to
+    /// move a page away — see `NeighborPage`.
+    private func makeNeighborPageView(forPage page: Int) -> NSView? {
         guard model.pages.indices.contains(page) else { return nil }
         let metrics = currentIconLayoutMetrics
-        let key = PageSnapshotKey(
-            page: page,
-            width: Int(size.width.rounded()),
-            height: Int(size.height.rounded()),
-            iconSize: Int((metrics.baseSize * metrics.visualScale).rounded())
-        )
-        if let cached = pageSnapshotCache[key] { return cached }
-
-        let rendered = PageSnapshotRenderer.render(
+        return NeighborPage.makeView(
             items: model.pages[page],
             model: model,
             iconCache: iconCache,
             itemIdentifier: itemIdentifier,
             iconSize: metrics.baseSize,
             visualScale: metrics.visualScale,
-            size: size
+            size: collectionView.bounds.size,
+            scrollViewFrame: scrollView.frame
         )
-        guard let rendered else { return nil }
-        // A snapshot with missing icons is not a picture of the page, it is a
-        // picture of the moment the icons had not loaded yet. Keeping it meant
-        // every later swipe onto that page showed the gap again, and the icons
-        // only appeared once the live grid took over — an icon that blinks out
-        // for the length of a swipe.
-        if rendered.isComplete {
-            // Bounded: a neighbour peek only ever needs the pages either side
-            // of the current one, and the grid is not usually deep enough for
-            // this to grow, but a stale entry is dead weight either way.
-            if pageSnapshotCache.count >= 6 { pageSnapshotCache.removeAll(keepingCapacity: true) }
-            pageSnapshotCache[key] = rendered.image
-        }
-        return rendered.image
+    }
+
+    /// Test hook: a neighbouring page exactly as a drag builds it.
+    func neighborPageForTesting(page: Int) -> NSView? {
+        makeNeighborPageView(forPage: page)
+    }
+
+    /// Test hook: starts a page swipe and moves it by `deltaX`, as the
+    /// trackpad would, and returns the neighbouring page it brought in. End it
+    /// with `resetDragStateIfNeeded()`.
+    func pageDragForTesting(deltaX: CGFloat) -> NSView? {
+        beginPageDrag()
+        updatePageDrag(deltaX: deltaX)
+        return dragNeighborView
     }
 
 #if LAUNCHPAD_DEBUG_HOOKS
@@ -1268,7 +1246,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             currentPage: { [unowned self] in currentPage },
             commitPageChange: { [unowned self] page in commitPageChangeDuringItemDrag(to: page) },
             prefetchIcons: { [unowned self] page in prefetchAdjacentPageIcons(including: page) },
-            pageSnapshot: { [unowned self] page, size in renderPageSnapshot(forPage: page, size: size) },
+            neighborPage: { [unowned self] page in makeNeighborPageView(forPage: page) },
             activateItem: { [unowned self] indexPath in activate(at: indexPath) },
             clearKeyboardSelection: { [unowned self] in clearKeyboardSelection() }
         )

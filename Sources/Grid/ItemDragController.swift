@@ -50,7 +50,9 @@ final class ItemDragController {
         let currentPage: () -> Int
         let commitPageChange: (Int) -> Void
         let prefetchIcons: (Int) -> Void
-        let pageSnapshot: (Int, NSSize) -> NSImage?
+        /// The given page as a view over the grid, for the peek to move a page
+        /// away with its layer's translation — see `NeighborPage`.
+        let neighborPage: (_ page: Int) -> NSView?
         let activateItem: (IndexPath) -> Void
         let clearKeyboardSelection: () -> Void
     }
@@ -658,17 +660,12 @@ final class ItemDragController {
             return
         }
 
-        if session.edgePeekImageView == nil {
+        if session.edgePeekView == nil {
             callbacks.prefetchIcons(currentPage + direction)
-            guard let image = callbacks.pageSnapshot(currentPage + direction, collectionView.bounds.size) else { return }
-            let imageView = PageSnapshotRenderer.makeNeighborImageView(
-                image: image,
-                direction: direction,
-                pageWidth: width,
-                scrollViewFrame: scrollView.frame
-            )
-            view.addSubview(imageView, positioned: .above, relativeTo: scrollView)
-            session.edgePeekImageView = imageView
+            guard let peek = callbacks.neighborPage(currentPage + direction) else { return }
+            view.addSubview(peek, positioned: .above, relativeTo: scrollView)
+            peek.layoutSubtreeIfNeeded()
+            session.edgePeekView = peek
         }
 
         let dampedOffset = GridSpring.rubberBand(penetration, dimension: ItemDrag.itemDragEdgePeekResistanceDimension)
@@ -678,7 +675,7 @@ final class ItemDragController {
         collectionView.wantsLayer = true
         collectionView.layer?.setValue(previewOffset, forKeyPath: "transform.translation.x")
         let peekOffset = previewOffset + (direction > 0 ? width : -width)
-        session.edgePeekImageView?.layer?.setValue(peekOffset, forKeyPath: "transform.translation.x")
+        session.edgePeekView?.layer?.setValue(peekOffset, forKeyPath: "transform.translation.x")
         CATransaction.commit()
         session.lastPeekOffset = previewOffset
         session.lastPeekTime = CACurrentMediaTime()
@@ -691,12 +688,12 @@ final class ItemDragController {
     /// (the page-turn commit path in `commitPageTurnDuringDrag` handles its
     /// own transition instead of going through this).
     private func clearEdgePeek(session: ItemDrag.ItemDragSession) {
-        guard let peekImageView = session.edgePeekImageView else { return }
+        guard let peekView = session.edgePeekView else { return }
         let lastOffset = session.lastPeekOffset ?? 0
         collectionView.layer?.add(GridSpring.animation(keyPath: "transform.translation.x", from: lastOffset, to: 0, damping: 0.98, response: 0.20), forKey: "edgePeekRevert")
         collectionView.layer?.setValue(0, forKeyPath: "transform.translation.x")
-        peekImageView.removeFromSuperview()
-        session.edgePeekImageView = nil
+        peekView.removeFromSuperview()
+        session.edgePeekView = nil
         session.lastPeekOffset = nil
         session.lastPeekTime = nil
     }
@@ -707,7 +704,7 @@ final class ItemDragController {
     /// width and leaves `commitPageChange` — which runs only if the drag is
     /// still live — to put it back at zero. Release the button inside that
     /// window and nothing else does it: `clearEdgePeek` returns early because
-    /// the turn took the peek image out of the session, the 15s safety net and
+    /// the turn took the peek out of the session, the 15s safety net and
     /// `resetSearch` only look at the page-*swipe* state, and `reloadData`
     /// never touches the layer's transform. The grid was left parked a full
     /// page off-screen — wallpaper and nothing else — until the user paged
@@ -742,8 +739,8 @@ final class ItemDragController {
         let rawVelocity = GridSpring.estimateVelocity(from: session.lastPeekOffset, at: session.lastPeekTime, to: presentationX, at: CACurrentMediaTime())
         let boundedVelocity = min(max(rawVelocity, -1600), 1600)
         let relativeVelocity = abs(offset - presentationX) > 1 ? boundedVelocity / (offset - presentationX) : 0
-        let peekImageView = session.edgePeekImageView
-        session.edgePeekImageView = nil // this function now owns the transition, not clearEdgePeek
+        let peekView = session.edgePeekView
+        session.edgePeekView = nil // this function now owns the transition, not clearEdgePeek
         session.lastPeekOffset = nil
         session.lastPeekTime = nil
 
@@ -752,7 +749,7 @@ final class ItemDragController {
         let spring = GridSpring.animation(keyPath: "transform.translation.x", from: presentationX, to: offset, damping: 0.98, response: 0.30, initialVelocity: relativeVelocity)
         collectionView.layer?.add(spring, forKey: "itemDragPageTurnOut")
         collectionView.layer?.setValue(offset, forKeyPath: "transform.translation.x")
-        // The peek image (if one was already showing) rides out at the same
+        // The peek (if one was already showing) rides out at the same
         // damping/response/velocity — same motion "feel" — rather than
         // being torn down abruptly. It needs its own `CASpringAnimation`
         // instance (not the same one reused) since it's sitting a constant
@@ -760,13 +757,13 @@ final class ItemDragController {
         // `from`/`to` values, but velocity is a rate and is unaffected by
         // that constant offset, so handing off the exact same
         // `relativeVelocity` to both is correct.
-        if let peekImageView {
+        if let peekView {
             let peekOffsetConstant: CGFloat = direction > 0 ? width : -width
-            let peekCurrentX = (peekImageView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? (presentationX + peekOffsetConstant)
+            let peekCurrentX = (peekView.layer?.presentation()?.value(forKeyPath: "transform.translation.x") as? CGFloat) ?? (presentationX + peekOffsetConstant)
             let peekTarget = offset + peekOffsetConstant
             let peekSpring = GridSpring.animation(keyPath: "transform.translation.x", from: peekCurrentX, to: peekTarget, damping: 0.98, response: 0.30, initialVelocity: relativeVelocity)
-            peekImageView.layer?.add(peekSpring, forKey: "itemDragPageTurnOut")
-            peekImageView.layer?.setValue(peekTarget, forKeyPath: "transform.translation.x")
+            peekView.layer?.add(peekSpring, forKey: "itemDragPageTurnOut")
+            peekView.layer?.setValue(peekTarget, forKeyPath: "transform.translation.x")
         }
 
         let settleDuration = min(max(spring.settlingDuration, 0.12), 0.55)
@@ -774,9 +771,9 @@ final class ItemDragController {
             Task { @MainActor in
                 // Torn down unconditionally, even if the guard below bails
                 // (stale/superseded drag) — this function already took
-                // ownership of `peekImageView` from `session` above, so
+                // ownership of `peekView` from `session` above, so
                 // nothing else will clean it up if this early-returns.
-                peekImageView?.removeFromSuperview()
+                peekView?.removeFromSuperview()
                 guard let self else { return }
                 guard self.activeItemDrag === session, session.generation == self.itemDragGeneration else {
                     // Superseded or already ended. `commitPageChange` is what

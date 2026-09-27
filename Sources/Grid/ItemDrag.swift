@@ -56,7 +56,7 @@ enum ItemDrag {
         /// dwells in the edge zone, before the dwell timer actually commits
         /// a page turn. `nil` whenever the pointer isn't currently in an
         /// edge zone.
-        var edgePeekImageView: NSImageView?
+        var edgePeekView: NSView?
         /// Last offset/timestamp applied to the peek — reused by §8c to
         /// approximate a release velocity when the page-turn commit spring
         /// re-targets a peek that's still easing.
@@ -66,7 +66,7 @@ enum ItemDrag {
         /// view a full page's width until its settle block puts it back.
         ///
         /// The turn is the one place that moves the collection view itself
-        /// rather than a peek image, and the only thing that undoes it is
+        /// rather than a peek view, and the only thing that undoes it is
         /// `commitPageChange` — inside a block guarded on the drag still being
         /// live. Letting go inside that window makes the guard bail, so the
         /// drag's own teardown has to finish the job; this is what tells it
@@ -74,7 +74,7 @@ enum ItemDrag {
         var pageTurnInFlight = false
         /// Real, confirmed report ("グループ化しようとするとアプリが逃げる
         /// ...わかりやすくできない？"): a standalone overlay (same pattern
-        /// as `floatingView`/`edgePeekImageView` — never a sublayer added to
+        /// as `floatingView`/`edgePeekView` — never a sublayer added to
         /// a reusable `GridCellItem`, since `prepareForReuse` only resets
         /// that cell's own transform/opacity/animations, not arbitrary
         /// sublayers someone else added) that shows the folder drop zone's

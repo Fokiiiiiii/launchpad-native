@@ -183,78 +183,98 @@ private final class GridHarness {
 
 // MARK: - Page snapshot cache
 
-/// Rendering a neighbour page costs 320-375ms of blocked main thread — it
-/// builds a throwaway collection view, every cell in it, and draws the result.
-/// That ran on every swipe, which made paging quickly unusable. The same page
-/// renders identically until the model changes, so it is cached.
-@Test @MainActor func aPageSnapshotIsRenderedOnceAndReused() async throws {
-    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: dir) }
-    // Enough apps for several pages.
-    let harness = await GridHarness(appCount: 60, directory: dir)
-    defer { harness.teardown() }
-    try await harness.waitForIcons(1)
-
-    let size = NSSize(width: 800, height: 600)
-    let first = harness.controller.pageSnapshotForTesting(page: 1, size: size)
-    #expect(first != nil, "the grid should have a second page to snapshot")
-
-    let second = harness.controller.pageSnapshotForTesting(page: 1, size: size)
-    // Identity, not equality: a cache hit returns the very same image.
-    #expect(first === second, "the second request re-rendered instead of reusing")
+/// The apps a neighbouring page's grid shows, in order, by icon key.
+@MainActor
+private func shownApps(in neighbour: NSView) -> [String]? {
+    guard let grid = neighbour.subviews.compactMap({ ($0 as? NSScrollView)?.documentView as? NSCollectionView }).first else {
+        return nil
+    }
+    return (0..<grid.numberOfItems(inSection: 0)).compactMap {
+        (grid.item(at: IndexPath(item: $0, section: 0)) as? GridCellItem)?.currentRequestKey
+    }
 }
 
-/// A page whose icons have not loaded yet renders with gaps. Keeping that
-/// picture meant every later swipe onto the page showed the same gaps, and the
-/// icons only reappeared when the live grid took over at the end of the drag —
-/// an icon that blinks out for the length of a swipe, on that page only,
-/// forever after the one unlucky swipe that cached it.
-@Test @MainActor func anIncompleteSnapshotIsNotKept() async throws {
-    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: dir) }
-    let harness = await GridHarness(appCount: 60, directory: dir)
-    defer { harness.teardown() }
-    // Deliberately no `waitForIcons`: the icons are still loading, which is
-    // exactly the state a swipe can catch a neighbouring page in.
-
-    let size = NSSize(width: 800, height: 600)
-    let first = harness.controller.pageSnapshotForTesting(page: 1, size: size)
-    let second = harness.controller.pageSnapshotForTesting(page: 1, size: size)
-    #expect(first !== second, "a snapshot drawn with missing icons was cached")
-
-    // Once everything is warm the same request does get cached.
-    try await harness.waitForIcons(1)
-    let warm = harness.controller.pageSnapshotForTesting(page: 1, size: size)
-    let warmAgain = harness.controller.pageSnapshotForTesting(page: 1, size: size)
-    #expect(warm === warmAgain, "a complete snapshot was re-rendered instead of reused")
+@MainActor
+private func appKeys(onPage page: Int, of model: GridModel) -> [String] {
+    model.pages[page].compactMap { item in
+        guard case .app(let id) = item else { return nil }
+        return model.record(for: id)?.iconCacheKey
+    }
 }
 
-/// A cached snapshot must not outlive the arrangement it depicts.
-@Test @MainActor func changingTheModelInvalidatesCachedSnapshots() async throws {
+/// The page beside the current one during a swipe used to be a picture,
+/// drawn on the CPU on the main thread at the first frame of the swipe — about
+/// 400ms here, 211-325ms in the app's own logs. It is now that page itself: a
+/// grid of the same cells over the live grid, kept a page away by its layer's
+/// translation. The cells are checked one by one because a collection view
+/// outside a scroll view lays out none, which the first version of this did.
+@Test @MainActor func aNeighbourPageIsThatPageLaidOutOverTheGrid() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
     let harness = await GridHarness(appCount: 60, directory: dir)
     defer { harness.teardown() }
     try await harness.waitForIcons(1)
+    let scrollView = try #require(harness.controller.view.subviews.compactMap { $0 as? NSScrollView }.first)
 
-    let size = NSSize(width: 800, height: 600)
-    let before = harness.controller.pageSnapshotForTesting(page: 1, size: size)
-    harness.controller.reload()
-    let after = harness.controller.pageSnapshotForTesting(page: 1, size: size)
-    #expect(before !== after, "a stale snapshot survived a model change")
+    for page in [0, 1] {
+        let neighbour = try #require(harness.controller.neighborPageForTesting(page: page))
+        harness.controller.view.addSubview(neighbour)
+        neighbour.layoutSubtreeIfNeeded()
+        defer { neighbour.removeFromSuperview() }
+
+        #expect(neighbour.frame == scrollView.frame)
+        #expect(shownApps(in: neighbour) == appKeys(onPage: page, of: harness.model))
+    }
 }
 
-/// A different size is a different picture, so it cannot reuse the entry.
-@Test @MainActor func aDifferentSizeRendersItsOwnSnapshot() async throws {
+/// Mid-swipe, the next page sits a page to the right of the grid and moves
+/// with it, and it is the next page's apps that it shows.
+@Test @MainActor func aSwipeBringsTheNextPageInBesideTheGrid() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
     let harness = await GridHarness(appCount: 60, directory: dir)
     defer { harness.teardown() }
     try await harness.waitForIcons(1)
+    let scrollView = try #require(harness.controller.view.subviews.compactMap { $0 as? NSScrollView }.first)
+    let grid = try #require(scrollView.documentView as? NSCollectionView)
+    let width = grid.bounds.width
 
-    let small = harness.controller.pageSnapshotForTesting(page: 1, size: NSSize(width: 800, height: 600))
-    let large = harness.controller.pageSnapshotForTesting(page: 1, size: NSSize(width: 1_000, height: 700))
-    #expect(small !== large)
+    let neighbour = try #require(harness.controller.pageDragForTesting(deltaX: -100))
+    let gridX = grid.layer?.value(forKeyPath: "transform.translation.x") as? CGFloat
+    let neighbourX = neighbour.layer?.value(forKeyPath: "transform.translation.x") as? CGFloat
+
+    #expect(gridX == -100)
+    #expect(neighbourX == width - 100)
+    #expect(shownApps(in: neighbour) == appKeys(onPage: 1, of: harness.model))
+
+    harness.controller.resetDragStateIfNeeded()
+    #expect(neighbour.superview == nil)
+}
+
+/// Clicks and scrolls belong to the live grid; the neighbouring page is only a
+/// view of where the drag is heading.
+@Test @MainActor func aNeighbourPageNeverTakesInput() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 60, directory: dir)
+    defer { harness.teardown() }
+
+    let neighbour = try #require(harness.controller.neighborPageForTesting(page: 1))
+    harness.controller.view.addSubview(neighbour)
+    neighbour.layoutSubtreeIfNeeded()
+    defer { neighbour.removeFromSuperview() }
+    let center = NSPoint(x: neighbour.frame.midX, y: neighbour.frame.midY)
+    #expect(neighbour.hitTest(center) == nil)
+}
+
+/// There is no page beyond the last.
+@Test @MainActor func thereIsNoNeighbourPastTheLastPage() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 60, directory: dir)
+    defer { harness.teardown() }
+
+    #expect(harness.controller.neighborPageForTesting(page: harness.model.pages.count) == nil)
 }
 
 // MARK: - Keyboard selection
