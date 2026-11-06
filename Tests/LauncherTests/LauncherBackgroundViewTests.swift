@@ -23,6 +23,38 @@ func glassMaterialIntensityClampsAndChangesAllMaterialParametersMonotonically() 
     #expect(middle.sheenOpacity == 0.35)
 }
 
+/// Strength used to change the blur radius without anything noticing, and in glass
+/// mode the "blur wallpaper" switch (which glass ignores) made every slider step
+/// look like a change.
+@Test @MainActor
+func theWallpaperIsPreparedAgainOnlyWhenWhatItWasPreparedWithChanged() {
+    var glass = LauncherBackgroundView.Configuration()
+    glass.mode = .glass
+    glass.materialIntensity = 0.35
+    glass.blursWallpaper = false
+    let prepared = LauncherBackgroundView.requestedBlurRadius(for: glass)
+
+    #expect(!LauncherBackgroundView.needsWallpaperReload(lastMode: .glass, lastRadius: prepared, configuration: glass),
+            "an unchanged glass configuration asked for a new image")
+
+    glass.materialIntensity = 0.36
+    #expect(!LauncherBackgroundView.needsWallpaperReload(lastMode: .glass, lastRadius: prepared, configuration: glass),
+            "a tiny strength step decoded the wallpaper again")
+
+    glass.materialIntensity = 0.9
+    #expect(LauncherBackgroundView.needsWallpaperReload(lastMode: .glass, lastRadius: prepared, configuration: glass),
+            "a large strength change left the blur as it was")
+
+    var wallpaper = LauncherBackgroundView.Configuration()
+    wallpaper.mode = .wallpaper
+    #expect(LauncherBackgroundView.needsWallpaperReload(lastMode: .glass, lastRadius: prepared, configuration: wallpaper))
+    #expect(LauncherBackgroundView.needsWallpaperReload(lastMode: nil, lastRadius: nil, configuration: wallpaper))
+
+    let blurred = LauncherBackgroundView.requestedBlurRadius(for: wallpaper)
+    wallpaper.blursWallpaper = false
+    #expect(LauncherBackgroundView.needsWallpaperReload(lastMode: .wallpaper, lastRadius: blurred, configuration: wallpaper))
+}
+
 @Test @MainActor
 func wallpaperBlurStaysSubtle() {
     #expect(LauncherBackgroundView.wallpaperBlurRadius(isEnabled: true) == 8)

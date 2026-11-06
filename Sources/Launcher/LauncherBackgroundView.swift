@@ -61,7 +61,8 @@ final class LauncherBackgroundView: NSView {
     /// is still dragging.  The last requested mode/blur pair is enough to
     /// decide when the wallpaper pixels themselves need to change.
     private var lastWallpaperMode: LauncherBackgroundMode?
-    private var lastWallpaperBlur: Bool?
+    /// The blur radius the wallpaper on screen was prepared with.
+    private var lastWallpaperRadius: CGFloat?
     /// `init` requests the wallpaper for the screen it is handed, and
     /// `LauncherWindowController.show()` then calls `update(screen:)` on the
     /// view it just built. Resolving the source is not free — it enumerates
@@ -182,7 +183,7 @@ final class LauncherBackgroundView: NSView {
             sheenLayer.opacity = material.sheenOpacity
             if reloadWallpaper {
                 lastWallpaperMode = .glass
-                lastWallpaperBlur = true
+                lastWallpaperRadius = material.blurRadius
                 requestWallpaper(radius: material.blurRadius, generation: requestGeneration)
             }
         case .wallpaper:
@@ -192,7 +193,7 @@ final class LauncherBackgroundView: NSView {
             sheenLayer.opacity = 0
             if reloadWallpaper {
                 lastWallpaperMode = .wallpaper
-                lastWallpaperBlur = configuration.blursWallpaper
+                lastWallpaperRadius = radius
                 requestWallpaper(radius: radius, generation: requestGeneration)
             }
         }
@@ -211,6 +212,34 @@ final class LauncherBackgroundView: NSView {
 
     static func wallpaperBlurRadius(isEnabled: Bool) -> CGFloat {
         isEnabled ? 8 : 0
+    }
+
+    /// Radii closer than this look the same, so a slider drag does not decode and
+    /// blur the wallpaper again for every step of it.
+    private static let radiusReloadStep: CGFloat = 4
+
+    /// The blur radius a configuration asks for: the glass strength's in glass
+    /// mode (the "blur wallpaper" switch is not consulted there), the switch's
+    /// otherwise.
+    static func requestedBlurRadius(for configuration: Configuration) -> CGFloat {
+        switch configuration.mode {
+        case .glass: return glassMaterialParameters(for: configuration.materialIntensity).blurRadius
+        case .wallpaper: return wallpaperBlurRadius(isEnabled: configuration.blursWallpaper)
+        }
+    }
+
+    /// Whether the image on screen was prepared differently from what the
+    /// configuration now asks for. It used to compare the mode and the switch
+    /// only: glass strength never reached the blur until something else forced a
+    /// reload, and in glass mode a switch left off made every slider step count as
+    /// a change.
+    static func needsWallpaperReload(
+        lastMode: LauncherBackgroundMode?,
+        lastRadius: CGFloat?,
+        configuration: Configuration
+    ) -> Bool {
+        guard lastMode == configuration.mode, let lastRadius else { return true }
+        return abs(lastRadius - requestedBlurRadius(for: configuration)) >= radiusReloadStep
     }
 
     private func requestWallpaper(radius: CGFloat, generation: Int) {
@@ -280,8 +309,11 @@ final class LauncherBackgroundView: NSView {
         self.configuration = configuration
         configurationGeneration &+= 1
         let generation = configurationGeneration
-        let wallpaperNeedsReload = lastWallpaperMode != configuration.mode
-            || lastWallpaperBlur != configuration.blursWallpaper
+        let wallpaperNeedsReload = Self.needsWallpaperReload(
+            lastMode: lastWallpaperMode,
+            lastRadius: lastWallpaperRadius,
+            configuration: configuration
+        )
         configurationTask?.cancel()
         configurationTask = Task { @MainActor [weak self] in
             // Slider updates arrive in bursts. Apply one latest configuration
