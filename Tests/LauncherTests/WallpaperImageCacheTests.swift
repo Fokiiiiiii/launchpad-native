@@ -698,6 +698,45 @@ func noAddedPhotosGiveNoUrl() throws {
     #expect(UserAddedPhotos.currentPhotoURL(in: root.appendingPathComponent("missing")) == nil)
 }
 
+// MARK: - A source that exists but cannot be drawn
+
+/// Existing is not the same as usable. A damaged picture or a file this process
+/// may not read used to leave the launcher with no background although another
+/// source would have worked.
+@Test func aSourceThatExistsButCannotBeDecodedFallsThroughToTheNextOne() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let broken = directory.appendingPathComponent("broken.png")
+    try Data("this is not an image".utf8).write(to: broken)
+    let good = try writeWallpaper(width: 400, height: 300, type: .png, in: directory)
+
+    let image = await WallpaperImageCache.loadAndBlur(
+        source: WallpaperSource(kind: .staticImage, url: broken),
+        fallbackSources: [
+            WallpaperSource(kind: .staticImage, url: directory.appendingPathComponent("missing.png")),
+            WallpaperSource(kind: .staticImage, url: good),
+        ],
+        radius: 0
+    )
+
+    #expect(image != nil)
+}
+
+@Test func noSourceThatCanBeDrawnGivesNoImage() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let broken = directory.appendingPathComponent("broken.png")
+    try Data("this is not an image".utf8).write(to: broken)
+
+    let image = await WallpaperImageCache.loadAndBlur(
+        source: WallpaperSource(kind: .staticImage, url: broken),
+        fallbackSources: [.unavailable],
+        radius: 0
+    )
+
+    #expect(image == nil)
+}
+
 /// Writes a flat-coloured image of the given pixel size, optionally tagged with
 /// an EXIF orientation the way a camera stores a photo taken sideways.
 private func writeWallpaper(width: Int, height: Int, type: UTType, orientation: Int? = nil, in directory: URL) throws -> URL {

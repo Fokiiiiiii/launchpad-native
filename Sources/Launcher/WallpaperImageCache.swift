@@ -571,12 +571,20 @@ enum WallpaperImageCache {
         let modificationDate: Date?
         let fileSize: UInt64?
         let radius: CGFloat
+        /// A captured window is the same window, at the same bounds, whatever it
+        /// now shows — nothing in the key notices a changed wallpaper or Space.
+        /// A time bucket gives that image a short life; a file has its
+        /// modification date and needs none.
+        let captureEpoch: Int?
     }
+
+    /// How long a captured wallpaper window is reused.
+    private static let captureLifetime: TimeInterval = 30
 
     private struct Descriptor {
         let key: CacheKey
         let source: WallpaperSource
-        let fallbackSource: WallpaperSource?
+        let fallbackSources: [WallpaperSource]
     }
 
     private static var cache: [CacheKey: CGImage] = [:]
@@ -613,7 +621,7 @@ enum WallpaperImageCache {
         let task = Task.detached(priority: .utility) {
             await Self.loadAndBlur(
                 source: descriptor.source,
-                fallbackSource: descriptor.fallbackSource,
+                fallbackSources: descriptor.fallbackSources,
                 radius: radius
             )
         }
@@ -646,7 +654,7 @@ enum WallpaperImageCache {
 
     private struct ResolvedSources {
         let source: WallpaperSource
-        let fallbackSource: WallpaperSource?
+        let fallbackSources: [WallpaperSource]
         let storeProvider: String?
         let hasScreenCaptureAccess: Bool
     }
@@ -699,33 +707,44 @@ enum WallpaperImageCache {
             ?? (SystemWallpaperStore.imageProviderIdentifiers.contains(storeProvider ?? "")
                 ? UserAddedPhotos.currentPhotoURL()
                 : nil)
+        // Files first. Listing every window on the system is the costly part of
+        // resolving, so it happens only when no file names the wallpaper.
+        let fileSource = WallpaperSourceResolver.resolve(
+            desktopURL: desktopURL,
+            configuredURL: configuredURL,
+            providerArtworkURL: storedFileURL
+        )
         // A preflight check only: it never prompts, and this app does not ask
         // for the permission.
         let hasScreenCaptureAccess = CGPreflightScreenCaptureAccess()
-        let source = WallpaperSourceResolver.resolve(
-            desktopURL: desktopURL,
-            configuredURL: configuredURL,
-            providerArtworkURL: storedFileURL,
-            windowCandidates: wallpaperWindowCandidates(),
-            targetBounds: targetBounds,
-            hasScreenCaptureAccess: hasScreenCaptureAccess
-        )
-        let fallbackSource: WallpaperSource?
-        if source.kind == .windowCapture {
-            // A WindowServer image can be unavailable when Screen Recording
-            // permission is denied. Keep the old file/Aerial path explicit so
-            // the utility task can try it without touching AppKit again.
-            fallbackSource = WallpaperSourceResolver.resolve(
+        let source = fileSource.kind != .unavailable
+            ? fileSource
+            : WallpaperSourceResolver.resolve(
                 desktopURL: desktopURL,
                 configuredURL: configuredURL,
-                providerArtworkURL: storedFileURL
+                providerArtworkURL: storedFileURL,
+                windowCandidates: wallpaperWindowCandidates(),
+                targetBounds: targetBounds,
+                hasScreenCaptureAccess: hasScreenCaptureAccess
             )
-        } else {
-            fallbackSource = nil
+
+        // What to try when the chosen source is there but cannot be drawn — a
+        // damaged picture, a file this process may not read, a movie that will
+        // not decode. Existing is not the same as usable, so the other places the
+        // wallpaper could come from are kept in order, each tried in turn.
+        var fallbackSources: [WallpaperSource] = []
+        let alternatives = [
+            fileSource,
+            WallpaperSourceResolver.resolve(desktopURL: nil, configuredURL: nil, providerArtworkURL: storedFileURL),
+            WallpaperSourceResolver.resolve(desktopURL: nil, configuredURL: configuredURL, providerArtworkURL: nil),
+        ]
+        for candidate in alternatives
+        where candidate.kind != .unavailable && candidate != source && !fallbackSources.contains(candidate) {
+            fallbackSources.append(candidate)
         }
         return ResolvedSources(
             source: source,
-            fallbackSource: fallbackSource,
+            fallbackSources: fallbackSources,
             storeProvider: storeProvider,
             hasScreenCaptureAccess: hasScreenCaptureAccess
         )
@@ -819,7 +838,10 @@ enum WallpaperImageCache {
             captureBounds: source.captureBounds,
             modificationDate: modificationDate,
             fileSize: fileSize,
-            radius: radius
+            radius: radius,
+            captureEpoch: source.kind == .windowCapture
+                ? Int(Date().timeIntervalSince1970 / captureLifetime)
+                : nil
         )
         DiagnosticsLog.launcher.info(
             "wallpaper descriptor: sourceKind=\(source.kind.rawValue, privacy: .public), displayID=\(displayID, privacy: .public), windowID=\(source.windowID ?? 0, privacy: .public), storeProvider=\(resolved.storeProvider ?? "<none>", privacy: .public), captureAccess=\(resolved.hasScreenCaptureAccess, privacy: .public), resolvedURL=\(source.url?.path ?? "<unavailable>", privacy: .private), radius=\(radius, privacy: .public), cacheHit=\(cache[key] != nil, privacy: .public)"
@@ -827,7 +849,7 @@ enum WallpaperImageCache {
         return Descriptor(
             key: key,
             source: source,
-            fallbackSource: resolved.fallbackSource
+            fallbackSources: resolved.fallbackSources
         )
     }
 
@@ -861,21 +883,19 @@ enum WallpaperImageCache {
         cacheOrder.removeAll()
     }
 
-    nonisolated private static func loadAndBlur(
+    /// The first of `source` and then `fallbackSources` that can actually be
+    /// drawn, blurred.
+    nonisolated static func loadAndBlur(
         source: WallpaperSource,
-        fallbackSource: WallpaperSource?,
+        fallbackSources: [WallpaperSource],
         radius: CGFloat
     ) async -> CGImage? {
-        if let image = await loadSourceImage(source) {
-            return blur(image, radius: radius)
+        for candidate in [source] + fallbackSources {
+            if let image = await loadSourceImage(candidate) {
+                return blur(image, radius: radius)
+            }
         }
-
-        guard source.kind == .windowCapture,
-              let fallbackSource,
-              let fallbackImage = await loadSourceImage(fallbackSource) else {
-            return nil
-        }
-        return blur(fallbackImage, radius: radius)
+        return nil
     }
 
     nonisolated static func loadSourceImage(
@@ -946,21 +966,25 @@ enum WallpaperImageCache {
     /// AVFoundation to stop generation rather than leaving a movie running.
     nonisolated private static func videoFrame(from url: URL) async -> CGImage? {
         let asset = AVURLAsset(url: url)
-        let duration: CMTime
-        do {
-            duration = try await asset.load(.duration)
-        } catch {
-            duration = .zero
-        }
-        let durationSeconds = duration.isNumeric ? duration.seconds : 0
-        let sampleSeconds = durationSeconds.isFinite && durationSeconds > 0
-            ? min(durationSeconds * 0.5, 1.0)
-            : 0
-        let time = CMTime(seconds: sampleSeconds, preferredTimescale: 600)
 
+        // The deadline starts before the duration is read, not after: on a slow
+        // volume or a damaged movie that read is where the time goes, and
+        // while it ran nothing bounded it — the request held one of the two
+        // load slots, and every later wallpaper request waited behind it.
         return await withTaskGroup(of: CGImage?.self) { group in
             group.addTask {
-                await extractVideoFrame(asset: asset, at: time)
+                let duration: CMTime
+                do {
+                    duration = try await asset.load(.duration)
+                } catch {
+                    duration = .zero
+                }
+                let durationSeconds = duration.isNumeric ? duration.seconds : 0
+                let sampleSeconds = durationSeconds.isFinite && durationSeconds > 0
+                    ? min(durationSeconds * 0.5, 1.0)
+                    : 0
+                let time = CMTime(seconds: sampleSeconds, preferredTimescale: 600)
+                return await extractVideoFrame(asset: asset, at: time)
             }
             group.addTask {
                 do {
