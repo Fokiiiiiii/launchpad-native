@@ -294,11 +294,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             #endif
 
             var skippedRestoredSnapshot = false
-            let restoredIDs = Set(cachedRecords.map { $0.id })
+            // The first snapshot is skipped only when it is exactly what was
+            // restored. Comparing the set of apps alone also skipped one that had
+            // the same apps with new details — a changed display name after a
+            // language switch — so those waited for the next change to show.
+            let restoredByID = Dictionary(cachedRecords.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             for await update in await scanner.updates() {
                 if !skippedRestoredSnapshot {
                     skippedRestoredSnapshot = true
-                    if Set(update.records.map { $0.id }) == restoredIDs {
+                    if Dictionary(update.records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) == restoredByID {
                         continue
                     }
                 }

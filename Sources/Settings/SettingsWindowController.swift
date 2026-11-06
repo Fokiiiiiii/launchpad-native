@@ -175,7 +175,10 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     public func closeWithoutKeyReclaim() {
-        dismissal.suppressNextKeyReclaim()
+        // Only a window that exists will report that it closed — that is what
+        // clears the flag. Setting it for one that is not showing left it set for
+        // the next ordinary close, which then skipped giving the key back.
+        if window != nil { dismissal.suppressNextKeyReclaim() }
         window?.close()
     }
 
