@@ -173,6 +173,43 @@ private func momentumEvent(dx: Double, momentum: CGMomentumScrollPhase) -> NSEve
     #expect(ended == [60, 60])
 }
 
+/// A trackpad lifts its fingers (`.ended`) and then keeps sending momentum. That
+/// tail belongs to the swipe that just finished; taken as a new one it turned each
+/// swipe into two page turns.
+@Test @MainActor func theMomentumAfterATrackpadSwipeIsNotASecondSwipe() throws {
+    let recognizer = SwipePageRecognizer()
+    var began = 0
+    var ended: [CGFloat] = []
+    recognizer.callbacks.onBegan = { began += 1 }
+    recognizer.callbacks.onEnded = { delta, _ in ended.append(delta) }
+
+    guard let start = scrollEvent(dx: 0, dy: 0, phase: .began),
+          let move = scrollEvent(dx: 30, dy: 0, phase: .changed),
+          let lift = scrollEvent(dx: 0, dy: 0, phase: .ended),
+          let tailStart = momentumEvent(dx: 0, momentum: .begin),
+          let tailMove = momentumEvent(dx: 30, momentum: .continuous),
+          let tailEnd = momentumEvent(dx: 0, momentum: .end) else { return }
+    recognizer.handle(start)
+    recognizer.handle(move)
+    recognizer.handle(move)
+    recognizer.handle(lift)
+    recognizer.handle(tailStart)
+    recognizer.handle(tailMove)
+    recognizer.handle(tailMove)
+    recognizer.handle(tailMove)
+    recognizer.handle(tailEnd)
+
+    #expect(began == 1, "the momentum began a second swipe")
+    #expect(ended == [60], "the momentum ended a second swipe")
+
+    // And a swipe after that is still recognised.
+    recognizer.handle(start)
+    recognizer.handle(move)
+    recognizer.handle(move)
+    recognizer.handle(lift)
+    #expect(ended == [60, 60])
+}
+
 /// A plain wheel mouse has no phases at all, and was once swallowed entirely by
 /// the trackpad-only guard.
 @Test @MainActor func plainWheelTicksPageDiscretely() throws {

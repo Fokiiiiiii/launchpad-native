@@ -28,6 +28,9 @@ final class SwipePageRecognizer {
     private var swipeAxis: SwipeAxis?
     private var swipeEngaged = false
     private var swipeCompletedForGesture = false
+    /// The finished gesture ended through its scroll phase, as a real trackpad's
+    /// does: the momentum events that follow are its tail, not a second swipe.
+    private var completedByScrollPhase = false
     private var recentSamples: [(delta: CGFloat, time: CFTimeInterval)] = []
     /// A single confirmed-horizontal `.changed` sample used to fire
     /// `onSwipeBegan` unconditionally last time — ambient trackpad jitter
@@ -78,7 +81,11 @@ final class SwipePageRecognizer {
         // A series that starts with a momentum phase and no scroll phase is
         // still a new series: left alone, the state of the one before it — which
         // is marked complete — suppressed everything that followed.
-        let momentumBegan = event.phase == [] && event.momentumPhase.contains(.began)
+        // The tail of a swipe that a scroll phase has just ended is not one: a
+        // trackpad lifts its fingers (`.ended`) and keeps sending momentum, and
+        // reading that as a new series turned every swipe into two page turns.
+        let continuesFinishedSwipe = swipeCompletedForGesture && completedByScrollPhase
+        let momentumBegan = event.phase == [] && event.momentumPhase.contains(.began) && !continuesFinishedSwipe
         if event.phase.contains(.mayBegin) || event.phase.contains(.began) || momentumBegan {
             idleEndWork?.cancel()
             swipeAccumulatedDeltaX = 0
@@ -86,6 +93,7 @@ final class SwipePageRecognizer {
             swipeAxis = nil
             swipeEngaged = false
             swipeCompletedForGesture = false
+            completedByScrollPhase = false
             recentSamples.removeAll()
             DiagnosticsLog.grid.notice("scrollWheel: began/mayBegin")
         }
@@ -133,6 +141,7 @@ final class SwipePageRecognizer {
             || (momentumOnly && (event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled)))
         guard isEnded, !swipeCompletedForGesture else { return }
         idleEndWork?.cancel()
+        completedByScrollPhase = event.phase.contains(.ended) || event.phase.contains(.cancelled)
         finishGesture(synthetic: false)
     }
 
