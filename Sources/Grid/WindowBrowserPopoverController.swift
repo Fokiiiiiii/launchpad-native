@@ -121,7 +121,9 @@ final class WindowBrowserPopoverController: NSViewController, NSCollectionViewDa
 
     private func closeWindow(at index: Int) {
         guard windows.indices.contains(index) else { return }
-        WindowActivator.close(windows[index])
+        // Only a window that really was closed leaves the list — otherwise the
+        // row disappears while the window is still there.
+        guard WindowActivator.close(windows[index]) else { return }
         windows.remove(at: index)
         collectionView.reloadData()
         emptyLabel.isHidden = !windows.isEmpty
@@ -129,7 +131,7 @@ final class WindowBrowserPopoverController: NSViewController, NSCollectionViewDa
 
     private func minimizeWindow(at index: Int) {
         guard windows.indices.contains(index) else { return }
-        WindowActivator.minimize(windows[index])
+        guard WindowActivator.minimize(windows[index]) else { return }
         onDismiss()
     }
 }
