@@ -84,7 +84,9 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     private static let pageControlHeight: CGFloat = 28
     /// How far a page slides as it leaves/enters, matching the main grid's own
     /// `pageSlideOffset`.
-    private static let pageSlideOffset: CGFloat = 18
+    private static var pageSlideOffset: CGFloat {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 18
+    }
     static func displayedColumnCount(itemCount: Int, configuredColumns: Int) -> Int {
         min(max(itemCount, 1), max(configuredColumns, 1))
     }

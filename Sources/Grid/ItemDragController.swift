@@ -985,6 +985,8 @@ final class ItemDragController {
     // lifetime wouldn't have anything meaningful to attach to.
 
     private func startWobble() {
+        // An endless shake is exactly what the setting is there to switch off.
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         for item in collectionView.visibleItems() {
             guard let layer = item.view.layer else { continue }
             // Confirmed too fast/large by the user ("揺れが不気味") at the

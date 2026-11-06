@@ -437,7 +437,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// The swap is wrapped in a short directional slide (later page slides in
     /// from the right, mirrored going back) while the collection view stays
     /// opaque, so there is no fade-to-black frame between pages.
-    private static let pageSlideOffset: CGFloat = 18
+    /// No slide under Reduce Motion: the page still changes, without travelling.
+    private static var pageSlideOffset: CGFloat {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 18
+    }
     private var pageTransitionGeneration = 0
 
     /// Where the keyboard selection lands on a page the arrow keys are still
@@ -509,7 +512,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         layer?.setValue(exitTarget, forKeyPath: "transform.translation.x")
         CATransaction.commit()
 
-        let settleDelay = PageTransition.swapDelay(response: PageTransition.exitResponse)
+        let settleDelay = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            ? 0.05
+            : PageTransition.swapDelay(response: PageTransition.exitResponse)
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) { [weak self] in
             Task { @MainActor in
                 guard let self, self.pageTransitionGeneration == generation else { return }

@@ -428,6 +428,8 @@ final class LauncherBackgroundView: NSView {
     }
 
     private func addBloomDrift(to layer: CALayer) {
+        // The drift never stops, which is what Reduce Motion asks not to have.
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         let animation = CAKeyframeAnimation(keyPath: "transform")
         animation.values = [
             CATransform3DIdentity,
