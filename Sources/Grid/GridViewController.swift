@@ -372,6 +372,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
 
     public func moveSelection(deltaColumns: Int, deltaRows: Int) {
+        guard pendingEdgeSelection == nil else { return }
         guard let current = collectionView.selectionIndexPaths.first else {
             select(IndexPath(item: 0, section: 0))
             return
@@ -382,18 +383,18 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         if flat < 0 {
             guard currentPage > 0 else { return }
-            jumpToPage(currentPage - 1)
-            flat = max(model.pages[currentPage].count - 1, 0)
+            jumpToPage(currentPage - 1, landingOn: .last)
+            return
         } else if flat >= count {
             guard currentPage < model.pages.count - 1 else { return }
-            jumpToPage(currentPage + 1)
-            flat = 0
+            jumpToPage(currentPage + 1, landingOn: .first)
+            return
         }
         select(IndexPath(item: flat, section: 0))
     }
 
     public func launchSelection() {
-        guard let indexPath = collectionView.selectionIndexPaths.first else { return }
+        guard pendingEdgeSelection == nil, let indexPath = collectionView.selectionIndexPaths.first else { return }
         activate(at: indexPath)
     }
 
@@ -439,6 +440,14 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private static let pageSlideOffset: CGFloat = 18
     private var pageTransitionGeneration = 0
 
+    /// Where the keyboard selection lands on a page the arrow keys are still
+    /// turning to. The page is swapped in a third of a second after the key, so
+    /// the selection cannot be set at the key press: it would be painted on the
+    /// page that is leaving and lost by the reload. Non-nil exactly while such a
+    /// turn is in flight, and arrow keys and Return are held off until it lands.
+    private enum PageEdge { case first, last }
+    private var pendingEdgeSelection: PageEdge?
+
     /// Timings for moving between pages, gathered in one place because they
     /// have to move together: the data swap is scheduled off the same
     /// `response` that drives the spring, so changing one alone either shows
@@ -465,7 +474,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
     }
 
-    private func jumpToPage(_ index: Int) {
+    private func jumpToPage(_ index: Int, landingOn edge: PageEdge? = nil) {
         guard model.pages.indices.contains(index), index != currentPage || collectionView.numberOfSections == 0 else { return }
         // Page dots and the arrow keys reach here too, and mid-drag they have
         // the same problem as a swipe — see the swipe wiring in `loadView`.
@@ -473,6 +482,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         let start = DispatchTime.now()
         pageTransitionGeneration &+= 1
         let generation = pageTransitionGeneration
+        pendingEdgeSelection = edge
         prefetchAdjacentPageIcons(including: index)
         collectionView.wantsLayer = true
         collectionView.alphaValue = 1
@@ -518,6 +528,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 self.resetScrollPosition()
                 self.pageControl.currentPage = index
                 self.prefetchAdjacentPageIcons()
+                if let edge = self.pendingEdgeSelection {
+                    self.pendingEdgeSelection = nil
+                    let count = self.model.pages[index].count
+                    if count > 0 { self.select(IndexPath(item: edge == .first ? 0 : count - 1, section: 0)) }
+                }
 
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)

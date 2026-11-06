@@ -390,6 +390,37 @@ private func accessibilityDescendants(of root: Any) -> [Any] {
     )
 }
 
+/// The next page arrives a third of a second after the arrow key, so the
+/// selection has to wait for it: set at the key press it was painted on the page
+/// that was leaving and lost by the reload, and a Return in between launched an
+/// app of the old page.
+@Test @MainActor func arrowKeyAcrossAPageEdgeSelectsTheFirstAppOfTheNextPage() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 80, directory: dir)
+    defer { harness.teardown() }
+    try await harness.waitForIcons(1)
+
+    let pages = harness.model.pages
+    try #require(pages.count > 1)
+    guard case .app(let firstOfNextPage) = pages[1][0],
+          let expected = harness.model.record(for: firstOfNextPage)?.bundleIdentifier
+    else { throw GridTestError.unexpectedLayout }
+
+    harness.controller.moveSelection(deltaColumns: 0, deltaRows: 0)
+    harness.controller.moveSelection(deltaColumns: pages[0].count - 1, deltaRows: 0)
+    harness.controller.moveSelection(deltaColumns: 1, deltaRows: 0)
+
+    harness.controller.launchSelection()
+    #expect(harness.launchedApps.isEmpty, "Return during the page turn launched an app of the old page")
+
+    try await Task.sleep(for: .milliseconds(900))
+    harness.controller.launchSelection()
+    #expect(harness.launchedApps == [expected], "the selection did not land on the new page's first app")
+}
+
+private enum GridTestError: Error { case unexpectedLayout }
+
 /// The tile hugs the icon rather than the icon *and* its label: it should read
 /// as the icon sitting on a tile, and a band wide enough to hold a long name
 /// reads as a text selection instead.
