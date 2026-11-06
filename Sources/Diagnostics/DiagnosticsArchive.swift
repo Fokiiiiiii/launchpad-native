@@ -79,7 +79,7 @@ public enum DiagnosticsArchive {
     }
 
     /// Reads this app's entries from the unified log, newest window first.
-    static func readEntries(days: Int, now: Date = Date()) -> [(date: Date, line: String)] {
+    @Sendable static func readEntries(days: Int, now: Date) -> [(date: Date, line: String)] {
         let since = now.addingTimeInterval(-Double(days) * 86_400)
         let formatter = ISO8601DateFormatter()
         formatter.timeZone = .current
@@ -117,8 +117,23 @@ public enum DiagnosticsArchive {
         days: Int = defaultDayCount,
         entriesPerDay: Int = defaultEntriesPerDay
     ) async throws -> Summary {
+        try await writeInBackground(
+            to: destination, days: days, entriesPerDay: entriesPerDay, reader: readEntries
+        )
+    }
+
+    /// The same with the source of the entries given. Tests pass their own: the
+    /// real one is the machine's unified log, whose enumeration can wait on the
+    /// logging daemon for as long as it likes — on a CI runner it waited forever
+    /// and held the whole test run.
+    static func writeInBackground(
+        to destination: URL,
+        days: Int,
+        entriesPerDay: Int,
+        reader: @escaping @Sendable (Int, Date) -> [(date: Date, line: String)]
+    ) async throws -> Summary {
         try await Task.detached(priority: .utility) {
-            try write(to: destination, days: days, entriesPerDay: entriesPerDay)
+            try write(to: destination, days: days, entriesPerDay: entriesPerDay, reader: reader)
         }.value
     }
 
@@ -132,7 +147,17 @@ public enum DiagnosticsArchive {
         entriesPerDay: Int = defaultEntriesPerDay,
         now: Date = Date()
     ) throws -> Summary {
-        let entries = readEntries(days: days, now: now)
+        try write(to: destination, days: days, entriesPerDay: entriesPerDay, now: now, reader: readEntries)
+    }
+
+    static func write(
+        to destination: URL,
+        days: Int,
+        entriesPerDay: Int,
+        now: Date = Date(),
+        reader: (Int, Date) -> [(date: Date, line: String)]
+    ) throws -> Summary {
+        let entries = reader(days, now)
         let grouped = groupByDay(entries, entriesPerDay: entriesPerDay)
 
         // The zip names its top-level folder after this directory, so the

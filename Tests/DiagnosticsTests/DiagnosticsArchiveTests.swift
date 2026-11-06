@@ -90,13 +90,22 @@ private func entry(_ day: String, _ hour: Int, _ text: String) -> (date: Date, l
 // MARK: archive
 
 /// End to end against the real log store and a real zip.
+/// Entries given to the writer instead of the machine's unified log. Reading the
+/// real one from a test hung a CI runner indefinitely inside the logging daemon's
+/// enumeration, taking every other test with it.
+private let stubbedEntries: @Sendable (Int, Date) -> [(date: Date, line: String)] = { _, now in
+    [(now, "2026-01-01T00:00:00Z [test] [notice] a stubbed entry")]
+}
+
 @Test func writingAnArchiveProducesAZipContainingDailyLogs() throws {
     DiagnosticsLog.appHost.notice("archive test marker")
     let destination = FileManager.default.temporaryDirectory
         .appendingPathComponent("logs-\(UUID().uuidString).zip")
     defer { try? FileManager.default.removeItem(at: destination) }
 
-    let summary = try DiagnosticsArchive.write(to: destination, days: 30)
+    let summary = try DiagnosticsArchive.write(
+        to: destination, days: 30, entriesPerDay: DiagnosticsArchive.defaultEntriesPerDay, reader: stubbedEntries
+    )
 
     #expect(FileManager.default.fileExists(atPath: destination.path))
     #expect(summary.byteCount > 0)
@@ -116,8 +125,12 @@ private func entry(_ day: String, _ hour: Int, _ text: String) -> (date: Date, l
         .appendingPathComponent("logs-\(UUID().uuidString).zip")
     defer { try? FileManager.default.removeItem(at: destination) }
 
-    _ = try DiagnosticsArchive.write(to: destination, days: 1)
-    let second = try DiagnosticsArchive.write(to: destination, days: 1)
+    _ = try DiagnosticsArchive.write(
+        to: destination, days: 1, entriesPerDay: DiagnosticsArchive.defaultEntriesPerDay, reader: stubbedEntries
+    )
+    let second = try DiagnosticsArchive.write(
+        to: destination, days: 1, entriesPerDay: DiagnosticsArchive.defaultEntriesPerDay, reader: stubbedEntries
+    )
     #expect(second.byteCount > 0)
 }
 
@@ -164,7 +177,9 @@ private func entry(_ day: String, _ hour: Int, _ text: String) -> (date: Date, l
     let destination = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).zip")
     defer { try? FileManager.default.removeItem(at: destination) }
 
-    let summary = try await DiagnosticsArchive.writeInBackground(to: destination, days: 1)
+    let summary = try await DiagnosticsArchive.writeInBackground(
+        to: destination, days: 1, entriesPerDay: DiagnosticsArchive.defaultEntriesPerDay, reader: stubbedEntries
+    )
 
     #expect(FileManager.default.fileExists(atPath: destination.path))
     #expect(summary.byteCount > 0)
