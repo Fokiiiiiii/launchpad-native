@@ -85,12 +85,17 @@ public enum LegacyLaunchpadImporter {
             (childrenByParent[parentID] ?? []).sorted { $0.ordering < $1.ordering }.map(\.rowid)
         }
 
-        func collectAppBundleIDs(under parentID: Int64) -> [String] {
-            sortedChildren(of: parentID).flatMap { child -> [String] in
+        // The parent links come from a database that can be damaged. A loop
+        // among them would otherwise be followed for ever, so each row is
+        // visited once per walk.
+        func collectAppBundleIDs(under parentID: Int64, visited: Set<Int64> = []) -> [String] {
+            guard !visited.contains(parentID) else { return [] }
+            let path = visited.union([parentID])
+            return sortedChildren(of: parentID).flatMap { child -> [String] in
                 if let bundleID = bundleIDByItem[child] {
                     return [bundleID]
                 }
-                return collectAppBundleIDs(under: child)
+                return collectAppBundleIDs(under: child, visited: path)
             }
         }
 
@@ -106,7 +111,9 @@ public enum LegacyLaunchpadImporter {
             return .app(identifier)
         }
 
+        var walked: Set<Int64> = []
         func walk(parentID: Int64) {
+            guard walked.insert(parentID).inserted else { return }
             for child in sortedChildren(of: parentID) {
                 if let bundleID = bundleIDByItem[child] {
                     if let item = resolveOrMarkUnresolved(bundleID) {

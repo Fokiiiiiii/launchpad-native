@@ -826,6 +826,11 @@ public final class GridModel {
         for folder in result.folders {
             folders[folder.id] = folder
         }
+        // The importer puts a whole folder on one page. A saved layout is split
+        // to the folder page size when it loads; an import is applied after
+        // that, so without this a large folder stayed on one page — more icons
+        // than the panel can show — until the next launch repaired it.
+        normalizeFolderPages()
         pages = [[]]
         // `unplacedAppOrder` already has folder placeholders interleaved at
         // their original relative position (see LegacyLaunchpadImporter).

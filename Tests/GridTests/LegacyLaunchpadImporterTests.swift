@@ -84,6 +84,32 @@ private func makeFixtureDatabase(at url: URL) throws {
     }
 }
 
+/// Each row has one parent, so a loop can be reached from the root only through
+/// a row that is its own parent. Following that for ever overflowed the stack.
+@Test func aRowThatIsItsOwnParentDoesNotSendTheImportRoundInCircles() throws {
+    let dbURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).db")
+    defer { try? FileManager.default.removeItem(at: dbURL) }
+    var db: OpaquePointer?
+    #expect(sqlite3_open(dbURL.path, &db) == SQLITE_OK)
+    defer { sqlite3_close(db) }
+    let statements = [
+        "CREATE TABLE items (rowid INTEGER PRIMARY KEY, uuid VARCHAR, flags INTEGER, type INTEGER, parent_id INTEGER, ordering INTEGER)",
+        "CREATE TABLE apps (item_id INTEGER PRIMARY KEY, title VARCHAR, bundleid VARCHAR, storeid VARCHAR, category_id INTEGER, moddate REAL, bookmark BLOB)",
+        "CREATE TABLE groups (item_id INTEGER PRIMARY KEY, category_id INTEGER, title VARCHAR)",
+        // The root names itself as its parent.
+        "INSERT INTO items (rowid, uuid, flags, type, parent_id, ordering) VALUES (1, 'ROOTPAGE', 1, 1, 1, 0)",
+        "INSERT INTO items (rowid, uuid, flags, type, parent_id, ordering) VALUES (10, 'app-a', 0, 4, 1, 0)",
+        "INSERT INTO apps (item_id, title, bundleid) VALUES (10, 'AppA', 'com.example.a')",
+    ]
+    for sql in statements {
+        #expect(sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK)
+    }
+
+    let result = LegacyLaunchpadImporter.importLegacyLayout(from: dbURL, matching: [record("AppA", id: "com.example.a")])
+
+    #expect(result.unplacedAppOrder.count == 1)
+}
+
 @Test func importReturnsEmptyResultForMissingRoot() throws {
     let dbURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).db")
     defer { try? FileManager.default.removeItem(at: dbURL) }

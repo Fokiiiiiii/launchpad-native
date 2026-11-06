@@ -147,6 +147,32 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(restoredIDs == Set(["normal", "menubar"]))
 }
 
+/// The importer puts a whole folder on one page, and the split to the folder
+/// page size used to happen only when a saved layout was loaded — so a first
+/// import left a big folder with more icons than its panel can show.
+@Test @MainActor func aLegacyFolderLargerThanAFolderPageIsSplitAtOnce() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+
+    let limit = model.gridSettings.folderGridSize
+    let apps = (0..<(limit * 2 + 3)).map { record("App\($0)", id: "app\($0)") }
+    let folder = Folder(name: "Big", pages: [apps.map { .app($0.id.asPersistenceIdentifier) }])
+    let result = LegacyImportResult(
+        folders: [folder],
+        unplacedAppOrder: [.folder(folder.id)],
+        unresolvedBundleIDs: []
+    )
+
+    #expect(model.applyLegacyImportIfFirstRun(result))
+
+    let imported = try #require(model.folders[folder.id])
+    #expect(imported.pages.count == 3)
+    #expect(imported.pages.allSatisfy { $0.count <= limit })
+    #expect(imported.pages.flatMap { $0 }.count == apps.count, "nothing was dropped by the split")
+}
+
 @Test @MainActor func legacyAndPersistedItemsPruneBackgroundOnlyRecords() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
