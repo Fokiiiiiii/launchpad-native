@@ -4,3 +4,4 @@
 .DS_Store
 .serena/
 code_memory.db*
+.idea
