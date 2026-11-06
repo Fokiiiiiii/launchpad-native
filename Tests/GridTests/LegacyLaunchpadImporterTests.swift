@@ -26,8 +26,8 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
     )
 }
 
-/// Builds a tiny fixture Launchpad DB matching the real schema
-/// (`ReverseEngineering/Contracts/open-items.md`): root -> holding page ->
+/// Builds a tiny fixture Launchpad DB matching the real schema: root ->
+/// holding page ->
 /// [one bare app, one folder with two apps].
 private func makeFixtureDatabase(at url: URL) throws {
     var db: OpaquePointer?

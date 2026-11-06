@@ -51,8 +51,8 @@ public enum SortMode: String, Codable, Sendable {
     case lastUsed
 }
 
-/// Selectable app-icon designs — all original artwork (see
-/// `Tools/IconGenerator`), never a reproduction of Apple's or any
+/// Selectable app-icon designs — all original artwork, never a reproduction
+/// of Apple's or any
 /// competitor's actual icon. Adding new raw-`String` cases here is
 /// backward compatible on its own, same reasoning as `SortMode` above.
 public enum AppIconStyle: String, Codable, Sendable, CaseIterable {

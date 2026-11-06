@@ -2,7 +2,7 @@ import Foundation
 
 /// Pure classification of a raw `NX_SYSDEFINED` special-key event, kept free
 /// of `CGEventTap`/`NSEvent` so the bit-packing logic is unit-testable.
-/// Verified against `ReverseEngineering/Contracts/f4-hid.md`:
+/// Verified on real hardware:
 /// `NX_KEYTYPE_LAUNCH_PANEL = 13`, subtype `NX_SUBTYPE_AUX_CONTROL_BUTTONS = 8`,
 /// `data1` packs `(keyCode << 16) | keyFlags` where `keyFlags` bit 8 is the
 /// down/up state and bit 0 is the auto-repeat flag.

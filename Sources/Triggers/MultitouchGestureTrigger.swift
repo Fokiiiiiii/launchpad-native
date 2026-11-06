@@ -1,8 +1,7 @@
 import Diagnostics
 import Foundation
 
-// Verified against ReverseEngineering/Contracts/multitouch.md by live
-// capture on this machine — not a guessed layout.
+// Verified by live capture on this machine — not a guessed layout.
 struct MTPoint { var x: Float; var y: Float }
 struct MTReadout { var position: MTPoint; var velocity: MTPoint }
 struct Finger {

@@ -2,8 +2,8 @@ import AppKit
 import Diagnostics
 
 /// Captures the F4/Launch Panel/Spotlight key globally via `CGEventTap` at
-/// `.cghidEventTap` (verified installable from this machine in Phase 1 —
-/// `ReverseEngineering/Contracts/f4-hid.md`) and toggles the launcher.
+/// `.cghidEventTap` (verified installable from this machine) and toggles the
+/// launcher.
 ///
 /// When enabled, the tap uses `.defaultTap` (not `.listenOnly`) so the key
 /// event is *consumed* — the system's own Spotlight/Launchpad handling for

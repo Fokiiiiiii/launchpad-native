@@ -1,8 +1,8 @@
 import Foundation
 
 /// Turns a directory tree into `ApplicationRecord`s. Kept free of any
-/// LaunchServices SPI dependency — per `ReverseEngineering/Contracts/launchservices.md`,
-/// that Tier 3 API's selectors are not yet verified, so discovery here relies
+/// LaunchServices SPI dependency — that Tier 3 API's selectors are not
+/// verified, so discovery here relies
 /// only on `Bundle`, `FileManager`, and the public `Security` framework.
 enum ApplicationBundleReader {
     /// What a previous scan already learned about a bundle. Reading the code

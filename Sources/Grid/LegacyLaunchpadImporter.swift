@@ -4,8 +4,8 @@ import Persistence
 import SQLite3
 
 /// Read-only importer for the pre-macOS-26 Classic Launchpad SQLite DB
-/// (`ReverseEngineering/Contracts/open-items.md`: confirmed present and
-/// non-empty on this machine, schema matches exactly). Never writes to
+/// (confirmed present and non-empty on this machine, schema matches
+/// exactly). Never writes to
 /// Apple's storage — only reads.
 ///
 /// Fidelity note: this reconstructs folder membership/names and app

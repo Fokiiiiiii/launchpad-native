@@ -7,9 +7,8 @@ import ScreenCaptureKit
 /// on this machine including inside a real `NSApplication` context (a bare
 /// command-line probe crashed with a `CGS_REQUIRE_INIT` assertion; this
 /// app's normal AppKit run loop doesn't have that problem). No private
-/// SkyLight enumeration API was needed for this — see
-/// `ReverseEngineering/Contracts/skylight.md` for why Space *association*
-/// still needs the private API as a Tier 2 addition, which this module
+/// SkyLight enumeration API was needed for this. Space *association*
+/// would still need the private API as a Tier 2 addition, which this module
 /// doesn't implement yet (see the type doc comment on `WindowActivator`).
 public enum WindowEnumerator {
     /// Windows belonging to any known system-owned surface (menu bar, Dock,

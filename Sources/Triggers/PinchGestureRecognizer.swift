@@ -1,8 +1,7 @@
 import Foundation
 
 /// One trackpad contact, reduced to what the recognizer needs. Maps
-/// directly from the verified `Finger` struct
-/// (`ReverseEngineering/Contracts/multitouch.md`) at the call site.
+/// directly from the verified `Finger` struct at the call site.
 public struct TouchSample: Sendable, Equatable {
     public let id: Int32
     public let x: Float

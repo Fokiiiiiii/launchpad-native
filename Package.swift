@@ -88,41 +88,6 @@ let package = Package(
             dependencies: ["Diagnostics", "Localization", "DesignSystem"],
             path: "Sources/WhatsNew"
         ),
-        .executableTarget(
-            name: "ContractProbe",
-            path: "Tools/ContractProbe"
-        ),
-        .executableTarget(
-            name: "CatalogProbe",
-            dependencies: ["Catalog"],
-            path: "Tools/CatalogProbe"
-        ),
-        .executableTarget(
-            name: "MultitouchProbe",
-            path: "Tools/MultitouchProbe"
-        ),
-        .executableTarget(
-            name: "WindowBrowserProbe",
-            dependencies: ["WindowBrowser"],
-            path: "Tools/WindowBrowserProbe"
-        ),
-        .executableTarget(
-            name: "UninstallFixtureProbe",
-            dependencies: ["Uninstall", "Catalog"],
-            path: "Tools/UninstallFixtureProbe"
-        ),
-        .executableTarget(
-            name: "PrivilegedHelperProbe",
-            path: "Tools/PrivilegedHelperProbe"
-        ),
-        .executableTarget(
-            name: "IconGenerator",
-            path: "Tools/IconGenerator"
-        ),
-        .executableTarget(
-            name: "PrivilegedHelperRegistrationProbe",
-            path: "Tools/PrivilegedHelperRegistrationProbe"
-        ),
         .testTarget(
             name: "DiagnosticsTests",
             dependencies: ["Diagnostics"],

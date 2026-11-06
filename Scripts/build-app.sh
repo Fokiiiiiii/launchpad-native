@@ -23,7 +23,7 @@ set -eu
 
 CONFIG="${1:-debug}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SCRATCH="$HOME/.cache/launchpad-native/build"
+SCRATCH="${SCRATCH:-$HOME/.cache/launchpad-native/build}"
 APP="$SCRATCH/LaunchpadNative.app"
 INSTALLED_APP="$HOME/Applications/LaunchpadNative.app"
 
@@ -72,6 +72,9 @@ codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 
 echo "Built $APP"
+
+# NO_INSTALL=1 stops here: CI only wants the bundle, not a copy in ~/Applications.
+[ -n "${NO_INSTALL:-}" ] && exit 0
 
 pkill -f "Applications/LaunchpadNative.app/Contents/MacOS/AppHost" 2>/dev/null || true
 mkdir -p "$HOME/Applications"
