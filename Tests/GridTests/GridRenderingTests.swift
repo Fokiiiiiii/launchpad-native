@@ -407,8 +407,10 @@ private func accessibilityDescendants(of root: Any) -> [Any] {
           let expected = harness.model.record(for: firstOfNextPage)?.bundleIdentifier
     else { throw GridTestError.unexpectedLayout }
 
+    // The end of the first row, then one more step right.
+    let columns = harness.model.gridSettings.columns
     harness.controller.moveSelection(deltaColumns: 0, deltaRows: 0)
-    harness.controller.moveSelection(deltaColumns: pages[0].count - 1, deltaRows: 0)
+    harness.controller.moveSelection(deltaColumns: columns - 1, deltaRows: 0)
     harness.controller.moveSelection(deltaColumns: 1, deltaRows: 0)
 
     harness.controller.launchSelection()
@@ -425,6 +427,50 @@ private func accessibilityDescendants(of root: Any) -> [Any] {
 }
 
 private enum GridTestError: Error { case unexpectedLayout }
+
+/// Left and right stay on their row. At the end of it they turn the page and land
+/// on the same row, rather than dropping to the row below (right) or climbing to
+/// the one above (left) the way a flat walk through the items would.
+@Test @MainActor func leftAndRightAtTheEndOfARowTurnThePageOnTheSameRow() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 120, directory: dir)
+    defer { harness.teardown() }
+    try await harness.waitForIcons(1)
+
+    let pages = harness.model.pages
+    let columns = harness.model.gridSettings.columns
+    try #require(pages.count > 1 && columns > 2 && pages[0].count > 2 * columns && pages[1].count > 2 * columns)
+    func bundle(page: Int, item: Int) throws -> String {
+        guard case .app(let id) = pages[page][item], let record = harness.model.record(for: id) else {
+            throw GridTestError.unexpectedLayout
+        }
+        return record.bundleIdentifier
+    }
+    /// Return launches the selection once the page has landed, so asking until
+    /// something launches reads where the selection is.
+    func selectedApp() async throws -> String? {
+        let before = harness.launchedApps.count
+        for _ in 0..<80 where harness.launchedApps.count == before {
+            harness.controller.launchSelection()
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        return harness.launchedApps.last
+    }
+
+    // The end of the second row on the first page, one step right.
+    harness.controller.moveSelection(deltaColumns: 0, deltaRows: 0)
+    harness.controller.moveSelection(deltaColumns: 0, deltaRows: 1)
+    harness.controller.moveSelection(deltaColumns: columns - 1, deltaRows: 0)
+    harness.controller.moveSelection(deltaColumns: 1, deltaRows: 0)
+    #expect(try await selectedApp() == (try bundle(page: 1, item: columns)),
+            "right at the end of a row should land on the start of the same row of the next page")
+
+    // And back: left at the start of that row returns to the end of the same row.
+    harness.controller.moveSelection(deltaColumns: -1, deltaRows: 0)
+    #expect(try await selectedApp() == (try bundle(page: 0, item: 2 * columns - 1)),
+            "left at the start of a row should land on the end of the same row of the previous page")
+}
 
 /// VoiceOver presses a cell with `AXPress`; a button role with nothing behind it
 /// looks actionable and does nothing.

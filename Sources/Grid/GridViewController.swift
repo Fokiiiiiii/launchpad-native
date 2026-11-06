@@ -378,8 +378,25 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             return
         }
         let columns = max(model.gridSettings.columns, 1)
-        var flat = current.item + deltaColumns + deltaRows * columns
+        let flat = current.item + deltaColumns + deltaRows * columns
         let count = model.pages.indices.contains(currentPage) ? model.pages[currentPage].count : 0
+
+        // Left and right stay on their row. Past the end of it they turn the page,
+        // landing on the same row, rather than dropping to the row below (or
+        // climbing to the one above) as a flat walk through the items would.
+        if deltaRows == 0, abs(deltaColumns) == 1 {
+            let row = current.item / columns
+            if deltaColumns > 0, current.item % columns == columns - 1 || current.item + 1 >= count {
+                guard currentPage < model.pages.count - 1 else { return }
+                jumpToPage(currentPage + 1, landingOn: .startOfRow(row))
+                return
+            }
+            if deltaColumns < 0, current.item % columns == 0 {
+                guard currentPage > 0 else { return }
+                jumpToPage(currentPage - 1, landingOn: .endOfRow(row))
+                return
+            }
+        }
 
         if flat < 0 {
             guard currentPage > 0 else { return }
@@ -448,7 +465,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// the selection cannot be set at the key press: it would be painted on the
     /// page that is leaving and lost by the reload. Non-nil exactly while such a
     /// turn is in flight, and arrow keys and Return are held off until it lands.
-    private enum PageEdge { case first, last }
+    private enum PageEdge {
+        case first, last
+        /// The same row of the page being entered, at its left or right end. A row
+        /// the page does not have lands on its last item.
+        case startOfRow(Int), endOfRow(Int)
+    }
     private var pendingEdgeSelection: PageEdge?
 
     /// Timings for moving between pages, gathered in one place because they
@@ -536,7 +558,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 if let edge = self.pendingEdgeSelection {
                     self.pendingEdgeSelection = nil
                     let count = self.model.pages[index].count
-                    if count > 0 { self.select(IndexPath(item: edge == .first ? 0 : count - 1, section: 0)) }
+                    let columns = max(self.model.gridSettings.columns, 1)
+                    let item: Int
+                    switch edge {
+                    case .first: item = 0
+                    case .last: item = count - 1
+                    case .startOfRow(let row): item = min(row * columns, count - 1)
+                    case .endOfRow(let row): item = min(row * columns + columns - 1, count - 1)
+                    }
+                    if count > 0 { self.select(IndexPath(item: item, section: 0)) }
                 }
 
                 CATransaction.begin()
