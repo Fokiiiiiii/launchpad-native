@@ -423,7 +423,8 @@ public final class TriggerCoordinator {
             launchpadGestureCaptured: true,
             trackpadGestureValues: trackpadGestureValues,
             dockGestureValues: dockGestureValues,
-            dockGesturesCaptured: dockGesturesCaptured
+            dockGesturesCaptured: dockGesturesCaptured,
+            appliedKeys: backup.appliedKeys
         )
     }
 }

@@ -148,6 +148,11 @@ public enum ConflictingGestureManager {
 
     private static let supportedFingerCounts = [4, 5]
 
+    /// How a written preference is named in `GestureConflictBackup.appliedKeys`.
+    static func appliedKeyID(domain: String, key: String) -> String {
+        "\(domain)|\(key)"
+    }
+
     public static func decideTransition(
         enabled: Bool,
         desiredFingerCount: Int,
@@ -259,6 +264,20 @@ public enum ConflictingGestureManager {
             backup = rollback
         }
 
+        // What this transaction writes, so a later restore touches those and only
+        // those. A restore point carried over from before this was recorded
+        // (`appliedKeys == nil`) stays that way: what it wrote is unknown.
+        var applied: Set<String> = []
+        func succeeded() -> DisableResult {
+            var result = backup
+            if let restorePoint {
+                result.appliedKeys = restorePoint.appliedKeys.map { Array(Set($0).union(applied)).sorted() }
+            } else {
+                result.appliedKeys = applied.sorted()
+            }
+            return .succeeded(result)
+        }
+
         let countsToDisable = disableBothFingerCounts ? supportedFingerCounts : [fingerCount]
         for count in countsToDisable {
             guard let key = PinchKey(fingerCount: count) else { return .failed }
@@ -283,11 +302,12 @@ public enum ConflictingGestureManager {
                     }
                     return .failed
                 }
+                applied.insert(appliedKeyID(domain: domain, key: key.rawValue))
             }
         }
 
         guard disableRelatedNavigation else {
-            return .succeeded(backup)
+            return succeeded()
         }
 
         for key in trackpadSwipeKeys {
@@ -304,6 +324,7 @@ public enum ConflictingGestureManager {
                     }
                     return .failed
                 }
+                applied.insert(appliedKeyID(domain: domain, key: key))
             }
         }
 
@@ -321,9 +342,10 @@ public enum ConflictingGestureManager {
                 }
                 return .failed
             }
+            applied.insert(appliedKeyID(domain: launchpadDomain, key: key))
         }
 
-        return .succeeded(backup)
+        return succeeded()
     }
 
     @discardableResult
@@ -347,10 +369,23 @@ public enum ConflictingGestureManager {
             return false
         }
 
+        // Only what this app wrote, and only while it still holds what it wrote
+        // (0 — disabled). A key it never touched, or one the user has since
+        // changed in System Settings, is not this restore's to put back: doing
+        // so reverted the user's own later choices. A restore point from before
+        // the written keys were recorded restores everything it captured.
+        let applied = backup.appliedKeys.map(Set.init)
+        func shouldRestore(domain: String, key: String) -> Bool {
+            guard let applied else { return true }
+            return applied.contains(appliedKeyID(domain: domain, key: key))
+                && store.integerValue(forKey: key, domain: domain) == 0
+        }
+
         var success = true
         for (count, values) in entries {
             guard let key = PinchKey(fingerCount: count) else { return false }
             for domain in domains {
+                guard shouldRestore(domain: domain, key: key.rawValue) else { continue }
                 // Flattens “domain missing from the backup” and “domain
                 // present with an explicit nil” identically — both mean “the
                 // key did not exist before,” so restore should remove it.
@@ -373,6 +408,7 @@ public enum ConflictingGestureManager {
             for key in trackpadSwipeKeys {
                 guard let values = trackpadGestureValues[key] else { continue }
                 for domain in domains {
+                    guard shouldRestore(domain: domain, key: key) else { continue }
                     let original = values[domain] ?? nil
                     store.setIntegerValue(original, forKey: key, domain: domain)
                     guard store.synchronize(domain: domain) else {
@@ -390,6 +426,7 @@ public enum ConflictingGestureManager {
 
         if backup.dockGesturesCaptured, let dockGestureValues = backup.dockGestureValues {
             for key in dockGestureKeys {
+                guard shouldRestore(domain: launchpadDomain, key: key) else { continue }
                 let original = dockGestureValues[key] ?? nil
                 store.setIntegerValue(original, forKey: key, domain: launchpadDomain)
                 guard store.synchronize(domain: launchpadDomain) else {
@@ -496,7 +533,8 @@ public enum ConflictingGestureManager {
             launchpadGestureCaptured: launchpadCaptured,
             trackpadGestureValues: trackpadGestureValues,
             dockGestureValues: dockGestureValues,
-            dockGesturesCaptured: dockGesturesCaptured
+            dockGesturesCaptured: dockGesturesCaptured,
+            appliedKeys: restorePoint.appliedKeys
         )
     }
 

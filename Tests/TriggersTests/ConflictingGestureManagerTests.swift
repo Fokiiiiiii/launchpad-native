@@ -670,6 +670,103 @@ private let threeFingerHorizSwipeKey = "TrackpadThreeFingerHorizSwipeGesture"
     coordinator.stopAll()
 }
 
+// MARK: Restoring only what was written
+
+private let fourFingerSwipeKey = "TrackpadFourFingerHorizSwipeGesture"
+
+private func storeWithEveryGestureOn() -> FakeTrackpadPreferenceStore {
+    var initial: [String: [String: Int]] = [:]
+    for domain in ConflictingGestureManager.domains {
+        initial[domain] = [fourFingerKey: 2, fiveFingerKey: 2, fourFingerSwipeKey: 2]
+    }
+    return FakeTrackpadPreferenceStore(initialValues: initial)
+}
+
+/// The snapshot holds every gesture key that could compete, but a transaction
+/// writes only some of them. Restoring all of it put back the user's old values
+/// over whatever they had changed in System Settings in the meantime.
+@Test func restorePutsBackOnlyWhatTheTransactionWrote() throws {
+    let domains = ConflictingGestureManager.domains
+    let store = storeWithEveryGestureOn()
+    guard case .succeeded(let backup) = ConflictingGestureManager.disableVerified(
+        fingerCount: 4, store: store, disableBothFingerCounts: false, disableRelatedNavigation: false
+    ) else {
+        Issue.record("disabling should succeed")
+        return
+    }
+    #expect(Set(backup.appliedKeys ?? []) == Set(domains.map { "\($0)|\(fourFingerKey)" }))
+
+    // While the app runs, the user changes unrelated gestures.
+    for domain in domains {
+        store.setIntegerValue(0, forKey: fiveFingerKey, domain: domain)
+        store.setIntegerValue(1, forKey: fourFingerSwipeKey, domain: domain)
+    }
+
+    #expect(ConflictingGestureManager.restore(backup, store: store))
+
+    for domain in domains {
+        #expect(store.integerValue(forKey: fourFingerKey, domain: domain) == 2, "the key the app wrote is put back")
+        #expect(store.integerValue(forKey: fiveFingerKey, domain: domain) == 0, "the user's change to another key stays")
+        #expect(store.integerValue(forKey: fourFingerSwipeKey, domain: domain) == 1, "the user's change to another key stays")
+    }
+}
+
+@Test func aKeyTheUserChangedAfterItWasDisabledIsLeftAlone() throws {
+    let domains = ConflictingGestureManager.domains
+    let store = storeWithEveryGestureOn()
+    guard case .succeeded(let backup) = ConflictingGestureManager.disableVerified(
+        fingerCount: 4, store: store, disableBothFingerCounts: false, disableRelatedNavigation: false
+    ) else {
+        Issue.record("disabling should succeed")
+        return
+    }
+    // The user turns the gesture back on themselves, to a value of their own.
+    for domain in domains { store.setIntegerValue(1, forKey: fourFingerKey, domain: domain) }
+
+    #expect(ConflictingGestureManager.restore(backup, store: store))
+
+    for domain in domains {
+        #expect(store.integerValue(forKey: fourFingerKey, domain: domain) == 1)
+    }
+}
+
+/// What an older version wrote carries no record of what it changed, so the
+/// whole snapshot is still put back, as before.
+@Test func aRestorePointWithoutTheWrittenKeysStillRestoresEverythingItCaptured() throws {
+    let domains = ConflictingGestureManager.domains
+    let store = storeWithEveryGestureOn()
+    guard case .succeeded(var backup) = ConflictingGestureManager.disableVerified(
+        fingerCount: 4, store: store, disableBothFingerCounts: true, disableRelatedNavigation: true
+    ) else {
+        Issue.record("disabling should succeed")
+        return
+    }
+    backup.appliedKeys = nil
+
+    #expect(ConflictingGestureManager.restore(backup, store: store))
+
+    for domain in domains {
+        #expect(store.integerValue(forKey: fourFingerKey, domain: domain) == 2)
+        #expect(store.integerValue(forKey: fiveFingerKey, domain: domain) == 2)
+        #expect(store.integerValue(forKey: fourFingerSwipeKey, domain: domain) == 2)
+    }
+}
+
+@Test func reEnforcingKeepsAndExtendsTheRecordedKeys() throws {
+    let store = storeWithEveryGestureOn()
+    guard case .succeeded(let first) = ConflictingGestureManager.disableVerified(
+        fingerCount: 4, store: store, disableBothFingerCounts: false, disableRelatedNavigation: false
+    ), case .succeeded(let second) = ConflictingGestureManager.disableVerified(
+        fingerCount: 4, store: store, preserving: first, disableBothFingerCounts: false, disableRelatedNavigation: false
+    ) else {
+        Issue.record("disabling should succeed")
+        return
+    }
+
+    #expect(second.appliedKeys == first.appliedKeys)
+    #expect(second.values == first.values, "the original values are kept, not the already-disabled ones")
+}
+
 @Test @MainActor func coordinatorTreatsMultitouchAsConflictOwnerEvenWithLegacyOptOut() {
     let initial: [String: [String: Int]] = [
         "com.apple.AppleMultitouchTrackpad": [fourFingerKey: 2, fiveFingerKey: 2],

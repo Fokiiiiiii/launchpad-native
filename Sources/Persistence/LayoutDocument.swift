@@ -258,6 +258,13 @@ public struct GestureConflictBackup: Codable, Sendable, Equatable {
     /// "absent") from older backups that never owned these keys.
     public var dockGestureValues: [String: Int?]?
     public var dockGesturesCaptured: Bool
+    /// The preferences this app actually wrote, as `domain|key` — a restore
+    /// puts back those and nothing else. The snapshot holds every gesture key
+    /// that could compete, written or not, and restoring all of it reverted
+    /// whatever the user had changed in System Settings meanwhile. `nil` for a
+    /// restore point made before this was recorded: what it wrote is unknown,
+    /// so it keeps restoring everything it captured.
+    public var appliedKeys: [String]?
 
     public init(
         fingerCount: Int,
@@ -268,7 +275,8 @@ public struct GestureConflictBackup: Codable, Sendable, Equatable {
         launchpadGestureCaptured: Bool = false,
         trackpadGestureValues: [String: [String: Int?]]? = nil,
         dockGestureValues: [String: Int?]? = nil,
-        dockGesturesCaptured: Bool = false
+        dockGesturesCaptured: Bool = false,
+        appliedKeys: [String]? = nil
     ) {
         self.fingerCount = fingerCount
         self.values = values
@@ -279,10 +287,11 @@ public struct GestureConflictBackup: Codable, Sendable, Equatable {
         self.trackpadGestureValues = trackpadGestureValues
         self.dockGestureValues = dockGestureValues
         self.dockGesturesCaptured = dockGesturesCaptured
+        self.appliedKeys = appliedKeys
     }
 
     private enum CodingKeys: String, CodingKey {
-        case fingerCount, values, valuesByFingerCount, launchpadGestureValue, launchpadGestureWasPresent, launchpadGestureCaptured, trackpadGestureValues, dockGestureValues, dockGesturesCaptured
+        case fingerCount, values, valuesByFingerCount, launchpadGestureValue, launchpadGestureWasPresent, launchpadGestureCaptured, trackpadGestureValues, dockGestureValues, dockGesturesCaptured, appliedKeys
     }
 
     public init(from decoder: Decoder) throws {
@@ -304,6 +313,7 @@ public struct GestureConflictBackup: Codable, Sendable, Equatable {
         )
         dockGestureValues = try container.decodeIfPresent([String: Int?].self, forKey: .dockGestureValues)
         dockGesturesCaptured = try container.decodeIfPresent(Bool.self, forKey: .dockGesturesCaptured) ?? false
+        appliedKeys = try container.decodeIfPresent([String].self, forKey: .appliedKeys)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -325,6 +335,7 @@ public struct GestureConflictBackup: Codable, Sendable, Equatable {
             try container.encode(true, forKey: .dockGesturesCaptured)
             try container.encodeIfPresent(dockGestureValues, forKey: .dockGestureValues)
         }
+        try container.encodeIfPresent(appliedKeys, forKey: .appliedKeys)
     }
 }
 
