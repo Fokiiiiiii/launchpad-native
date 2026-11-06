@@ -39,6 +39,30 @@ enum GridSpring {
         return animation
     }
 
+    /// The translation that keeps a layer's centre where it is while the layer
+    /// is scaled by `scale` about its anchor point.
+    ///
+    /// A view's backing layer does not always scale about its middle — which
+    /// anchor point it has depends on how AppKit set it up — and a panel that
+    /// scales about a corner appears to slide as it grows. Scaling about
+    /// `anchorPoint` moves the centre by `(scale - 1) * (centre - anchor)`;
+    /// this is the opposite of that.
+    static func centeringTranslation(scale: CGFloat, size: CGSize, anchorPoint: CGPoint) -> CGPoint {
+        CGPoint(
+            x: (1 - scale) * (0.5 - anchorPoint.x) * size.width,
+            y: (1 - scale) * (0.5 - anchorPoint.y) * size.height
+        )
+    }
+
+    /// `scale` about the layer's centre, as one transform.
+    static func centeredScale(_ scale: CGFloat, size: CGSize, anchorPoint: CGPoint) -> CATransform3D {
+        let shift = centeringTranslation(scale: scale, size: size, anchorPoint: anchorPoint)
+        return CATransform3DConcat(
+            CATransform3DMakeScale(scale, scale, 1),
+            CATransform3DMakeTranslation(shift.x, shift.y, 0)
+        )
+    }
+
     /// Apple's standard rubber-band resistance formula (see apple-design's
     /// guidance): resistance increases with overshoot instead of a hard
     /// stop, so dragging past an end still moves but doesn't go far.

@@ -155,9 +155,12 @@ final class FolderOverlayPresenter {
 
         backdrop.alphaValue = 0
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             backdrop.animator().alphaValue = 1
         }
+        // The panel settles into place rather than appearing at full size.
+        Self.scalePanel(panel, from: 0.94, to: 1, damping: 0.88, response: 0.32, key: "open")
 
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.launcher.info("folder transition: build+show full-screen overlay took \(ms, privacy: .public)ms")
@@ -177,11 +180,64 @@ final class FolderOverlayPresenter {
         )
     }
 
+    /// Scales `panel` between two sizes about its centre. Reduce Motion keeps
+    /// the fade and drops this.
+    ///
+    /// The model value is set to where the animation ends, so the panel is
+    /// already there when the animation is removed — on close that is the
+    /// moment before the backdrop goes, and a snap back to full size would show.
+    private static func scalePanel(
+        _ panel: NSView,
+        from: CGFloat,
+        to: CGFloat,
+        damping: CGFloat,
+        response: CGFloat,
+        key: String
+    ) {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        panel.wantsLayer = true
+        guard let layer = panel.layer else { return }
+        let size = layer.bounds.size
+        let anchor = layer.anchorPoint
+        // Closing while the opening is still moving carries on from where the
+        // panel has got to, instead of jumping to full size first.
+        var from = from
+        if layer.animationKeys()?.isEmpty == false {
+            if let shown = layer.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat {
+                from = shown
+            }
+            layer.removeAllAnimations()
+        }
+        let start = GridSpring.centeringTranslation(scale: from, size: size, anchorPoint: anchor)
+        let end = GridSpring.centeringTranslation(scale: to, size: size, anchorPoint: anchor)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.transform = GridSpring.centeredScale(to, size: size, anchorPoint: anchor)
+        CATransaction.commit()
+
+        let animations: [(String, CGFloat, CGFloat)] = [
+            ("transform.scale", from, to),
+            ("transform.translation.x", start.x, end.x),
+            ("transform.translation.y", start.y, end.y),
+        ]
+        for (keyPath, fromValue, toValue) in animations {
+            layer.add(
+                GridSpring.animation(keyPath: keyPath, from: fromValue, to: toValue, damping: damping, response: response),
+                forKey: "\(key)-\(keyPath)"
+            )
+        }
+    }
+
     func close() {
         guard let backdrop else { return }
         self.backdrop = nil
+        if let panel = contentsViewController?.view {
+            Self.scalePanel(panel, from: 1, to: 0.97, damping: 1.0, response: 0.2, key: "close")
+        }
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.14
+            context.duration = 0.16
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             backdrop.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             Task { @MainActor [weak self] in

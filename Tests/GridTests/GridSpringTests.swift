@@ -91,6 +91,35 @@ import Testing
     #expect(spring.duration == spring.settlingDuration)
 }
 
+// MARK: scaling about the centre
+
+/// A panel that scales about a corner appears to slide as it grows, and which
+/// anchor point a view's layer has is not something to rely on — so the
+/// transform has to hold the centre still for any of them.
+@Test func scalingAboutAnyAnchorPointKeepsTheCentreStill() {
+    let size = CGSize(width: 400, height: 300)
+    let centre = CGPoint(x: 200, y: 150)
+    let anchors = [CGPoint(x: 0.5, y: 0.5), CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 1), CGPoint(x: 0, y: 1)]
+    for anchor in anchors {
+        for scale in [CGFloat(0.5), 0.94, 1.0, 1.2] {
+            let transform = CATransform3DGetAffineTransform(
+                GridSpring.centeredScale(scale, size: size, anchorPoint: anchor)
+            )
+            // A layer transform acts on points measured from the anchor.
+            let anchorPoint = CGPoint(x: anchor.x * size.width, y: anchor.y * size.height)
+            let moved = CGPoint(x: centre.x - anchorPoint.x, y: centre.y - anchorPoint.y).applying(transform)
+            #expect(abs(anchorPoint.x + moved.x - centre.x) < 1e-9, "anchor \(anchor), scale \(scale)")
+            #expect(abs(anchorPoint.y + moved.y - centre.y) < 1e-9, "anchor \(anchor), scale \(scale)")
+        }
+    }
+}
+
+@Test func aLayerAlreadyScalingAboutItsCentreNeedsNoTranslation() {
+    let shift = GridSpring.centeringTranslation(scale: 0.94, size: CGSize(width: 400, height: 300), anchorPoint: CGPoint(x: 0.5, y: 0.5))
+    #expect(shift == .zero)
+    #expect(GridSpring.centeringTranslation(scale: 1, size: CGSize(width: 400, height: 300), anchorPoint: .zero) == .zero)
+}
+
 // MARK: velocity estimate
 
 @Test func velocityIsTheAverageRateBetweenTwoSamples() {

@@ -422,6 +422,16 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             rootContentView?.layer?.removeAllAnimations()
             window.alphaValue = 0
         }
+        // A show that lands while a hide is still shrinking the content takes
+        // over from it: the hide's own cleanup is cancelled by the new
+        // generation, so nothing else would put the content back to full size.
+        if let layer = rootContentView?.layer, !CATransform3DIsIdentity(layer.transform) {
+            layer.removeAllAnimations()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.transform = CATransform3DIdentity
+            CATransaction.commit()
+        }
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -466,17 +476,23 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         animationGeneration += 1
         let generation = animationGeneration
 
+        // Reduce Motion keeps the fade and drops the shrink.
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if let layer = rootContentView?.layer {
             layer.removeAllAnimations()
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            layer.transform = CATransform3DMakeScale(0.94, 0.94, 1)
-            CATransaction.commit()
-            layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.0, to: 0.94, damping: 1.0, response: 0.28), forKey: "scaleOut")
+            if !reduceMotion {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                layer.transform = CATransform3DMakeScale(0.94, 0.94, 1)
+                CATransaction.commit()
+                layer.add(Self.springAnimation(keyPath: "transform.scale", from: 1.0, to: 0.94, damping: 1.0, response: 0.28), forKey: "scaleOut")
+            }
         }
 
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.30
+            // Leaving is quicker than arriving: it is already decided, and
+            // waiting on it is the only thing the user can feel.
+            context.duration = 0.2
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             window.animator().alphaValue = 0
         }, completionHandler: { [weak self, weak window] in
@@ -498,7 +514,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// authoritative; animation is limited to visibility.
     private func animateIn(window: NSWindow) {
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
+            context.duration = 0.18
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         }
