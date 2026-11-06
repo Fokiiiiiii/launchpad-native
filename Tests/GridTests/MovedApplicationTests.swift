@@ -88,6 +88,28 @@ private func temporaryDirectory() -> URL {
     #expect(model.alias(for: b.id) == nil)
 }
 
+/// Search lists apps in the grid's order and listens to a different signal than
+/// the grid does; a move that only told the grid left equal-rank results in the
+/// order from before it.
+@Test @MainActor func reorderingTellsSearchAsWellAsTheGrid() async throws {
+    let dir = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "com.example.a"), record("B", id: "com.example.b"), record("C", id: "com.example.c")])
+    var searchSignals = 0
+    model.onSearchableRecordsChange = { searchSignals += 1 }
+
+    model.moveItem(fromPage: 0, fromIndex: 0, toPage: 0, toIndex: 2)
+    #expect(searchSignals == 1)
+
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+    #expect(searchSignals == 2)
+
+    model.applySortMode(.name)
+    #expect(searchSignals == 3)
+}
+
 @Test @MainActor func aMovedAppInsideAFolderStaysInThatFolder() async throws {
     let dir = temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }

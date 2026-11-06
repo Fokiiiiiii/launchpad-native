@@ -101,7 +101,15 @@ public final class GridModel {
     /// dragging gaps into pages over time.
     public func reorganizePages() {
         reflowPagesToCurrentCapacity()
+        orderDidChange()
+    }
+
+    /// The grid redraws on `onChange`, but launcher search lists apps in the grid's
+    /// order and listens to something else; without telling it too, results with
+    /// equal rank kept the order from before the last move.
+    private func orderDidChange() {
         onChange?()
+        onSearchableRecordsChange?()
     }
 
     private func reflowPagesToCurrentCapacity() {
@@ -237,7 +245,7 @@ public final class GridModel {
         case .lastUsed:
             sortEachContainer(by: isOrderedByLastUsedMostRecentFirst)
         }
-        onChange?()
+        orderDidChange()
     }
 
     private func sortEachContainer(by areInIncreasingOrder: (LayoutItem, LayoutItem) -> Bool) {
@@ -634,7 +642,7 @@ public final class GridModel {
         }
         pages[toPage].insert(item, at: clampedIndex)
         cascadeOverflow(from: toPage)
-        onChange?()
+        orderDidChange()
     }
 
     /// Pushes whatever no longer fits off the end of a page onto the next one,
@@ -679,7 +687,7 @@ public final class GridModel {
         let clampedIndex = min(max(toIndex, 0), folder.pages[page].count)
         folder.pages[page].insert(item, at: clampedIndex)
         folders[folderID] = folder
-        onChange?()
+        orderDidChange()
     }
 
     /// Dragging one item onto another: onto a bare app, both merge into a new
@@ -709,7 +717,7 @@ public final class GridModel {
             folders[folderID] = folder
             pages[sourcePage].remove(at: sourceIndex)
         }
-        onChange?()
+        orderDidChange()
     }
 
     private func appendToFolder(_ folder: inout Folder, item: LayoutItem) {
@@ -782,7 +790,7 @@ public final class GridModel {
         if isFolderEmpty(folderID) {
             dissolveFolder(folderID)
         }
-        onChange?()
+        orderDidChange()
     }
 
     private func isFolderEmpty(_ id: FolderID) -> Bool {
@@ -827,7 +835,7 @@ public final class GridModel {
         if pages.contains(where: { $0.count > capacityPerPage }) {
             reflowPagesToCurrentCapacity()
         }
-        onChange?()
+        orderDidChange()
     }
 
     // MARK: - Hidden apps (2.16)
