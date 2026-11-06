@@ -414,8 +414,13 @@ private func accessibilityDescendants(of root: Any) -> [Any] {
     harness.controller.launchSelection()
     #expect(harness.launchedApps.isEmpty, "Return during the page turn launched an app of the old page")
 
-    try await Task.sleep(for: .milliseconds(900))
-    harness.controller.launchSelection()
+    // Return does nothing until the page has landed, so asking until something
+    // launches finds exactly when it did — however busy the machine running the
+    // tests is.
+    for _ in 0..<80 where harness.launchedApps.isEmpty {
+        try await Task.sleep(for: .milliseconds(100))
+        harness.controller.launchSelection()
+    }
     #expect(harness.launchedApps == [expected], "the selection did not land on the new page's first app")
 }
 
