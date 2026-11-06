@@ -910,6 +910,11 @@ public final class GridModel {
 
     // MARK: - Legacy import
 
+    /// Whether nothing has been arranged yet — the state a legacy import may fill.
+    public var hasNoArrangement: Bool {
+        folders.isEmpty && pages.allSatisfy(\.isEmpty)
+    }
+
     /// Applies a one-time Classic Launchpad import, but only when this
     /// app's own layout is still completely empty (no pages, no folders) —
     /// i.e. first run, before the user has arranged anything here. Safe to

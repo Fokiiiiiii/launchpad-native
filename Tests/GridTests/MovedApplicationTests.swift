@@ -88,6 +88,20 @@ private func temporaryDirectory() -> URL {
     #expect(model.alias(for: b.id) == nil)
 }
 
+/// A legacy import is applied only to a layout with nothing in it, and a first
+/// run with an empty layout holds off filling the grid from a partial startup
+/// cache so that import still has somewhere to land.
+@Test @MainActor func aLayoutHasNoArrangementUntilSomethingIsPlacedInIt() async throws {
+    let dir = temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(dir)
+    await model.loadDocument()
+    #expect(model.hasNoArrangement)
+
+    model.reconcile(with: [record("A", id: "com.example.a")])
+    #expect(!model.hasNoArrangement)
+}
+
 /// Search lists apps in the grid's order and listens to a different signal than
 /// the grid does; a move that only told the grid left equal-rank results in the
 /// order from before it.

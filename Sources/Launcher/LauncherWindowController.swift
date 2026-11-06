@@ -328,6 +328,14 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         // `reconcile` itself fills the grid (alphabetically) with anything
         // unplaced — running reconcile first would make every subsequent
         // import attempt see a "non-empty" grid and silently no-op.
+        // The startup cache can be partial. Importing against it would resolve only
+        // the apps it holds and never try again, and filling the empty grid from it
+        // would leave nothing for a later import to apply to; so a first run with
+        // an empty layout waits for the first complete scan.
+        if !hasAttemptedLegacyImport, !isAuthoritative, gridModel.hasNoArrangement {
+            applySearchableRecords()
+            return
+        }
         if !hasAttemptedLegacyImport {
             hasAttemptedLegacyImport = true
             if let dbURL = LegacyLaunchpadImporter.defaultDatabaseURL() {
