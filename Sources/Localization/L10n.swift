@@ -112,6 +112,7 @@ public enum L10n {
     public static var sensitivityLabel: String { string("settings.triggers.sensitivity", "Sensitivity") }
     public static var gestureSensitivityAccessibilityLabel: String { string("settings.triggers.sensitivity.accessibility", "Gesture sensitivity") }
     public static var f4PermissionHint: String { string("settings.triggers.f4hint", "F4 needs Input Monitoring permission") }
+    public static var hotkeyRegistrationFailedHint: String { string("settings.hotkey.registrationfailed", "This shortcut could not be registered. Another app may already be using it.") }
     public static var trackpadPermissionHint: String { string("settings.triggers.trackpadhint", "Trackpad gesture needs Accessibility and Input Monitoring permission") }
     public static var openPrivacySettingsButton: String { string("settings.triggers.openprivacysettings", "Open Privacy Settings…") }
     public static var searchNoResultsTitle: String { string("launcher.search.empty.title", "No Results") }

@@ -64,6 +64,7 @@
 "settings.triggers.sensitivity" = "感度";
 "settings.triggers.sensitivity.accessibility" = "ジェスチャーの感度";
 "settings.triggers.f4hint" = "F4には入力監視の権限が必要です";
+"settings.hotkey.registrationfailed" = "このショートカットを登録できませんでした。ほかのアプリが使っている可能性があります";
 "settings.triggers.trackpadhint" = "トラックパッドジェスチャーにはアクセシビリティと入力監視の権限が必要です";
 "settings.triggers.openprivacysettings" = "プライバシー設定を開く…";
 "launcher.search.empty.title" = "結果がありません";

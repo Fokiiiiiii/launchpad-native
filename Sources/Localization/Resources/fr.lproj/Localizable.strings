@@ -64,6 +64,7 @@
 "settings.triggers.sensitivity" = "Sensibilité";
 "settings.triggers.sensitivity.accessibility" = "Sensibilité du geste";
 "settings.triggers.f4hint" = "F4 nécessite l'autorisation « Surveillance de la saisie »";
+"settings.hotkey.registrationfailed" = "Ce raccourci n'a pas pu être enregistré. Une autre app l'utilise peut-être déjà.";
 "settings.triggers.trackpadhint" = "Le geste du trackpad nécessite les autorisations « Accessibilité » et « Surveillance de la saisie »";
 "settings.triggers.openprivacysettings" = "Ouvrir les réglages de confidentialité…";
 "launcher.search.empty.title" = "Aucun résultat";

@@ -403,6 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if isFingerSwitch, runtimeResult.gestureConflictStatus == .unchanged {
             result = TriggerSettingsApplyResult(
                 f4Active: runtimeResult.f4Active,
+                hotkeyActive: runtimeResult.hotkeyActive,
                 multitouchActive: runtimeResult.multitouchActive,
                 multitouchEventArbitrationActive: runtimeResult.multitouchEventArbitrationActive,
                 gestureConflictStatus: .applied,
@@ -504,6 +505,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         return TriggerSettingsApplyResult(
             f4Active: report.f4Active,
+            // Only a hotkey that was asked for can have failed.
+            hotkeyActive: report.hotkeyRegistered || !settings.hotkeyEnabled,
             multitouchActive: report.multitouchActive,
             multitouchEventArbitrationActive: report.multitouchEventArbitrationActive,
             gestureConflictStatus: conflictStatus,

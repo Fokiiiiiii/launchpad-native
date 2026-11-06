@@ -173,6 +173,32 @@ import Testing
     #expect(viewModel.hotkeyEnabled == !previous.hotkeyEnabled)
 }
 
+/// A combination another app already holds registers nothing and says nothing; the
+/// result has to carry that to the window, or the toggle just looks switched on.
+@Test @MainActor func aHotkeyThatCouldNotBeRegisteredIsReportedToTheWindow() async {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("launchpad-settings-hotkey-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let model = GridModel(layoutStore: LayoutStore(directory: directory))
+    let viewModel = SettingsViewModel(
+        model: model,
+        onTriggerSettingsChanged: { _ in
+            TriggerSettingsApplyResult(
+                f4Active: false, hotkeyActive: false, multitouchActive: false, multitouchEventArbitrationActive: false,
+                gestureConflictStatus: .unchanged, gestureConflictBackup: nil
+            )
+        },
+        onDockVisibilityChanged: { _ in }
+    )
+    #expect(viewModel.hotkeyActive)
+
+    viewModel.hotkeyEnabled = !model.triggerSettings.hotkeyEnabled
+    for _ in 0..<60 { await Task.yield() }
+
+    #expect(!viewModel.hotkeyActive)
+}
+
 @Test @MainActor func trackpadArbitrationFailureIsPublishedSeparatelyFromRawListener() async {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("launchpad-settings-trackpad-status-test-\(UUID().uuidString)", isDirectory: true)

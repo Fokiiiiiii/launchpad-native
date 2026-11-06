@@ -64,6 +64,7 @@
 "settings.triggers.sensitivity" = "Empfindlichkeit";
 "settings.triggers.sensitivity.accessibility" = "Gestenempfindlichkeit";
 "settings.triggers.f4hint" = "F4 benötigt die Berechtigung „Eingabeüberwachung“";
+"settings.hotkey.registrationfailed" = "Dieses Kürzel konnte nicht registriert werden. Möglicherweise belegt es bereits eine andere App.";
 "settings.triggers.trackpadhint" = "Die Trackpad-Geste benötigt die Berechtigungen „Bedienungshilfen“ und „Eingabeüberwachung“";
 "settings.triggers.openprivacysettings" = "Datenschutzeinstellungen öffnen…";
 "launcher.search.empty.title" = "Keine Ergebnisse";

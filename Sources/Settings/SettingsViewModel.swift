@@ -18,6 +18,9 @@ public enum GestureConflictApplyStatus: Sendable, Equatable {
 
 public struct TriggerSettingsApplyResult: Sendable, Equatable {
     public let f4Active: Bool
+    /// Whether the hotkey that was asked for is really registered. Another app
+    /// holding the same combination makes the request fail without any error.
+    public let hotkeyActive: Bool
     public let multitouchActive: Bool
     public let multitouchEventArbitrationActive: Bool
     public let gestureConflictStatus: GestureConflictApplyStatus
@@ -25,12 +28,14 @@ public struct TriggerSettingsApplyResult: Sendable, Equatable {
 
     public init(
         f4Active: Bool,
+        hotkeyActive: Bool = true,
         multitouchActive: Bool,
         multitouchEventArbitrationActive: Bool,
         gestureConflictStatus: GestureConflictApplyStatus,
         gestureConflictBackup: GestureConflictBackup?
     ) {
         self.f4Active = f4Active
+        self.hotkeyActive = hotkeyActive
         self.multitouchActive = multitouchActive
         self.multitouchEventArbitrationActive = multitouchEventArbitrationActive
         self.gestureConflictStatus = gestureConflictStatus
@@ -265,6 +270,8 @@ public final class SettingsViewModel: ObservableObject {
     /// are (re)applied, so the Triggers tab can show a real permission
     /// hint instead of just trusting the toggle.
     @Published public var f4Active: Bool = false
+    /// False only when the hotkey is enabled and could not be registered.
+    @Published public var hotkeyActive: Bool = true
     @Published public private(set) var multitouchActive: Bool = false
     @Published public var multitouchEventArbitrationActive: Bool = false
     @Published public private(set) var gestureConflictStatus: GestureConflictApplyStatus = .unchanged
@@ -523,6 +530,7 @@ public final class SettingsViewModel: ObservableObject {
                 return
             }
             self.f4Active = result.f4Active
+            self.hotkeyActive = result.hotkeyActive
             self.multitouchActive = result.multitouchActive
             self.multitouchEventArbitrationActive = result.multitouchEventArbitrationActive
             self.gestureConflictStatus = result.gestureConflictStatus
@@ -602,6 +610,7 @@ public final class SettingsViewModel: ObservableObject {
             let result = await self.onTriggerSettingsChanged(self.model.triggerSettings)
             if self.triggerApplyGeneration == generation {
                 self.f4Active = result.f4Active
+                self.hotkeyActive = result.hotkeyActive
                 self.multitouchActive = result.multitouchActive
                 self.multitouchEventArbitrationActive = result.multitouchEventArbitrationActive
                 self.gestureConflictStatus = result.gestureConflictStatus
@@ -714,6 +723,7 @@ public final class SettingsViewModel: ObservableObject {
             let result = await self.onTriggerSettingsChanged(triggers)
             if self.triggerApplyGeneration == generation {
                 self.f4Active = result.f4Active
+                self.hotkeyActive = result.hotkeyActive
                 self.multitouchActive = result.multitouchActive
                 self.multitouchEventArbitrationActive = result.multitouchEventArbitrationActive
                 self.gestureConflictStatus = result.gestureConflictStatus

@@ -39,6 +39,14 @@ extension SettingsView {
                                 )
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                                 .frame(height: 24)
+                                if !viewModel.hotkeyActive {
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .foregroundStyle(.orange)
+                                        Text(L10n.hotkeyRegistrationFailedHint)
+                                            .font(.caption)
+                                    }
+                                }
                             }
                         }
                     }

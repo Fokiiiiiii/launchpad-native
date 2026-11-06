@@ -64,6 +64,7 @@
 "settings.triggers.sensitivity" = "灵敏度";
 "settings.triggers.sensitivity.accessibility" = "手势灵敏度";
 "settings.triggers.f4hint" = "F4 需要「输入监控」权限";
+"settings.hotkey.registrationfailed" = "无法注册此快捷键，可能已被其他 App 占用。";
 "settings.triggers.trackpadhint" = "触控板手势需要「辅助功能」和「输入监控」权限";
 "settings.triggers.openprivacysettings" = "打开隐私设置…";
 "launcher.search.empty.title" = "无结果";

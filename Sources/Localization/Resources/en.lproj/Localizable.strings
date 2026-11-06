@@ -64,6 +64,7 @@
 "settings.triggers.sensitivity" = "Sensitivity";
 "settings.triggers.sensitivity.accessibility" = "Gesture sensitivity";
 "settings.triggers.f4hint" = "F4 needs Input Monitoring permission";
+"settings.hotkey.registrationfailed" = "This shortcut could not be registered. Another app may already be using it.";
 "settings.triggers.trackpadhint" = "Trackpad gesture needs Accessibility and Input Monitoring permission";
 "settings.triggers.openprivacysettings" = "Open Privacy Settings…";
 "launcher.search.empty.title" = "No Results";

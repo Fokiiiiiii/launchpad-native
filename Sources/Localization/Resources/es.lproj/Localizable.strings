@@ -64,6 +64,7 @@
 "settings.triggers.sensitivity" = "Sensibilidad";
 "settings.triggers.sensitivity.accessibility" = "Sensibilidad del gesto";
 "settings.triggers.f4hint" = "F4 requiere el permiso «Monitorización de entrada»";
+"settings.hotkey.registrationfailed" = "No se pudo registrar este atajo. Puede que otra app ya lo esté usando.";
 "settings.triggers.trackpadhint" = "El gesto del trackpad requiere los permisos «Accesibilidad» y «Monitorización de entrada»";
 "settings.triggers.openprivacysettings" = "Abrir ajustes de privacidad…";
 "launcher.search.empty.title" = "Sin resultados";
