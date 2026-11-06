@@ -76,6 +76,20 @@ import Testing
     #expect(fourRows < twoRows)
 }
 
+/// A folder of several pages carries a page control in the same panel, so its
+/// icons have to leave room for it under the height cap.
+@Test @MainActor func aPagedFolderLeavesRoomForItsPageControl() {
+    let single = FolderContentsViewController.folderIconSize(gridIconSize: 161.45, rows: 4, availableHeight: 1_050)
+    let paged = FolderContentsViewController.folderIconSize(
+        gridIconSize: 161.45, rows: 4, availableHeight: 1_050, hasPageControl: true
+    )
+    #expect(paged < single)
+
+    let rows = 4.0
+    let height = rows * (paged + 40) + (rows - 1) * 26 + 68 + 77 + 28
+    #expect(height <= 1_050 * 0.75 + 0.001)
+}
+
 /// A short display must not shrink icons away to nothing.
 @Test @MainActor func iconsNeverShrinkBelowAFloor() {
     #expect(FolderContentsViewController.folderIconSize(gridIconSize: 161.45, rows: 4, availableHeight: 300) == 48)

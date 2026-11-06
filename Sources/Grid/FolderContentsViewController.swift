@@ -95,12 +95,21 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     /// came out of, which is what the reference launcher does. The cap only
     /// engages for a folder deep enough that its rows would otherwise take over
     /// the display; at the common one or two rows nothing is scaled at all.
-    static func folderIconSize(gridIconSize: Double, rows: Int, availableHeight: CGFloat) -> Double {
+    static func folderIconSize(
+        gridIconSize: Double,
+        rows: Int,
+        availableHeight: CGFloat,
+        hasPageControl: Bool = false
+    ) -> Double {
         let rowCount = CGFloat(max(rows, 1))
+        // The page control is part of the panel's height whenever there is more
+        // than one page; leaving it out sized icons for a panel taller than the
+        // cap allows, and the bottom row was squeezed.
         let budget = availableHeight * Self.maximumHeightFraction
             - (rowCount - 1) * Self.cellSpacing
             - 2 * Self.gridVerticalPadding
             - Self.approximateChromeHeight
+            - (hasPageControl ? Self.pageControlHeight : 0)
         let perRow = budget / rowCount
         let fits = perRow - Self.tileLabelAllowanceVertical
         return min(gridIconSize, Double(max(fits, 48)))

@@ -77,7 +77,8 @@ final class FolderOverlayPresenter {
         let iconSize = FolderContentsViewController.folderIconSize(
             gridIconSize: metrics.iconSize,
             rows: rows,
-            availableHeight: hostView.bounds.height
+            availableHeight: hostView.bounds.height,
+            hasPageControl: (model.folders[folderID]?.pages.count ?? 0) > 1
         )
         let panelWidth = FolderContentsViewController.panelWidth(
             availableWidth: hostView.bounds.width - 2 * Self.panelSideInset,
