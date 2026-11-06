@@ -745,7 +745,9 @@ private func writeWallpaper(width: Int, height: Int, type: UTType, orientation: 
         space: CGColorSpace(name: CGColorSpace.sRGB)!,
         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
     ))
-    context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 1))
+    // sRGB, not `CGColor(red:green:blue:alpha:)`, which is generic RGB and lands
+    // elsewhere once converted — the colour a test reads back has to be the one put in.
+    context.setFillColor(CGColor(colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, components: [0.2, 0.4, 0.8, 1])!)
     context.fill(CGRect(x: 0, y: 0, width: width, height: height))
     let image = try #require(context.makeImage())
     let url = directory.appendingPathComponent("wallpaper.\(type.preferredFilenameExtension ?? "image")")
@@ -778,6 +780,34 @@ func aStaticWallpaperIsDecodedAtTheSizeTheBlurUses() async throws {
 
     #expect(image.extent.width == WallpaperImageCache.blurInputMaxDimension)
     #expect(image.extent.height == 640)
+}
+
+/// "No blur" asked for the picture, but it was shrunk to the blur's 960 pixels and
+/// its colours were pushed to the blurred look's saturation.
+@Test
+func anUnblurredWallpaperKeepsTheDetailAndColourOfTheOriginal() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = try writeWallpaper(width: 3_000, height: 2_000, type: .png, in: directory)
+    let source = WallpaperSource(kind: .staticImage, url: url)
+
+    let sharp = try #require(await WallpaperImageCache.loadAndBlur(source: source, fallbackSources: [], radius: 0))
+    let blurred = try #require(await WallpaperImageCache.loadAndBlur(source: source, fallbackSources: [], radius: 8))
+
+    #expect(sharp.width == 3_000, "the unblurred picture was shrunk")
+    #expect(CGFloat(blurred.width) == WallpaperImageCache.blurInputMaxDimension)
+
+    // The flat source colour (0.2, 0.4, 0.8) comes back unchanged. Drawn into a
+    // known sRGB pixel so the bytes do not depend on how the image stores them.
+    let pixel = try #require(CGContext(
+        data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ))
+    pixel.draw(sharp, in: CGRect(x: -sharp.width / 2, y: -sharp.height / 2, width: sharp.width, height: sharp.height))
+    let bytes = try #require(pixel.data).assumingMemoryBound(to: UInt8.self)
+    #expect(abs(Int(bytes[0]) - 51) <= 3 && abs(Int(bytes[1]) - 102) <= 3 && abs(Int(bytes[2]) - 204) <= 3,
+            "the colours were changed: \(bytes[0]) \(bytes[1]) \(bytes[2])")
 }
 
 /// A photo taken sideways is stored landscape with an orientation tag. The

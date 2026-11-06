@@ -890,16 +890,21 @@ enum WallpaperImageCache {
         fallbackSources: [WallpaperSource],
         radius: CGFloat
     ) async -> CGImage? {
+        // Blurred, the picture's detail is gone anyway, so a small one is enough.
+        // With the blur off the user asked for the picture itself, which a
+        // 960-pixel copy stretched over a large display is not.
+        let maxDimension = radius > 0 ? blurInputMaxDimension : sharpMaxDimension
         for candidate in [source] + fallbackSources {
-            if let image = await loadSourceImage(candidate) {
-                return blur(image, radius: radius)
+            if let image = await loadSourceImage(candidate, maxDimension: maxDimension) {
+                return blur(image, radius: radius, maxDimension: maxDimension)
             }
         }
         return nil
     }
 
     nonisolated static func loadSourceImage(
-        _ source: WallpaperSource
+        _ source: WallpaperSource,
+        maxDimension: CGFloat = blurInputMaxDimension
     ) async -> CIImage? {
         switch source.kind {
         case .windowCapture:
@@ -913,7 +918,7 @@ enum WallpaperImageCache {
             return CIImage(cgImage: captured)
         case .staticImage:
             guard let url = source.url,
-                  let image = decodeDownsampled(url, maxPixelSize: blurInputMaxDimension) else {
+                  let image = decodeDownsampled(url, maxPixelSize: maxDimension) else {
                 return nil
             }
             return CIImage(cgImage: image)
@@ -1031,6 +1036,10 @@ enum WallpaperImageCache {
     /// would only make the blur slower.
     nonisolated static let blurInputMaxDimension: CGFloat = 960
 
+    /// The longer side an unblurred wallpaper keeps: a 4K display's worth, about
+    /// 33MB as pixels, instead of the blur's 960.
+    nonisolated static let sharpMaxDimension: CGFloat = 3_840
+
     /// Decodes an image file at no more than `maxPixelSize` on its longer side.
     ///
     /// `CIImage(contentsOf:)` decoded the whole file only for the blur to shrink
@@ -1057,11 +1066,12 @@ enum WallpaperImageCache {
         )
     }
 
-    nonisolated private static func blur(_ image: CIImage, radius: CGFloat) -> CGImage? {
-        // Downsample to a fixed max dimension before the expensive blur.
-        let maxDimension = blurInputMaxDimension
+    nonisolated private static func blur(_ image: CIImage, radius: CGFloat, maxDimension: CGFloat) -> CGImage? {
+        // Downsample to a fixed max dimension before the expensive blur. With no
+        // blur nothing is enlarged: the picture is shown as it is.
         let extent = image.extent
-        let scale = maxDimension / max(extent.width, extent.height, 1)
+        let fitScale = maxDimension / max(extent.width, extent.height, 1)
+        let scale = radius > 0 ? fitScale : min(fitScale, 1)
         let downsampled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         // Gaussian blur samples outside the source extent. Clamp first so
         // those samples repeat edge pixels rather than transparent bands.
@@ -1076,10 +1086,16 @@ enum WallpaperImageCache {
         } else {
             colorFilter.inputImage = downsampled
         }
-        colorFilter.saturation = 1.15
+        // The blurred look is nudged toward richer colour; the picture itself is not.
+        colorFilter.saturation = radius > 0 ? 1.15 : 1.0
 
         guard let output = colorFilter.outputImage else { return nil }
         let cropped = output.cropped(to: downsampled.extent)
+        // The picture itself is rendered into sRGB explicitly: left to the context's
+        // default its colours came out lighter than the file's.
+        if radius <= 0, let srgb = CGColorSpace(name: CGColorSpace.sRGB) {
+            return Self.renderContext.createCGImage(cropped, from: cropped.extent, format: .RGBA8, colorSpace: srgb)
+        }
         return Self.renderContext.createCGImage(cropped, from: cropped.extent)
     }
 
