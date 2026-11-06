@@ -57,6 +57,13 @@ public final class IconCache: @unchecked Sendable {
     private let writeStateLock = NSLock()
     private var pendingWriteCount = 0
     private let maxPendingWrites = 8
+    /// Icons are written under a name that carries the app's modification time, so
+    /// every update leaves the previous file behind. Nothing else removes them, so
+    /// the folder is trimmed to this many bytes, oldest first.
+    private let diskBudgetBytes = 64 * 1024 * 1024
+    private let writesPerTrim = 100
+    /// Touched on `writeQueue` only.
+    private var writesSinceTrim = 0
 
     public init(cacheDirectory: URL? = nil) {
         let cachesDirectory = FileManager.default
@@ -66,6 +73,28 @@ public final class IconCache: @unchecked Sendable {
             .appendingPathComponent("com.launchpadnative.app/icons", isDirectory: true)
         self.cacheDirectory = base
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        // Behind the launch: the queue is serial and nothing waits on it.
+        writeQueue.async { [self] in trimDiskCache(toBytes: diskBudgetBytes) }
+    }
+
+    /// Deletes the oldest PNGs until the folder fits in `budget`. Age is the file's
+    /// modification time, i.e. when it was written; an icon still in use that is
+    /// older than the budget allows is simply drawn and written once more.
+    func trimDiskCache(toBytes budget: Int) {
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey]
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: cacheDirectory, includingPropertiesForKeys: Array(keys), options: .skipsHiddenFiles
+        ) else { return }
+        var files = urls.compactMap { url -> (url: URL, date: Date, size: Int)? in
+            guard url.pathExtension == "png", let values = try? url.resourceValues(forKeys: keys) else { return nil }
+            return (url, values.contentModificationDate ?? .distantPast, values.fileSize ?? 0)
+        }
+        var total = files.reduce(0) { $0 + $1.size }
+        guard total > budget else { return }
+        files.sort { $0.date < $1.date }
+        for file in files where total > budget {
+            if (try? FileManager.default.removeItem(at: file.url)) != nil { total -= file.size }
+        }
     }
 
     /// What an icon is cached under: the app's own key and the size it was
@@ -264,6 +293,11 @@ public final class IconCache: @unchecked Sendable {
                 try? pngData.write(to: diskURL, options: .atomic)
             }
             logSlowIfNeeded(record: record, phase: "png-encode+write", start: encodeStart)
+            writesSinceTrim += 1
+            if writesSinceTrim >= writesPerTrim {
+                writesSinceTrim = 0
+                trimDiskCache(toBytes: diskBudgetBytes)
+            }
         }
     }
 

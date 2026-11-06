@@ -24,6 +24,30 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
     )
 }
 
+/// Updated apps leave their old icon files behind; the folder has to stay inside
+/// its budget by dropping the oldest, and leave the rest alone.
+@Test func theDiskCacheDropsTheOldestFilesFirstWhenOverBudget() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let cache = IconCache(cacheDirectory: dir)
+    let names = (0..<5).map { "icon\($0).png" }
+    for (age, name) in names.enumerated() {
+        let url = dir.appendingPathComponent(name)
+        try Data(count: 1_000).write(to: url)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: Double(1_000 + age))], ofItemAtPath: url.path
+        )
+    }
+
+    cache.trimDiskCache(toBytes: 2_500)
+
+    let left = Set(try FileManager.default.contentsOfDirectory(atPath: dir.path))
+    #expect(left == ["icon3.png", "icon4.png"])
+
+    cache.trimDiskCache(toBytes: 2_500)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path).count == 2, "a folder within budget was trimmed")
+}
+
 /// The cache moved from an `actor` (fully serialized) to a concurrent-queue
 /// backed class specifically so multiple icon fetches can run in parallel
 /// instead of one at a time — this test exercises many concurrent callers
