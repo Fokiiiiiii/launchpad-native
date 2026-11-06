@@ -7,30 +7,24 @@ on:
 
 jobs:
   build:
-    name: Build (${{ matrix.name }})
-    runs-on: ${{ matrix.runner }}
+    # Compiled against the macOS 27 SDK (Xcode 27). The result still runs on
+    # macOS 26: the 26 SDK cannot build it, since the glass views use 27 API.
+    runs-on: xcode-27
     timeout-minutes: 30
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { name: macos27, runner: xcode-27 }
-          - { name: macos26, runner: macos-26 }
     steps:
       - uses: actions/checkout@v7
       - name: Build
         run: NO_INSTALL=1 SCRATCH="$RUNNER_TEMP/build" ./Scripts/build-app.sh release
       - name: Package
         run: |
-          zip="LaunchpadNative-${{ matrix.name }}.zip"
-          ditto -c -k --keepParent "$RUNNER_TEMP/build/LaunchpadNative.app" "$zip"
-          shasum -a 256 "$zip" > "$zip.sha256"
+          ditto -c -k --keepParent "$RUNNER_TEMP/build/LaunchpadNative.app" LaunchpadNative.zip
+          shasum -a 256 LaunchpadNative.zip > LaunchpadNative.zip.sha256
       - uses: actions/upload-artifact@v7
         with:
-          name: LaunchpadNative-${{ matrix.name }}
-          path: LaunchpadNative-${{ matrix.name }}.zip*
+          name: LaunchpadNative
+          path: LaunchpadNative.zip*
 
   publish:
     if: startsWith(github.ref, 'refs/tags/')
@@ -41,9 +35,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          pattern: LaunchpadNative-*
-          merge-multiple: true
+          name: LaunchpadNative
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" LaunchpadNative-*.zip* --repo "$GITHUB_REPOSITORY" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" LaunchpadNative.zip LaunchpadNative.zip.sha256 --repo "$GITHUB_REPOSITORY" --generate-notes

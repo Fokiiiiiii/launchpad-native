@@ -125,6 +125,7 @@ struct OwnershipEvidenceCollectorTests {
         for directory in directories {
             try fm.createDirectory(at: directory, withIntermediateDirectories: true)
         }
+        try fm.createDirectory(at: cookies.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data().write(to: cookies)
         try fm.createDirectory(at: byHost.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data().write(to: byHost)

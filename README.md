@@ -1,117 +1,44 @@
 # LaunchpadNative
 
-A replacement for Launchpad, which macOS 26 removed. Press a key or pinch the
-trackpad, your apps appear in a grid over whatever you were doing, you pick
-one, it goes away.
+A native replacement for the Launchpad that macOS 26 removed. Press a key or pinch the trackpad, pick an app, and it goes away.
 
-It runs as a background utility with no Dock icon of its own, reads the apps
-already installed on the machine, and keeps its own arrangement of them —
-including the folders and page order from the old Launchpad, imported on first
-launch.
+## Features
 
-Source only. No App Store build, no installer, no paid tier.
+- **Open it your way** — F4, a hot corner, a global hotkey, or a four- or five-finger pinch.
+- **Fast search** — just start typing. Matches by name, abbreviation (`vsc`), and Japanese reading.
+- **Your layout** — drag to reorder, make folders, add pages. Imports your old Launchpad layout on first launch.
+- **Right-click an icon** — reveal in Finder, keep in Dock, rename, hide, list windows, or uninstall.
+- **Uninstaller** — finds leftover caches and preferences and moves what you tick to the Trash.
+- **Wallpaper background** — blurred, and follows your desktop, including dynamic wallpapers.
+- English, Japanese, Chinese, Korean, German, French and Spanish.
 
-## What it does
+No dependencies, no installer, no tracking. MIT licensed.
 
-**Opening it.** F4 out of the box, plus a hot corner (bottom-right by default),
-a global hotkey you choose, or a four- or five-finger pinch on the trackpad.
-Each is optional and configurable. Escape, a click on the background, or
-launching something closes it.
+## Install
 
-**Finding an app.** Start typing. Results rank by how well they match — the
-whole name first, then the start of it, then a word inside it, then an
-abbreviation ("vsc" finds Visual Studio Code). Japanese names are searchable by
-their reading, so メモ answers to "memo" and システム設定 to "settei", without
-switching input modes. Apps you have opened recently come first among equally
-good matches. Arrow keys move the selection, Return opens it.
+Requires macOS 26 or later on Apple Silicon.
 
-**Arranging it.** Drag an icon to move it; the others get out of the way as you
-go. Hold one over another to make a folder, or over the edge of the screen to
-carry it to the next page. Folders open into a panel you can page through,
-rename in place, and rearrange inside. Right-click any icon to reveal it in
-Finder, keep it in the Dock, rename it, hide it, list its open windows, or
-uninstall it.
+1. Download `LaunchpadNative.zip` from [Releases](../../releases/latest) and unzip it.
+2. Move `LaunchpadNative.app` to `/Applications`.
+3. The app is not notarized, so clear the download flag once, then open it:
 
-**Settings** (five tabs: General, Screen, Apps, Advanced, About) cover the
-triggers, the grid's rows and columns, icon size, sort order, the background,
-whether the real Dock stays on top, login-at-start, a menu-bar icon, hidden
-apps, and a diagnostics export. Available in English, Japanese, Simplified
-Chinese, Korean, German, French and Spanish.
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/LaunchpadNative.app
+   open /Applications/LaunchpadNative.app
+   ```
 
-**Uninstalling other apps** finds what an app left behind — caches,
-preferences, application support — shows you the list with sizes, and moves
-what you tick to the Trash.
+It stays resident and waits for a trigger (F4 out of the box).
 
-## Requirements
+### Build from source
 
-macOS 26 or later, Apple Silicon, and the macOS 27 SDK to build. The app uses
-macOS 27's AppKit additions where it runs on 27, so it has to be compiled
-against that SDK even to run on 26. The SDK comes with Xcode 27; Command Line
-Tools that only carry the 26 SDK cannot build it.
-
-## Build and run
+Needs Xcode 27 (the macOS 27 SDK).
 
 ```sh
 ./Scripts/build-app.sh release
-open ~/Applications/LaunchpadNative.app
 ```
 
-That builds the bundle, signs it, and installs it to `~/Applications`. Run it
-once and it stays resident, waiting for a trigger.
-
-For development, `./Scripts/build-app.sh` with no argument builds the debug
-configuration, which is the one that carries the `LAUNCHPAD_DEBUG_*` hooks used
-for verification — they are compiled out of release builds entirely, so an
-environment variable can never reach into someone else's grid.
-
-```sh
-SCRATCH=~/.cache/launchpad-native/build
-swift build --scratch-path "$SCRATCH"
-swift test  --scratch-path "$SCRATCH"
-```
-
-The `--scratch-path` matters: this repository sits in an iCloud-synced folder,
-and SwiftPM's build database hits disk I/O errors when `.build` is synced.
-
-## How it is put together
-
-| Module | Responsibility |
-| --- | --- |
-| `AppHost` | The resident process: startup order, trigger wiring, window controllers |
-| `Catalog` | Finding installed apps, watching for changes, caching icons |
-| `Persistence` | The saved layout — atomic writes, last-known-good backup |
-| `Grid` | The icon grid, dragging, folders, paging |
-| `Launcher` | The overlay window, search, background |
-| `Triggers` | Hotkey, hot corner, F4, trackpad gestures |
-| `WindowBrowser` | Listing and raising an app's open windows |
-| `Settings` `Onboarding` `WhatsNew` `Uninstall` | The panels |
-| `DesignSystem` `Localization` `Diagnostics` | Shared surfaces, strings, logging |
-
-Private system APIs are used only where no public equivalent exists
-(MultitouchSupport for finger counts, SkyLight for the menu bar), always
-through a resolver that checks for the symbol at runtime rather than linking
-against a guessed signature. Where macOS 26 ships a public replacement —
-`NSGlassEffectView`, `SMAppService`, `NSWindow.CollectionBehavior` — that is
-what gets used.
-
-Pure logic is kept out of the view controllers so it can be tested directly:
-grid geometry, spring math, search ranking, trigger policy, log retention. The
-test suite is ~380 cases and runs in about fifteen seconds.
-
-## Dependencies
-
-None. No Swift Package Manager dependencies at all — only Apple's own
-frameworks, plus the system `libsqlite3` for reading the old Launchpad
-database on first launch.
-
-## More
-
-- [`docs/engineering-log.md`](docs/engineering-log.md) — round-by-round notes
-  on what broke, what the measurements said, and what was tried and reverted
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — build and test expectations, and the
-  rules around private-API changes
-- [`SECURITY.md`](SECURITY.md) — reporting a vulnerability
+This builds, signs and installs to `~/Applications/LaunchpadNative.app`.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see [LICENSE](LICENSE).

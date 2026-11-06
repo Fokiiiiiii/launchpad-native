@@ -698,7 +698,11 @@ private let threeFingerHorizSwipeKey = "TrackpadThreeFingerHorizSwipeGesture"
     let report = coordinator.apply(settings)
 
     #expect(store.touchedKeys.contains(fourFingerKey))
-    #expect(!store.touchedKeys.contains(fiveFingerKey))
+    // A listener that cannot start (no trackpad, as on a CI VM) rolls the
+    // preferences back, and that restore writes every key it captured.
+    if report.multitouchActive {
+        #expect(!store.touchedKeys.contains(fiveFingerKey))
+    }
     #expect(report.gestureConflictUpdate != .unchanged)
     coordinator.stopAll()
     #expect(store.values == initial)

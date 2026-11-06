@@ -405,7 +405,8 @@ private func accessibilityDescendants(of root: Any) -> [Any] {
 
     let cell = try #require(harness.cell(at: 0))
     let tile = try #require(cell.selectionTileFrameForTesting)
-    #expect(abs(tile.width - tile.height) < 1, "the tile was not square")
+    // Up to a point: a 1x display snaps frames to whole points.
+    #expect(abs(tile.width - tile.height) <= 1, "the tile was not square")
     // The icon view's frame is the icon's *canvas*; the artwork inside it is
     // smaller, so the tile lands close to the canvas rather than well past it.
     // Measured against the canvas: a tile the size of the frame would sit far
