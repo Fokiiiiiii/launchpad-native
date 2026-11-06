@@ -53,6 +53,32 @@ private func makeSnapshotFixture(in root: URL, name: String = "Fixture.app") thr
     #expect(CatalogSnapshotStore.prune([record], sources: [source]).isEmpty)
 }
 
+/// An unmounted volume's apps must survive a restart, or the next scan — which
+/// reads that source as unreadable and keeps what it already knows — has nothing
+/// to keep, and the layout loses their places.
+@Test func catalogSnapshotKeepsRecordsOfASourceThatIsNotMounted() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (record, source) = try makeSnapshotFixture(in: root)
+
+    // The volume goes away: the root and everything under it.
+    try FileManager.default.removeItem(at: root)
+
+    #expect(CatalogSnapshotStore.prune([record], sources: [source]) == [record])
+}
+
+@Test func catalogSnapshotStillDropsADeletedAppOfASourceThatIsMounted() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (gone, source) = try makeSnapshotFixture(in: root, name: "Gone.app")
+    let (kept, _) = try makeSnapshotFixture(in: root, name: "Kept.app")
+    try FileManager.default.removeItem(at: gone.bundleURL)
+
+    #expect(CatalogSnapshotStore.prune([gone, kept], sources: [source]) == [kept])
+}
+
 @Test func catalogSnapshotEncodingIsBounded() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

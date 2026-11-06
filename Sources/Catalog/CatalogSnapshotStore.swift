@@ -118,6 +118,15 @@ public enum CatalogSnapshotStore {
         let resolvedRootByID = sourceByID.mapValues {
             $0.rootURL.standardizedFileURL.resolvingSymlinksInPath().path
         }
+        // A source whose root is not there at all — an unmounted volume — says
+        // nothing about the apps it holds. Dropping them here meant the scanner
+        // never saw them, so it had nothing to carry forward, and the next
+        // authoritative update removed them from the user's pages and folders.
+        let rootIsPresent = sourceByID.mapValues { source -> Bool in
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: source.rootURL.path, isDirectory: &isDirectory)
+                && isDirectory.boolValue
+        }
         return records
             .filter { record in
                 guard let source = sourceByID[record.sourceID],
@@ -128,6 +137,8 @@ public enum CatalogSnapshotStore {
                 else {
                     return false
                 }
+
+                if rootIsPresent[record.sourceID] == false { return true }
 
                 // Deliberately `fileExists` and not a `resourceValues` lookup
                 // for existence: `URL` caches resource values, so a bundle
