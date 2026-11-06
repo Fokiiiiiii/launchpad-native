@@ -5,6 +5,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import Diagnostics
 import ImageIO
+import UniformTypeIdentifiers
 import Darwin
 
 enum WallpaperSourceKind: String, Equatable, Hashable, Sendable {
@@ -285,6 +286,15 @@ enum WallpaperSourceResolver {
 enum SystemWallpaperStore {
     static let defaultProviderIdentifier = "com.apple.NeptuneOneExtension"
     static let aerialsProviderIdentifier = "com.apple.wallpaper.choice.aerials"
+    /// What the store records once the wallpaper has been set back to the
+    /// system's own: no configuration at all, and the provider is just "default".
+    static let systemDefaultProviderIdentifier = "default"
+    /// Where the user's own pictures come from: macOS 27's image extension, and
+    /// the provider earlier versions used.
+    static let imageProviderIdentifiers: Set<String> = [
+        "com.apple.wallpaper.extension.image",
+        "com.apple.wallpaper.choice.image",
+    ]
 
     private static let defaultProviderResources = URL(
         fileURLWithPath: "/System/Library/ExtensionKit/Extensions/NeptuneOneWallpaper.appex/Contents/Resources",
@@ -373,6 +383,111 @@ enum SystemWallpaperStore {
               let configuration = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
         else { return nil }
         return configuration["assetID"] as? String
+    }
+
+    /// Every file the store names for the desktop on `displayUUID`, when all
+    /// the choices that could apply to it name the same ones; empty otherwise.
+    static func desktopFileURLs(in store: [String: Any], displayUUID: String?) -> [URL] {
+        let sets = desktopChoices(in: store, displayUUID: displayUUID).map(fileURLs(in:))
+        guard let first = sets.first, sets.allSatisfy({ $0 == first }) else { return [] }
+        return first
+    }
+
+    /// Providers keep the picture they show in different places — a `Files`
+    /// entry, a URL or a bookmark inside `Configuration` — and a new provider
+    /// brings a new layout. Rather than know each one, every file URL found
+    /// anywhere in the choice is collected, nested property lists and
+    /// bookmarks included.
+    private static func fileURLs(in choice: [String: Any]) -> [URL] {
+        var urls: [URL] = []
+        collectFileURLs(choice["Files"], into: &urls)
+        collectFileURLs(choice["Configuration"], into: &urls)
+        var seen: Set<URL> = []
+        return urls.filter { seen.insert($0).inserted }
+    }
+
+    private static func collectFileURLs(_ value: Any?, into urls: inout [URL], depth: Int = 0) {
+        guard depth < 6, let value else { return }
+        switch value {
+        case let string as String:
+            if string.hasPrefix("file://"), let url = URL(string: string), url.isFileURL {
+                urls.append(url)
+            } else if string.hasPrefix("/") {
+                urls.append(URL(fileURLWithPath: string))
+            }
+        case let dictionary as [String: Any]:
+            for key in dictionary.keys.sorted() {
+                collectFileURLs(dictionary[key], into: &urls, depth: depth + 1)
+            }
+        case let array as [Any]:
+            for element in array {
+                collectFileURLs(element, into: &urls, depth: depth + 1)
+            }
+        case let data as Data:
+            if let nested = try? PropertyListSerialization.propertyList(from: data, format: nil) {
+                collectFileURLs(nested, into: &urls, depth: depth + 1)
+            } else if let url = resolveBookmark(data) {
+                urls.append(url)
+            }
+        default:
+            break
+        }
+    }
+
+    private static func resolveBookmark(_ data: Data) -> URL? {
+        let plain: URL.BookmarkResolutionOptions = [.withoutUI, .withoutMounting]
+        for options in [plain, plain.union(.withSecurityScope)] {
+            var isStale = false
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: options,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    /// A picture or movie, by its file type. A path found in a configuration
+    /// can be anything, and only these can be drawn.
+    static func isWallpaperMedia(_ url: URL) -> Bool {
+        guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
+        return type.conforms(to: .image) || type.conforms(to: .movie)
+    }
+}
+
+/// The pictures the user has added in the wallpaper settings.
+///
+/// The store says only that the desktop shows one of them
+/// ("userAddedPhotoShuffle") and names no file. They are kept as links to the
+/// original files, and the wallpaper agent reads the one it draws when the
+/// choice is made, so the link whose file was read most recently is the one on
+/// the desktop. A choice made long ago on a volume that does not update access
+/// times can be wrong; that is the limit of what the system exposes.
+enum UserAddedPhotos {
+    static var directory: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.apple.desktop.photos", isDirectory: true)
+    }
+
+    static func currentPhotoURL(in directory: URL = UserAddedPhotos.directory) -> URL? {
+        let fileManager = FileManager.default
+        guard let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else { return nil }
+        return names.sorted()
+            .compactMap { name -> (url: URL, read: Date)? in
+                let link = directory.appendingPathComponent(name).path
+                guard let destination = try? fileManager.destinationOfSymbolicLink(atPath: link) else { return nil }
+                let target = URL(fileURLWithPath: destination, relativeTo: directory).standardizedFileURL
+                guard SystemWallpaperStore.isWallpaperMedia(target),
+                      let read = try? target.resourceValues(forKeys: [.contentAccessDateKey]).contentAccessDate else {
+                    return nil
+                }
+                return (target, read)
+            }
+            .max { $0.read < $1.read }?
+            .url
     }
 }
 
@@ -553,9 +668,10 @@ enum WallpaperImageCache {
         let storeProvider = store.flatMap {
             SystemWallpaperStore.desktopProvider(in: $0, displayUUID: displayUUID)
         }
+        let fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
         let providerArtworkURL: URL?
         switch storeProvider {
-        case SystemWallpaperStore.defaultProviderIdentifier:
+        case SystemWallpaperStore.defaultProviderIdentifier, SystemWallpaperStore.systemDefaultProviderIdentifier:
             providerArtworkURL = SystemWallpaperStore.defaultProviderArtwork(prefersDark: prefersDarkArtwork)
         case SystemWallpaperStore.aerialsProviderIdentifier:
             providerArtworkURL = store
@@ -566,19 +682,30 @@ enum WallpaperImageCache {
                         assets: AerialArtwork.loadAssets() ?? [],
                         prefersDark: prefersDarkArtwork,
                         isLandscape: targetBounds.map { $0.width >= $0.height } ?? true,
-                        fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+                        fileExists: fileExists
                     )
                 }
         default:
             providerArtworkURL = nil
         }
+        // Any other provider — a photo of the user's own, a built-in picture,
+        // whatever macOS adds next — is read from the files its choice names.
+        let storedFileURL = providerArtworkURL
+            ?? store.flatMap {
+                SystemWallpaperStore.desktopFileURLs(in: $0, displayUUID: displayUUID)
+                    .first { SystemWallpaperStore.isWallpaperMedia($0) && fileExists($0) }
+            }
+            // The image provider records no file for the user's own photos.
+            ?? (SystemWallpaperStore.imageProviderIdentifiers.contains(storeProvider ?? "")
+                ? UserAddedPhotos.currentPhotoURL()
+                : nil)
         // A preflight check only: it never prompts, and this app does not ask
         // for the permission.
         let hasScreenCaptureAccess = CGPreflightScreenCaptureAccess()
         let source = WallpaperSourceResolver.resolve(
             desktopURL: desktopURL,
             configuredURL: configuredURL,
-            providerArtworkURL: providerArtworkURL,
+            providerArtworkURL: storedFileURL,
             windowCandidates: wallpaperWindowCandidates(),
             targetBounds: targetBounds,
             hasScreenCaptureAccess: hasScreenCaptureAccess
@@ -591,7 +718,7 @@ enum WallpaperImageCache {
             fallbackSource = WallpaperSourceResolver.resolve(
                 desktopURL: desktopURL,
                 configuredURL: configuredURL,
-                providerArtworkURL: providerArtworkURL
+                providerArtworkURL: storedFileURL
             )
         } else {
             fallbackSource = nil

@@ -566,6 +566,138 @@ func aVideoArtworkIsSampledAsAnAerialAndAThumbnailAsAStillImage() {
     #expect(fromThumbnail.kind == .staticImage)
 }
 
+// MARK: - Any other provider: the files its choice names
+
+/// One choice as `Store/Index.plist` keeps it: `Files`, and a `Configuration`
+/// that is a property list of its own, stored as data.
+private func fileEntry(files: [Any] = [], configuration: Any? = nil) throws -> [String: Any] {
+    var choice: [String: Any] = ["Provider": imageProvider, "Files": files]
+    if let configuration {
+        choice["Configuration"] = try PropertyListSerialization.data(
+            fromPropertyList: configuration, format: .binary, options: 0
+        )
+    }
+    return ["Desktop": ["Content": ["Choices": [choice]]]]
+}
+
+private func storeFiles(_ entry: [String: Any]) -> [String] {
+    let store: [String: Any] = ["Displays": [thisDisplay: entry]]
+    return SystemWallpaperStore.desktopFileURLs(in: store, displayUUID: thisDisplay).map(\.path)
+}
+
+@Test
+func storeFilesAreReadFromTheFilesEntry() throws {
+    let entry = try fileEntry(files: [["relative": "file:///Users/me/Pictures/my%20photo.jpg"]])
+    #expect(storeFiles(entry) == ["/Users/me/Pictures/my photo.jpg"])
+}
+
+@Test
+func storeFilesAreFoundAnywhereInsideTheConfiguration() throws {
+    let configuration: [String: Any] = [
+        "image": ["url": "file:///tmp/a.png"],
+        "other": "/tmp/b.heic",
+        "ignored": "not a path",
+        "count": 3,
+    ]
+    #expect(storeFiles(try fileEntry(configuration: configuration)) == ["/tmp/a.png", "/tmp/b.heic"])
+}
+
+@Test
+func storeFilesAreFoundInsideANestedPropertyList() throws {
+    let inner = try PropertyListSerialization.data(
+        fromPropertyList: ["url": "file:///tmp/nested.jpg"], format: .binary, options: 0
+    )
+    #expect(storeFiles(try fileEntry(configuration: ["blob": inner])) == ["/tmp/nested.jpg"])
+}
+
+@Test
+func storeFilesAreResolvedFromABookmark() throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("wall.png")
+    try Data([0]).write(to: file)
+
+    let paths = storeFiles(try fileEntry(configuration: ["bookmark": try file.bookmarkData()]))
+
+    #expect(paths.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+        == [file.resolvingSymlinksInPath().path])
+}
+
+/// The current Space is not knowable, so Spaces that name different files give none.
+@Test
+func storeFilesAreEmptyWhenSpacesNameDifferentFiles() throws {
+    let store: [String: Any] = [
+        "Displays": [thisDisplay: try fileEntry(files: [["relative": "file:///tmp/a.jpg"]])],
+        "Spaces": ["space-a": ["Default": try fileEntry(files: [["relative": "file:///tmp/b.jpg"]])]],
+    ]
+    #expect(SystemWallpaperStore.desktopFileURLs(in: store, displayUUID: thisDisplay).isEmpty)
+}
+
+@Test
+func onlyPicturesAndMoviesCountAsWallpaperMedia() {
+    for name in ["a.jpg", "a.JPEG", "a.png", "a.heic", "a.tiff", "a.mov", "a.mp4"] {
+        #expect(SystemWallpaperStore.isWallpaperMedia(URL(fileURLWithPath: "/tmp/\(name)")), "\(name)")
+    }
+    for name in ["a.txt", "a.plist", "a", "a.appex"] {
+        #expect(!SystemWallpaperStore.isWallpaperMedia(URL(fileURLWithPath: "/tmp/\(name)")), "\(name)")
+    }
+}
+
+// MARK: - The user's own photos
+
+/// A directory of links the way the wallpaper settings keep added photos, each
+/// pointing at a real file whose last-read time is set explicitly.
+private func addedPhotos(_ files: [(name: String, read: Int)], dangling: [String] = []) throws -> (links: URL, root: URL) {
+    let root = try temporaryDirectory()
+    let links = root.appendingPathComponent("links", isDirectory: true)
+    try FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
+    for (name, read) in files {
+        let file = root.appendingPathComponent(name)
+        try Data([0]).write(to: file)
+        var times = [timeval(tv_sec: read, tv_usec: 0), timeval(tv_sec: read, tv_usec: 0)]
+        #expect(utimes(file.path, &times) == 0)
+        try FileManager.default.createSymbolicLink(
+            at: links.appendingPathComponent(UUID().uuidString + "." + file.pathExtension),
+            withDestinationURL: file
+        )
+    }
+    for name in dangling {
+        try FileManager.default.createSymbolicLink(
+            atPath: links.appendingPathComponent(UUID().uuidString + "." + (name as NSString).pathExtension).path,
+            withDestinationPath: root.appendingPathComponent(name).path
+        )
+    }
+    return (links, root)
+}
+
+@Test
+func theUserAddedPhotoIsTheLinkWhoseFileWasReadMostRecently() throws {
+    let (links, root) = try addedPhotos(
+        [("older.png", 1_000_000), ("newer.jpg", 2_000_000)],
+        dangling: ["gone.gif"]
+    )
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(UserAddedPhotos.currentPhotoURL(in: links)?.lastPathComponent == "newer.jpg")
+}
+
+@Test
+func addedPhotosWhoseFileIsGoneOrIsNotAPictureAreIgnored() throws {
+    let (links, root) = try addedPhotos([("notes.txt", 3_000_000), ("only.png", 1_000_000)], dangling: ["gone.jpg"])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(UserAddedPhotos.currentPhotoURL(in: links)?.lastPathComponent == "only.png")
+}
+
+@Test
+func noAddedPhotosGiveNoUrl() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(UserAddedPhotos.currentPhotoURL(in: root) == nil)
+    #expect(UserAddedPhotos.currentPhotoURL(in: root.appendingPathComponent("missing")) == nil)
+}
+
 /// Writes a flat-coloured image of the given pixel size, optionally tagged with
 /// an EXIF orientation the way a camera stores a photo taken sideways.
 private func writeWallpaper(width: Int, height: Int, type: UTType, orientation: Int? = nil, in directory: URL) throws -> URL {
