@@ -61,13 +61,16 @@ public final class HotCornerTrigger {
                 DiagnosticsLog.triggers.error("Global mouseMoved monitor unavailable (likely missing Accessibility/Input Monitoring permission)")
             }
         }
-        if localMonitor == nil {
-            localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
-                Task { @MainActor [weak self] in
-                    self?.handleMouseMoved(event)
-                }
-                return event
+        installLocalMonitor()
+    }
+
+    func installLocalMonitor() {
+        guard localMonitor == nil else { return }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleMouseMoved(event)
             }
+            return event
         }
     }
 
