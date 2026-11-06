@@ -68,12 +68,20 @@ public final class IconCache: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
     }
 
+    /// What an icon is cached under: the app's own key and the size it was
+    /// drawn at. The key alone returned whichever size was asked for first to
+    /// every later request, so a small icon came back where a large one was
+    /// wanted.
+    private static func cacheKey(for record: ApplicationRecord, size: CGFloat) -> String {
+        "\(record.iconCacheKey)-s\(Int(size.rounded()))"
+    }
+
     public func icon(for record: ApplicationRecord, size: CGFloat = 128) async -> NSImage {
-        if let cached = readMemory(record.iconCacheKey) {
+        let key = Self.cacheKey(for: record, size: size)
+        if let cached = readMemory(key) {
             return cached
         }
 
-        let key = record.iconCacheKey
         let requestID = UUID()
         return await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
@@ -93,8 +101,8 @@ public final class IconCache: @unchecked Sendable {
     /// Synchronous best-effort peek at the in-memory cache, for callers that
     /// need an icon now and can tolerate a miss. Returns nil on a genuine
     /// cache miss rather than blocking.
-    public func cachedIconIfAvailable(for record: ApplicationRecord) -> NSImage? {
-        readMemory(record.iconCacheKey)
+    public func cachedIconIfAvailable(for record: ApplicationRecord, size: CGFloat = 128) -> NSImage? {
+        readMemory(Self.cacheKey(for: record, size: size))
     }
 
     public func evictMemoryCache() {

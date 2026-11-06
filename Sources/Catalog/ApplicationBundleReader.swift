@@ -206,7 +206,10 @@ enum ApplicationBundleReader {
             isSystemProtected: bundleURL.path.hasPrefix("/System/"),
             isBackgroundOnly: isBackgroundOnly,
             isMenuBarApp: isMenuBarApp,
-            iconCacheKey: "\(bundleIdentifier)-\(Int(modDate.timeIntervalSince1970))",
+            // The identifier alone is shared by every copy of an app, and so was
+            // the picture — two copies with the same modification second drew
+            // each other's icon. The path-derived part tells them apart.
+            iconCacheKey: "\(bundleIdentifier)-\(Int(modDate.timeIntervalSince1970))-\(id.value.prefix(12))",
             canLaunch: canLaunch,
             canOpenNewInstance: canOpenNewInstance,
             lastSeenModificationDate: modDate

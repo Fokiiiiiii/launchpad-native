@@ -470,7 +470,10 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         var tiles: [FolderOverlayTile] = []
         for entry in flattenedItems where entry.page == currentFolderPage {
             guard case .app(let id) = entry.item, let record = model.record(for: id) else { continue }
-            let tileID = record.iconCacheKey
+            // The app's own identity, not the key its picture is cached under:
+            // two copies of an app can share the latter, and then selecting,
+            // dragging or updating one would act on the other.
+            let tileID = record.id.value
             let cachedIcon = cache.cachedIconIfAvailable(for: record)
             tiles.append(FolderOverlayTile(
                 id: tileID,
@@ -610,7 +613,7 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
 
     private func tileID(for item: LayoutItem) -> String? {
         guard case .app(let id) = item, let record = model.record(for: id) else { return nil }
-        return record.iconCacheKey
+        return record.id.value
     }
 
     // MARK: - Renaming

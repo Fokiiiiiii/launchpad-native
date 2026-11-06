@@ -61,6 +61,23 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
     #expect(first === second) // same NSImage instance returned from memory
 }
 
+/// The picture is cached per size. Keyed by the app alone, whichever size was
+/// asked for first came back for every later request.
+@Test func theSameAppAtTwoSizesIsCachedSeparately() async {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let cache = IconCache(cacheDirectory: dir)
+    let r = record("Calculator", id: "com.apple.calculator")
+
+    let small = await cache.icon(for: r, size: 64)
+    let large = await cache.icon(for: r, size: 128)
+
+    #expect(small !== large)
+    #expect(cache.cachedIconIfAvailable(for: r, size: 64) === small)
+    #expect(cache.cachedIconIfAvailable(for: r, size: 128) === large)
+    #expect(cache.cachedIconIfAvailable(for: r, size: 32) == nil)
+}
+
 /// The key starts with an identifier from the app's own Info.plist.
 @Test func aHostileKeyStillCachesInsideTheCacheDirectory() {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
