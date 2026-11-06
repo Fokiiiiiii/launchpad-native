@@ -31,6 +31,10 @@ final class FolderOverlayPresenter {
     /// subview tree, but nothing else retains the controller behind it.
     private var contentsViewController: FolderContentsViewController?
     private var onDidCloseHandler: (() -> Void)?
+    /// Handlers of panels that are fading out, by the close that owns them. They
+    /// wait here rather than travelling into the completion closure, so the one
+    /// that fires is always the one that belonged to the panel being closed.
+    private var closingHandlers: [UUID: () -> Void] = [:]
 
     /// Test hook: the panel is held only here, and losing that hold once left
     /// every async icon load resolving against a dead controller.
@@ -239,11 +243,12 @@ final class FolderOverlayPresenter {
         // the old close must neither throw those away nor call them — that left
         // the new folder with no controller behind its icons.
         let closingController = contentsViewController
-        let closingHandler = onDidCloseHandler
+        let closeID = UUID()
+        closingHandlers[closeID] = onDidCloseHandler
         onDidCloseHandler = nil
 
         guard animated else {
-            finishClose(backdrop: backdrop, closingController: closingController, closingHandler: closingHandler)
+            finishClose(backdrop: backdrop, closingController: closingController, closeID: closeID)
             return
         }
         if let panel = closingController?.view {
@@ -255,7 +260,7 @@ final class FolderOverlayPresenter {
             backdrop.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             Task { @MainActor [weak self] in
-                self?.finishClose(backdrop: backdrop, closingController: closingController, closingHandler: closingHandler)
+                self?.finishClose(backdrop: backdrop, closingController: closingController, closeID: closeID)
             }
         })
     }
@@ -263,13 +268,13 @@ final class FolderOverlayPresenter {
     private func finishClose(
         backdrop: NSView,
         closingController: FolderContentsViewController?,
-        closingHandler: (() -> Void)?
+        closeID: UUID
     ) {
         backdrop.removeFromSuperview()
         if contentsViewController === closingController {
             contentsViewController = nil
         }
-        closingHandler?()
+        closingHandlers.removeValue(forKey: closeID)?()
     }
 }
 
