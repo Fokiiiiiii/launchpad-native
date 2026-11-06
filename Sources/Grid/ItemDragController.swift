@@ -432,6 +432,10 @@ final class ItemDragController {
         guard zoneTarget != session.pendingRawFolderCandidateIndex else { return }
         session.pendingRawFolderCandidateIndex = zoneTarget
         session.folderTimer?.invalidate()
+        // A target already confirmed on the previous candidate must not outlive
+        // the pointer leaving it: moving straight onto another icon and letting go
+        // before its hover delay ran out used to drop the item into the old one.
+        clearFolderCandidateHighlight(session: session)
         guard let zoneTarget else {
             clearFolderCandidate(session: session)
             return
@@ -852,6 +856,16 @@ final class ItemDragController {
     // MARK: Drop / settle / cancel
 
     private func endItemDrag(session: ItemDrag.ItemDragSession) {
+        // The catalog can reconcile mid-drag and shift the pages under the indexes
+        // taken at pick-up; dropping by index would then move whichever app now
+        // sits there. Cancel instead of guessing.
+        guard model.pages.indices.contains(session.sourcePage),
+              model.pages[session.sourcePage].indices.contains(session.sourceOriginalIndex),
+              model.pages[session.sourcePage][session.sourceOriginalIndex] == session.draggedItem else {
+            DiagnosticsLog.grid.notice("endItemDrag: source moved during the drag, cancelling")
+            revertItemDrag(session: session)
+            return
+        }
         disarmItemDragSafetyNet()
         session.invalidateTimers()
         activeItemDrag = nil
