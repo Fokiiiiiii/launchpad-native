@@ -1,6 +1,7 @@
 import AppKit
 import Diagnostics
-import ScreenCaptureKit
+// SCShareableContent is not Sendable, but it is only ever read once fetched.
+@preconcurrency import ScreenCaptureKit
 
 /// Captures a single-shot thumbnail for one window via the public
 /// `SCScreenshotManager.captureImage` (macOS 14+) — verified live on this
@@ -20,8 +21,25 @@ public actor WindowThumbnailService {
     /// cells are 140x130pt, so this covers 2x backing scale with headroom.
     private static let maxThumbnailPixelExtent: CGFloat = 320
 
+    /// Bumped by `evictAll`. A capture that began before it must not put its result
+    /// back: the browser it was for has already gone away.
+    private var generation = 0
+    private var inFlight: [Int: Task<NSImage?, Never>] = [:]
+    /// One listing of the on-screen windows, shared by every capture asking while
+    /// it is being fetched — a page of cells shows up all at once, and each used
+    /// to enumerate every window on the system by itself.
+    private var contentTask: Task<SCShareableContent, Error>?
+    /// Test seam: stands in for the ScreenCaptureKit capture.
+    private let captureOverride: (@Sendable (WindowInfo) async -> NSImage?)?
+
     public init(ttl: Duration = .seconds(2)) {
         self.ttl = ttl
+        self.captureOverride = nil
+    }
+
+    init(ttl: Duration = .seconds(2), capture: @escaping @Sendable (WindowInfo) async -> NSImage?) {
+        self.ttl = ttl
+        self.captureOverride = capture
     }
 
     public func thumbnail(for window: WindowInfo) async -> NSImage? {
@@ -35,8 +53,34 @@ public actor WindowThumbnailService {
         // the process's lifetime.
         cache = cache.filter { now - $0.value.capturedAt < ttl }
 
+        if let running = inFlight[window.id] { return await running.value }
+        let startedIn = generation
+        let task = Task { await self.capture(window, startedIn: startedIn, at: now) }
+        inFlight[window.id] = task
+        let image = await task.value
+        if generation == startedIn { inFlight[window.id] = nil }
+        return image
+    }
+
+    private func capture(_ window: WindowInfo, startedIn: Int, at now: ContinuousClock.Instant) async -> NSImage? {
+        let captured: NSImage?
+        if let captureOverride { captured = await captureOverride(window) } else { captured = await captureWindow(window) }
+        guard let image = captured else { return nil }
+        if generation == startedIn { cache[window.id] = CacheEntry(image: image, capturedAt: now) }
+        return image
+    }
+
+    private func shareableContent() async throws -> SCShareableContent {
+        if let running = contentTask { return try await running.value }
+        let task = Task { try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true) }
+        contentTask = task
+        defer { contentTask = nil }
+        return try await task.value
+    }
+
+    private func captureWindow(_ window: WindowInfo) async -> NSImage? {
         do {
-            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+            let content = try await shareableContent()
             guard let scWindow = content.windows.first(where: { $0.windowID == window.id }) else {
                 return nil
             }
@@ -55,9 +99,7 @@ public actor WindowThumbnailService {
             config.showsCursor = false
 
             let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-            let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-            cache[window.id] = CacheEntry(image: image, capturedAt: now)
-            return image
+            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
         } catch {
             DiagnosticsLog.catalog.error("Window thumbnail capture failed for window \(window.id, privacy: .public): \(String(describing: error), privacy: .public)")
             return nil
@@ -65,6 +107,8 @@ public actor WindowThumbnailService {
     }
 
     public func evictAll() {
+        generation += 1
         cache.removeAll()
+        inFlight.removeAll()
     }
 }
