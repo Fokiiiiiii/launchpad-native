@@ -95,6 +95,11 @@ struct GestureDeviceRouter {
 @MainActor
 public final class MultitouchGestureTrigger {
     private var deviceHandles: [UnsafeMutableRawPointer] = []
+    /// Set by `start()`, cleared by `stop()`. A listener that is wanted but holds
+    /// no devices — it started with none, or a re-attach failed — still has to
+    /// try again when one appears; keying that on the handles alone meant a
+    /// listener that had once ended up empty never came back.
+    private var isWanted = false
     // MTDeviceCreateList owns the device objects through the returned array.
     // Keep that array alive for as long as the raw handles are in use; releasing
     // it at the end of start() leaves dangling pointers that crash inside
@@ -166,6 +171,7 @@ public final class MultitouchGestureTrigger {
 
     @discardableResult
     public func start() -> MultitouchActivationReport {
+        isWanted = true
         guard deviceHandles.isEmpty else {
             return MultitouchActivationReport(
                 rawListenerActive: isActive,
@@ -287,14 +293,24 @@ public final class MultitouchGestureTrigger {
     /// distinguish; a device appearing or disappearing always changes it.
     @discardableResult
     public func restartIfDeviceSetChanged() -> Bool {
-        guard !deviceHandles.isEmpty else { return false }
-        guard let count = currentDeviceCount(), count != deviceHandles.count else { return false }
+        guard let count = currentDeviceCount(),
+              Self.shouldReattach(isWanted: isWanted, attached: deviceHandles.count, present: count) else { return false }
         DiagnosticsLog.triggers.info(
             "Multitouch devices changed (\(self.deviceHandles.count, privacy: .public) -> \(count, privacy: .public)); re-attaching the listener"
         )
         stop()
         start()
         return true
+    }
+
+    /// Whether the devices present now call for attaching again.
+    ///
+    /// A listener that is wanted attaches when it holds nothing and there is
+    /// something to hold, and again whenever the count moves. One that is not
+    /// wanted never does.
+    nonisolated static func shouldReattach(isWanted: Bool, attached: Int, present: Int) -> Bool {
+        guard isWanted else { return false }
+        return attached == 0 ? present > 0 : present != attached
     }
 
     private func currentDeviceCount() -> Int? {
@@ -307,6 +323,7 @@ public final class MultitouchGestureTrigger {
     }
 
     public func stop() {
+        isWanted = false
         gestureEventTap.stop()
         typealias MTDeviceStopFn = @convention(c) (UnsafeMutableRawPointer) -> Int32
         typealias MTUnregisterFn = @convention(c) (UnsafeMutableRawPointer, MTContactCallbackFunction) -> Int32

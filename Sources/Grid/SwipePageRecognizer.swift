@@ -48,6 +48,13 @@ final class SwipePageRecognizer {
     private var lastDiscreteWheelPageChange: CFTimeInterval = 0
     private let discreteWheelCooldown: CFTimeInterval = 0.35
 
+    /// A driver that reports precise deltas but no phases never says a swipe has
+    /// ended, so `onEnded` — which settles the page — would never come, and the
+    /// page would stay where the finger left it. A gap this long with no further
+    /// sample is taken as the end.
+    private var idleEndWork: DispatchWorkItem?
+    private let idleEndDelay: TimeInterval = 0.12
+
     /// A page fits entirely in the viewport (no horizontal scroll content),
     /// so this view has nothing to actually scroll — `scrollWheel` is
     /// overridden purely to recognize the swipe gesture and translate it
@@ -68,7 +75,12 @@ final class SwipePageRecognizer {
         // Trackpad drivers may put the useful samples in momentumPhase or
         // leave both phase fields empty. Normalize all of those forms into
         // the same continuous state machine instead of dropping the frames.
-        if event.phase.contains(.mayBegin) || event.phase.contains(.began) {
+        // A series that starts with a momentum phase and no scroll phase is
+        // still a new series: left alone, the state of the one before it — which
+        // is marked complete — suppressed everything that followed.
+        let momentumBegan = event.phase == [] && event.momentumPhase.contains(.began)
+        if event.phase.contains(.mayBegin) || event.phase.contains(.began) || momentumBegan {
+            idleEndWork?.cancel()
             swipeAccumulatedDeltaX = 0
             swipeAccumulatedDeltaY = 0
             swipeAxis = nil
@@ -113,10 +125,38 @@ final class SwipePageRecognizer {
             }
         }
 
+        if !hasPhase && event.hasPreciseScrollingDeltas {
+            scheduleIdleEnd()
+        }
+
         let isEnded = event.phase.contains(.ended) || event.phase.contains(.cancelled)
             || (momentumOnly && (event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled)))
         guard isEnded, !swipeCompletedForGesture else { return }
+        idleEndWork?.cancel()
+        finishGesture(synthetic: false)
+    }
 
+    private func scheduleIdleEnd() {
+        idleEndWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.finishIdleGesture() }
+        }
+        idleEndWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + idleEndDelay, execute: work)
+    }
+
+    /// Ends a gesture that has gone quiet without saying so. Also the entry
+    /// point a test uses instead of waiting out the delay.
+    func finishIdleGesture() {
+        idleEndWork = nil
+        finishGesture(synthetic: true)
+    }
+
+    /// - Parameter synthetic: the end was inferred, not reported. There is no
+    ///   phase boundary to mark the gesture complete, so the next burst of
+    ///   samples must be free to start a new one.
+    private func finishGesture(synthetic: Bool) {
+        guard !swipeCompletedForGesture else { return }
         DiagnosticsLog.grid.notice("scrollWheel: ended/cancelled, engaged=\(self.swipeEngaged, privacy: .public), dx=\(self.swipeAccumulatedDeltaX, privacy: .public), dy=\(self.swipeAccumulatedDeltaY, privacy: .public)")
         if swipeEngaged, let axis = swipeAxis {
             let effectiveDelta = axis == .horizontal ? swipeAccumulatedDeltaX : swipeAccumulatedDeltaY
@@ -126,7 +166,7 @@ final class SwipePageRecognizer {
         swipeAccumulatedDeltaY = 0
         swipeAxis = nil
         swipeEngaged = false
-        swipeCompletedForGesture = true
+        swipeCompletedForGesture = !synthetic
         recentSamples.removeAll()
     }
 
