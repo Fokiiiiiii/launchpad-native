@@ -228,6 +228,9 @@ public enum L10n {
 
     public static var diagnosticsHeader: String { string("settings.diagnostics.header", "Diagnostics") }
     public static var diagnosticsSaveReport: String { string("settings.diagnostics.savereport", "Export Logs…") }
+    public static var layoutSaveFailedTitle: String { string("alert.layoutsavefailed.title", "The layout could not be saved") }
+    public static var layoutSaveFailedMessage: String { string("alert.layoutsavefailed.message", "Your changes are kept while the app runs but will be lost when it quits. Check that the disk has free space and can be written to. The next change tries again.") }
+    public static var okButton: String { string("common.ok", "OK") }
     public static var diagnosticsSaveFailed: String { string("settings.diagnostics.savefailed", "The diagnostics report could not be saved.") }
 
     public static var whatsNewTitle: String { string("whatsnew.title", "What's New") }

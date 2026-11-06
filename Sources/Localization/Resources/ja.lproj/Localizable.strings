@@ -76,6 +76,9 @@
 "settings.hidden.empty.hint" = "アプリを右クリックして非表示にすると、ここに表示されます。";
 "settings.hidden.unhide" = "表示に戻す";
 "common.cancel" = "キャンセル";
+"common.ok" = "OK";
+"alert.layoutsavefailed.title" = "配置を保存できませんでした";
+"alert.layoutsavefailed.message" = "変更はアプリの実行中は保持されますが、終了すると失われます。ディスクの空き容量と書き込み権限を確認してください。次の変更でもう一度保存を試みます。";
 "menu.open" = "開く";
 "menu.opennewinstance" = "新規インスタンスを開く";
 "menu.showinfinder" = "Finderで表示";

@@ -124,11 +124,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Said once when saving starts failing, not on every attempt after it.
+    private func presentLayoutSaveFailure() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L10n.layoutSaveFailedTitle
+        alert.informativeText = L10n.layoutSaveFailedMessage
+        alert.addButton(withTitle: L10n.okButton)
+        alert.runModal()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         ProcessInfo.processInfo.disableAutomaticTermination("LaunchpadNative handles global triggers while hidden")
         DiagnosticsLog.appHost.info("LaunchpadNative resident host started")
         installCrashReporting()
+
+        launcherWindowController.model.onSaveFailureChange = { [weak self] failed in
+            if failed { self?.presentLayoutSaveFailure() }
+        }
 
         launcherWindowController.setOnOpenSettings { [weak self] in
             guard let self, launcherWindowController.isVisible else { return }

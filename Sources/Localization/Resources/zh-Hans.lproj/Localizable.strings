@@ -76,6 +76,9 @@
 "settings.hidden.empty.hint" = "在应用的右键菜单中选择「隐藏」，即可在此列出。";
 "settings.hidden.unhide" = "取消隐藏";
 "common.cancel" = "取消";
+"common.ok" = "好";
+"alert.layoutsavefailed.title" = "无法保存布局";
+"alert.layoutsavefailed.message" = "更改在 App 运行期间会保留，但退出后会丢失。请检查磁盘是否有可用空间并且可写入。下一次更改时会再次尝试保存。";
 "menu.open" = "打开";
 "menu.opennewinstance" = "打开新实例";
 "menu.showinfinder" = "在访达中显示";

@@ -76,6 +76,9 @@
 "settings.hidden.empty.hint" = "Blende eine App über ihr Kontextmenü aus, damit sie hier erscheint.";
 "settings.hidden.unhide" = "Einblenden";
 "common.cancel" = "Abbrechen";
+"common.ok" = "OK";
+"alert.layoutsavefailed.title" = "Das Layout konnte nicht gespeichert werden";
+"alert.layoutsavefailed.message" = "Ihre Änderungen bleiben erhalten, solange die App läuft, gehen aber beim Beenden verloren. Prüfen Sie, ob auf dem Datenträger Platz frei ist und er beschreibbar ist. Die nächste Änderung versucht es erneut.";
 "menu.open" = "Öffnen";
 "menu.opennewinstance" = "Neue Instanz öffnen";
 "menu.showinfinder" = "Im Finder zeigen";

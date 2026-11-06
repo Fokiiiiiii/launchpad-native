@@ -76,6 +76,9 @@
 "settings.hidden.empty.hint" = "Oculta una app desde su menú contextual para que aparezca aquí.";
 "settings.hidden.unhide" = "Mostrar";
 "common.cancel" = "Cancelar";
+"common.ok" = "OK";
+"alert.layoutsavefailed.title" = "No se pudo guardar la disposición";
+"alert.layoutsavefailed.message" = "Tus cambios se conservan mientras la app está abierta, pero se perderán al salir. Comprueba que el disco tenga espacio libre y permita escribir. El siguiente cambio volverá a intentarlo.";
 "menu.open" = "Abrir";
 "menu.opennewinstance" = "Abrir nueva instancia";
 "menu.showinfinder" = "Mostrar en el Finder";

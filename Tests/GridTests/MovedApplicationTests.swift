@@ -88,6 +88,35 @@ private func temporaryDirectory() -> URL {
     #expect(model.alias(for: b.id) == nil)
 }
 
+/// Almost every caller starts a save and drops its result, so a full or read-only
+/// disk looked like success until a restart brought the old layout back. The model
+/// says when saving starts failing, once, and when it works again.
+@Test @MainActor func aFailingSaveIsReportedOnceAndSoIsTheRecovery() async throws {
+    let dir = temporaryDirectory()
+    defer {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        try? FileManager.default.removeItem(at: dir)
+    }
+    let model = makeModel(dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "com.example.a")])
+    var changes: [Bool] = []
+    model.onSaveFailureChange = { changes.append($0) }
+
+    // A folder nothing can be written into.
+    try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.path)
+    let first = await model.save()
+    let second = await model.save()
+    #expect(!first && !second)
+    #expect(model.saveFailed)
+    #expect(changes == [true], "a failure streak was reported more than once")
+
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+    #expect(await model.save())
+    #expect(!model.saveFailed)
+    #expect(changes == [true, false])
+}
+
 /// A legacy import is applied only to a layout with nothing in it, and a first
 /// run with an empty layout holds off filling the grid from a partial startup
 /// cache so that import still has somewhere to land.

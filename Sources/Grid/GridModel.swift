@@ -944,15 +944,33 @@ public final class GridModel {
 
     // MARK: - Persistence
 
+    /// True from a save that failed until the next one that works. Most callers
+    /// start a save and drop its result, so without this a full disk or an
+    /// unwritable folder looked like success until a restart brought back the old
+    /// layout.
+    public private(set) var saveFailed = false
+
+    /// Called when `saveFailed` changes: once when saving starts failing, once when
+    /// it recovers — not on every failed attempt.
+    public var onSaveFailureChange: ((Bool) -> Void)?
+
+    private func recordSave(succeeded: Bool) {
+        guard saveFailed == succeeded else { return }
+        saveFailed = !succeeded
+        onSaveFailureChange?(saveFailed)
+    }
+
     @discardableResult
     public func save() async -> Bool {
         document.pages = pages
         document.folders = folders
         do {
             try await layoutStore.save(document)
+            recordSave(succeeded: true)
             return true
         } catch {
             DiagnosticsLog.persistence.error("Failed to save layout: \(String(describing: error), privacy: .public)")
+            recordSave(succeeded: false)
             return false
         }
     }
@@ -963,6 +981,8 @@ public final class GridModel {
     public func saveResult() async -> Bool {
         document.pages = pages
         document.folders = folders
-        return await layoutStore.saveResult(document)
+        let saved = await layoutStore.saveResult(document)
+        recordSave(succeeded: saved)
+        return saved
     }
 }

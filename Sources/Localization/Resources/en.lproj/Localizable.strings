@@ -76,6 +76,9 @@
 "settings.hidden.empty.hint" = "Hide an app from its context menu to list it here.";
 "settings.hidden.unhide" = "Unhide";
 "common.cancel" = "Cancel";
+"common.ok" = "OK";
+"alert.layoutsavefailed.title" = "The layout could not be saved";
+"alert.layoutsavefailed.message" = "Your changes are kept while the app runs but will be lost when it quits. Check that the disk has free space and can be written to. The next change tries again.";
 "menu.open" = "Open";
 "menu.opennewinstance" = "Open New Instance";
 "menu.showinfinder" = "Show in Finder";
