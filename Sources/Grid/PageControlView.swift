@@ -19,14 +19,55 @@ public final class PageControlView: NSView {
     public var currentPage: Int = 0 {
         didSet {
             guard currentPage != oldValue else { return }
-            updateDotStates()
+            if visibleDotRange != shownDotRange {
+                rebuildDots()
+            } else {
+                updateDotStates()
+            }
             updateChevronEnabledState()
         }
+    }
+
+    private static let dotSize: CGFloat = 24
+    private static let dotSpacing: CGFloat = 8
+    private static let chevronWidth: CGFloat = 32
+    /// Clear space kept between a chevron and the nearest dot.
+    private static let chevronGap: CGFloat = 8
+
+    /// How many dots fit between the two chevrons at the current width. Not
+    /// limited until the view has a width: every dot used to be drawn whatever the
+    /// space, and past a handful of pages they ran under the chevrons.
+    private var dotCapacity = Int.max
+    private var shownDotRange: Range<Int> = 0..<0
+
+    /// The pages whose dots are showing: all of them when they fit, otherwise a
+    /// window that follows the current page. The chevrons reach every page.
+    private var visibleDotRange: Range<Int> {
+        let pages = max(numberOfPages, 1)
+        let count = min(pages, dotCapacity)
+        let start = min(max(currentPage - count / 2, 0), pages - count)
+        return start..<(start + count)
+    }
+
+    private func capacity(forWidth width: CGFloat) -> Int {
+        guard width > 0 else { return .max }
+        let room = width - 2 * (Self.chevronWidth + Self.chevronGap)
+        return max(Int((room + Self.dotSpacing) / (Self.dotSize + Self.dotSpacing)), 1)
+    }
+
+    public override func layout() {
+        super.layout()
+        let capacity = capacity(forWidth: bounds.width)
+        guard capacity != dotCapacity else { return }
+        dotCapacity = capacity
+        rebuildDots()
     }
 
     private var dotButtons: [NSButton] = []
     /// Test-only dot count.
     var dotButtonCountForTesting: Int { dotButtons.count }
+    /// Test-only: the page each showing dot stands for.
+    var dotTagsForTesting: [Int] { dotButtons.map(\.tag) }
     /// Every button a click can land on, in visual order.
     var buttonsForTesting: [NSButton] { [previousButton] + dotButtons + [nextButton] }
     private let dotStack = NSStackView()
@@ -38,7 +79,7 @@ public final class PageControlView: NSView {
 
         dotStack.translatesAutoresizingMaskIntoConstraints = false
         dotStack.orientation = .horizontal
-        dotStack.spacing = 8
+        dotStack.spacing = Self.dotSpacing
 
         configureChevron(previousButton, symbol: "chevron.left", label: L10n.previousPageAccessibilityLabel, action: #selector(previousTapped))
         configureChevron(nextButton, symbol: "chevron.right", label: L10n.nextPageAccessibilityLabel, action: #selector(nextTapped))
@@ -93,7 +134,8 @@ public final class PageControlView: NSView {
     private func rebuildDots() {
         dotButtons.forEach { $0.removeFromSuperview() }
         dotButtons.removeAll()
-        for index in 0..<max(numberOfPages, 1) {
+        shownDotRange = visibleDotRange
+        for index in shownDotRange {
             let button = NSButton(title: "", target: self, action: #selector(dotClicked(_:)))
             button.tag = index
             button.isBordered = false
@@ -107,8 +149,8 @@ public final class PageControlView: NSView {
             button.setContentHuggingPriority(.required, for: .horizontal)
             button.setAccessibilityLabel(L10n.pageNumberAccessibilityLabel(index + 1))
             NSLayoutConstraint.activate([
-                button.widthAnchor.constraint(equalToConstant: 24),
-                button.heightAnchor.constraint(equalToConstant: 24)
+                button.widthAnchor.constraint(equalToConstant: Self.dotSize),
+                button.heightAnchor.constraint(equalToConstant: Self.dotSize)
             ])
             dotStack.addArrangedSubview(button)
             dotButtons.append(button)
@@ -119,8 +161,8 @@ public final class PageControlView: NSView {
     private func updateDotStates() {
         effectiveAppearance.performAsCurrentDrawingAppearance { [weak self] in
             guard let self else { return }
-            for (index, button) in dotButtons.enumerated() {
-                let isCurrentPage = index == currentPage
+            for button in dotButtons {
+                let isCurrentPage = button.tag == currentPage
                 button.contentTintColor = isCurrentPage
                     ? NSColor.labelColor
                     : NSColor.tertiaryLabelColor

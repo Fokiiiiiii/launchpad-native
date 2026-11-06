@@ -53,6 +53,29 @@ import Testing
     #expect(control.dotButtonCountForTesting == 1)
 }
 
+/// Past a handful of pages the dots ran under the chevrons. They now show a window
+/// around the current page that fits, and that window follows the page.
+@Test @MainActor func manyPagesShowOnlyTheDotsThatFitAndTheWindowFollowsTheCurrentPage() {
+    let control = PageControlView(frame: NSRect(x: 0, y: 0, width: 240, height: 32))
+    control.numberOfPages = 30
+    control.layoutSubtreeIfNeeded()
+
+    // 240 wide, less two chevrons and their gaps, holds five 24pt dots.
+    #expect(control.dotButtonCountForTesting == 5)
+    let dotsWidth = CGFloat(control.dotButtonCountForTesting) * 24 + CGFloat(control.dotButtonCountForTesting - 1) * 8
+    #expect(dotsWidth <= 240 - 2 * (32 + 8))
+
+    control.currentPage = 15
+    #expect(control.dotButtonCountForTesting == 5)
+    #expect(control.dotTagsForTesting == Array(13...17))
+
+    control.currentPage = 29
+    #expect(control.dotTagsForTesting == Array(25...29))
+
+    control.numberOfPages = 3
+    #expect(control.dotTagsForTesting == [0, 1, 2], "a few pages should all show")
+}
+
 /// On macOS 27 the glass pill contains the buttons so it can respond to them;
 /// earlier it sits behind them. Either way a click on a button must land on
 /// that button — glass taking clicks meant for the controls above it is a
