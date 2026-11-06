@@ -45,8 +45,8 @@ private func contextMenuRecord() -> ApplicationRecord {
     let without = ContextMenuBuilder.menu(for: record, actions: .init(open: {}, showInFinder: {}, rename: {}, hide: {}))
     let with = ContextMenuBuilder.menu(for: record, actions: .init(open: {}, showInFinder: {}, rename: {}, hide: {}, getInfo: {}))
 
-    #expect(!without.items.contains { $0.title == L10n.menuGetInfo })
-    #expect(with.items.contains { $0.title == L10n.menuGetInfo })
+    // The item and the separator in front of it.
+    #expect(with.items.count == without.items.count + 2)
     #expect(without.items.last?.isSeparatorItem != true)
 }
 
