@@ -92,7 +92,7 @@ enum WallpaperSourceResolver {
         // while the store said the desktop was the new default. The store is
         // what describes the desktop as it is now.
         if let providerArtworkURL, isUsableFile(providerArtworkURL) {
-            return WallpaperSource(kind: .staticImage, url: providerArtworkURL)
+            return source(for: providerArtworkURL)
         }
 
         if let configuredURL,
@@ -284,6 +284,7 @@ enum WallpaperSourceResolver {
 /// inside its extension as a light and a dark still.
 enum SystemWallpaperStore {
     static let defaultProviderIdentifier = "com.apple.NeptuneOneExtension"
+    static let aerialsProviderIdentifier = "com.apple.wallpaper.choice.aerials"
 
     private static let defaultProviderResources = URL(
         fileURLWithPath: "/System/Library/ExtensionKit/Extensions/NeptuneOneWallpaper.appex/Contents/Resources",
@@ -320,34 +321,121 @@ enum SystemWallpaperStore {
     /// wallpaper. The store-wide entries are consulted only when nothing is
     /// recorded for the display itself.
     static func desktopProvider(in store: [String: Any], displayUUID: String?) -> String? {
-        var providers: Set<String> = []
+        let providers = Set(desktopChoices(in: store, displayUUID: displayUUID).compactMap { $0["Provider"] as? String })
+        return providers.count == 1 ? providers.first : nil
+    }
+
+    /// The Aerial the store says the desktop on `displayUUID` shows, when every
+    /// choice that could apply to it names the same one; nil otherwise. For a
+    /// dynamic wallpaper such as the Golden Gate one this is the id of the whole
+    /// set, not of any one of its light/dark, landscape/portrait videos.
+    static func desktopAerialAssetID(in store: [String: Any], displayUUID: String?) -> String? {
+        let ids = desktopChoices(in: store, displayUUID: displayUUID).map(aerialAssetID(of:))
+        guard let first = ids.first, let id = first, ids.allSatisfy({ $0 == id }) else { return nil }
+        return id
+    }
+
+    private static func desktopChoices(in store: [String: Any], displayUUID: String?) -> [[String: Any]] {
+        var choices: [[String: Any]] = []
         if let displayUUID {
             let displays = store["Displays"] as? [String: Any]
-            providers.formUnion(desktopProviders(of: displays?[displayUUID]))
+            choices += desktopChoices(of: displays?[displayUUID])
             let spaces = store["Spaces"] as? [String: Any] ?? [:]
             for case let space as [String: Any] in spaces.values {
                 // A Space's own entry for this display replaces its default.
                 let perDisplay = (space["Displays"] as? [String: Any])?[displayUUID]
-                providers.formUnion(desktopProviders(of: perDisplay ?? space["Default"]))
+                choices += desktopChoices(of: perDisplay ?? space["Default"])
             }
         }
-        if providers.isEmpty {
-            providers.formUnion(desktopProviders(of: store["AllSpacesAndDisplays"]))
+        if choices.isEmpty {
+            choices += desktopChoices(of: store["AllSpacesAndDisplays"])
         }
-        if providers.isEmpty {
-            providers.formUnion(desktopProviders(of: store["SystemDefault"]))
+        if choices.isEmpty {
+            choices += desktopChoices(of: store["SystemDefault"])
         }
-        return providers.count == 1 ? providers.first : nil
+        return choices
     }
 
-    private static func desktopProviders(of entry: Any?) -> [String] {
+    private static func desktopChoices(of entry: Any?) -> [[String: Any]] {
         guard let entry = entry as? [String: Any],
               let desktop = entry["Desktop"] as? [String: Any],
               let content = desktop["Content"] as? [String: Any],
               let choices = content["Choices"] as? [[String: Any]] else {
             return []
         }
-        return choices.compactMap { $0["Provider"] as? String }
+        return choices.filter { $0["Provider"] is String }
+    }
+
+    /// `Configuration` is a property list of its own, stored as data.
+    private static func aerialAssetID(of choice: [String: Any]) -> String? {
+        guard choice["Provider"] as? String == aerialsProviderIdentifier,
+              let data = choice["Configuration"] as? Data,
+              let configuration = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return nil }
+        return configuration["assetID"] as? String
+    }
+}
+
+/// Finds the files behind an Aerial the wallpaper store names.
+///
+/// The store records which Aerial the desktop shows, and the files live in the
+/// wallpaper agent's own folder, not under the `SystemWallpaperURL` default
+/// that outlives its target. A dynamic Aerial such as Golden Gate is one entry
+/// with a light and a dark video for each of landscape and portrait, and the
+/// system fetches only the ones it has needed, so the variant for this display
+/// is looked for first and the others only when it has nothing on disk.
+enum AerialArtwork {
+    static var directory: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/com.apple.wallpaper/aerials", isDirectory: true)
+    }
+
+    /// The `assets` of the manifest the wallpaper agent keeps next to the files.
+    static func loadAssets() -> [[String: Any]]? {
+        let url = directory.appendingPathComponent("manifest/entries.json")
+        guard let data = try? Data(contentsOf: url),
+              let manifest = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+        return manifest["assets"] as? [[String: Any]]
+    }
+
+    /// The video of the best-matching variant that is on disk, else its
+    /// thumbnail. A thumbnail is small, but the launcher blurs the picture
+    /// into a few colours anyway, and it keeps the right wallpaper on screen
+    /// where a video was never downloaded.
+    static func artworkURL(
+        assetID: String,
+        assets: [[String: Any]],
+        prefersDark: Bool,
+        isLandscape: Bool,
+        in directory: URL = AerialArtwork.directory,
+        fileExists: (URL) -> Bool
+    ) -> URL? {
+        let wantedAppearance = prefersDark ? "dark" : "light"
+        let wantedOrientation = isLandscape ? "landscape" : "portrait"
+        func score(_ asset: [String: Any]) -> Int {
+            let variant = asset["variant"] as? [String: Any]
+            return (variant?["appearance"] as? String == wantedAppearance ? 2 : 0)
+                + (variant?["orientation"] as? String == wantedOrientation ? 1 : 0)
+        }
+        let variants = assets
+            .filter {
+                $0["id"] as? String == assetID
+                    || ($0["subcategories"] as? [String])?.contains(assetID) == true
+            }
+            .enumerated()
+            .sorted { (score($0.element), -$0.offset) > (score($1.element), -$1.offset) }
+            .compactMap { $0.element["id"] as? String }
+        for id in variants + [assetID] {
+            for url in [
+                directory.appendingPathComponent("videos/\(id).mov"),
+                directory.appendingPathComponent("thumbnails/\(id).png"),
+            ] where fileExists(url) {
+                return url
+            }
+        }
+        return nil
     }
 }
 
@@ -461,12 +549,29 @@ enum WallpaperImageCache {
         prefersDarkArtwork: Bool
     ) -> ResolvedSources {
         let configuredURL = configuredWallpaperURL()
-        let storeProvider = SystemWallpaperStore.load().flatMap {
+        let store = SystemWallpaperStore.load()
+        let storeProvider = store.flatMap {
             SystemWallpaperStore.desktopProvider(in: $0, displayUUID: displayUUID)
         }
-        let providerArtworkURL = storeProvider == SystemWallpaperStore.defaultProviderIdentifier
-            ? SystemWallpaperStore.defaultProviderArtwork(prefersDark: prefersDarkArtwork)
-            : nil
+        let providerArtworkURL: URL?
+        switch storeProvider {
+        case SystemWallpaperStore.defaultProviderIdentifier:
+            providerArtworkURL = SystemWallpaperStore.defaultProviderArtwork(prefersDark: prefersDarkArtwork)
+        case SystemWallpaperStore.aerialsProviderIdentifier:
+            providerArtworkURL = store
+                .flatMap { SystemWallpaperStore.desktopAerialAssetID(in: $0, displayUUID: displayUUID) }
+                .flatMap { assetID in
+                    AerialArtwork.artworkURL(
+                        assetID: assetID,
+                        assets: AerialArtwork.loadAssets() ?? [],
+                        prefersDark: prefersDarkArtwork,
+                        isLandscape: targetBounds.map { $0.width >= $0.height } ?? true,
+                        fileExists: { FileManager.default.fileExists(atPath: $0.path) }
+                    )
+                }
+        default:
+            providerArtworkURL = nil
+        }
         // A preflight check only: it never prompts, and this app does not ask
         // for the permission.
         let hasScreenCaptureAccess = CGPreflightScreenCaptureAccess()

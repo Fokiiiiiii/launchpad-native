@@ -457,6 +457,115 @@ func dockWallpaperIsStillCapturedWithoutScreenCaptureAccess() {
     #expect(source.windowID == dockWallpaper.windowID)
 }
 
+// MARK: - Aerial wallpapers
+
+private let aerialsProvider = SystemWallpaperStore.aerialsProviderIdentifier
+private let goldenGate = "17647EAB-8357-48B0-BCD6-B892194267C5"
+
+/// One Aerial choice; `Configuration` is a property list of its own, stored as data.
+private func aerialEntry(assetID: String) throws -> [String: Any] {
+    let configuration = try PropertyListSerialization.data(
+        fromPropertyList: ["assetID": assetID], format: .binary, options: 0
+    )
+    return ["Desktop": ["Content": ["Choices": [["Provider": aerialsProvider, "Configuration": configuration]]]]]
+}
+
+@Test
+func storeNamesTheAerialEveryEntryForTheDisplayAgreesOn() throws {
+    let store: [String: Any] = [
+        "Displays": [thisDisplay: try aerialEntry(assetID: goldenGate)],
+        "Spaces": ["space-a": ["Default": try aerialEntry(assetID: goldenGate)]],
+    ]
+    #expect(SystemWallpaperStore.desktopProvider(in: store, displayUUID: thisDisplay) == aerialsProvider)
+    #expect(SystemWallpaperStore.desktopAerialAssetID(in: store, displayUUID: thisDisplay) == goldenGate)
+}
+
+/// The current Space is not knowable, so two Aerials across Spaces are not
+/// resolved to either of them.
+@Test
+func storeLeavesTheAerialUnknownWhenSpacesNameDifferentOnes() throws {
+    let store: [String: Any] = [
+        "Displays": [thisDisplay: try aerialEntry(assetID: goldenGate)],
+        "Spaces": ["space-a": ["Default": try aerialEntry(assetID: "6D6834A4-2F0F-479A-B053-7D4DC5CB8EB7")]],
+    ]
+    #expect(SystemWallpaperStore.desktopAerialAssetID(in: store, displayUUID: thisDisplay) == nil)
+}
+
+@Test
+func storeHasNoAerialForAProviderThatIsNotAerials() {
+    let store: [String: Any] = ["Displays": [thisDisplay: storeEntry(imageProvider)]]
+    #expect(SystemWallpaperStore.desktopAerialAssetID(in: store, displayUUID: thisDisplay) == nil)
+}
+
+private let aerialDirectory = URL(fileURLWithPath: "/aerials", isDirectory: true)
+private var goldenGateVariants: [[String: Any]] {
+    [
+        ("LIGHT-H", "light", "landscape"), ("LIGHT-V", "light", "portrait"),
+        ("DARK-H", "dark", "landscape"), ("DARK-V", "dark", "portrait"),
+    ].map { id, appearance, orientation in
+        ["id": id, "subcategories": [goldenGate], "variant": ["appearance": appearance, "orientation": orientation]]
+    }
+}
+
+private func aerialArtwork(
+    prefersDark: Bool, isLandscape: Bool = true, onDisk: Set<String>
+) -> URL? {
+    AerialArtwork.artworkURL(
+        assetID: goldenGate,
+        assets: goldenGateVariants,
+        prefersDark: prefersDark,
+        isLandscape: isLandscape,
+        in: aerialDirectory,
+        fileExists: { onDisk.contains($0.path) }
+    )
+}
+
+@Test
+func aerialArtworkPicksTheVariantForTheAppearanceAndOrientation() {
+    let all: Set<String> = ["videos/LIGHT-H.mov", "videos/LIGHT-V.mov", "videos/DARK-H.mov", "videos/DARK-V.mov"]
+        .reduce(into: []) { $0.insert("/aerials/" + $1) }
+    #expect(aerialArtwork(prefersDark: true, onDisk: all)?.lastPathComponent == "DARK-H.mov")
+    #expect(aerialArtwork(prefersDark: false, onDisk: all)?.lastPathComponent == "LIGHT-H.mov")
+    #expect(aerialArtwork(prefersDark: true, isLandscape: false, onDisk: all)?.lastPathComponent == "DARK-V.mov")
+}
+
+/// The system fetches only the videos it has needed, so the thumbnail of the
+/// right variant has to beat another variant's video — the wrong appearance
+/// would be a visibly different wallpaper.
+@Test
+func aerialArtworkUsesTheThumbnailOfTheRightVariantBeforeAnotherVariantsVideo() {
+    let onDisk: Set<String> = ["/aerials/thumbnails/DARK-H.png", "/aerials/videos/LIGHT-H.mov"]
+    #expect(aerialArtwork(prefersDark: true, onDisk: onDisk)?.lastPathComponent == "DARK-H.png")
+}
+
+@Test
+func aerialArtworkPrefersTheVideoOverTheThumbnailOfTheSameVariant() {
+    let onDisk: Set<String> = ["/aerials/thumbnails/DARK-H.png", "/aerials/videos/DARK-H.mov"]
+    #expect(aerialArtwork(prefersDark: true, onDisk: onDisk)?.lastPathComponent == "DARK-H.mov")
+}
+
+@Test
+func aerialArtworkIsNilWhenNothingIsOnDisk() {
+    #expect(aerialArtwork(prefersDark: true, onDisk: []) == nil)
+}
+
+@Test
+func aVideoArtworkIsSampledAsAnAerialAndAThumbnailAsAStillImage() {
+    let desktopURL = URL(fileURLWithPath: "/System/Library/CoreServices/DefaultDesktop.heic")
+    let video = URL(fileURLWithPath: "/aerials/videos/DARK-H.mov")
+    let thumbnail = URL(fileURLWithPath: "/aerials/thumbnails/DARK-H.png")
+
+    let fromVideo = WallpaperSourceResolver.resolve(
+        desktopURL: desktopURL, configuredURL: nil, providerArtworkURL: video, isUsableFile: { _ in true }
+    )
+    let fromThumbnail = WallpaperSourceResolver.resolve(
+        desktopURL: desktopURL, configuredURL: nil, providerArtworkURL: thumbnail, isUsableFile: { _ in true }
+    )
+
+    #expect(fromVideo.kind == .aerialVideo)
+    #expect(fromThumbnail.kind == .staticImage)
+}
+
 /// Writes a flat-coloured image of the given pixel size, optionally tagged with
 /// an EXIF orientation the way a camera stores a photo taken sideways.
 private func writeWallpaper(width: Int, height: Int, type: UTType, orientation: Int? = nil, in directory: URL) throws -> URL {
