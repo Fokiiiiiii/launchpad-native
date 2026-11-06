@@ -22,7 +22,7 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     private var displayedIconSize: CGFloat = 64
 
     override func loadView() {
-        let container = NSView()
+        let container = PressActionView()
         highlightView.translatesAutoresizingMaskIntoConstraints = false
         highlightView.wantsLayer = true
 
@@ -103,6 +103,7 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     override func prepareForReuse() {
         super.prepareForReuse()
         currentRequestKey = nil
+        (view as? PressActionView)?.onPress = nil
         iconView.image = nil
         label.stringValue = ""
         displayedIconSize = 64
@@ -144,6 +145,16 @@ final class AppIconCollectionViewItem: NSCollectionViewItem {
     /// `LauncherViewController`.
     var debugLabelText: String { label.stringValue }
     #endif
+
+    /// Swaps the picture and nothing else — see `GridCellItem.setIcon`.
+    func setIcon(_ image: NSImage) {
+        iconView.image = image
+    }
+
+    /// What VoiceOver's press does: the same launch as a click.
+    func setPressAction(_ action: @escaping () -> Void) {
+        (view as? PressActionView)?.onPress = action
+    }
 
     func configure(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, visualScale: Double = 1, displayName: String? = nil) {
         currentRequestKey = record.iconCacheKey

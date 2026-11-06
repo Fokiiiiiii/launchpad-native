@@ -855,6 +855,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         let record = pageRecords[indexPath.item]
         let globalIndex = searchCurrentPage * searchPageSize + indexPath.item
         let isSelected = viewModel.selectedIndex == globalIndex
+        item.setPressAction { [weak self] in
+            self?.viewModel.select(index: globalIndex)
+            self?.launchSearchSelection()
+        }
         let metrics = gridViewController.currentIconLayoutMetrics
         let iconSize = metrics.baseSize
         let visualScale = metrics.visualScale
@@ -878,7 +882,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
                 // Search results reload on every keystroke, recycling cells —
                 // same cell-reuse guard as Grid.GridCellItem, see its comment.
                 guard item.currentRequestKey == expectedKey else { return }
-                item.configure(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, displayName: displayName)
+                item.setIcon(icon)
             }
         }
         return item

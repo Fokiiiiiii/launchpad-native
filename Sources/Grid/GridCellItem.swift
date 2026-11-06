@@ -37,7 +37,7 @@ final class GridCellItem: NSCollectionViewItem {
     private var displayedIconSizeValue: CGFloat = 96
 
     override func loadView() {
-        let container = NSView()
+        let container = PressActionView()
         highlightView.translatesAutoresizingMaskIntoConstraints = false
         highlightView.wantsLayer = true
 
@@ -131,6 +131,7 @@ final class GridCellItem: NSCollectionViewItem {
         view.layer?.opacity = 1
         resetVisualTransforms()
         currentRequestKey = nil
+        (view as? PressActionView)?.onPress = nil
         iconView.image = nil
         label.stringValue = ""
         currentIconSizeValue = 96
@@ -303,6 +304,22 @@ final class GridCellItem: NSCollectionViewItem {
 
     func applySelection(_ isSelected: Bool) {
         SelectionHighlight.apply(to: highlightView, isSelected: isSelected)
+        // The arrow keys move the selection onto cells that already exist, so the
+        // state VoiceOver reads has to follow here and not only at configure time.
+        view.setAccessibilitySelected(isSelected)
+        view.setAccessibilityValue(isSelected ? L10n.selectedAccessibilityValue : nil)
+    }
+
+    /// Swaps the picture and nothing else. A fetch that finishes late used to run
+    /// the whole configuration again with the selection it had captured when it
+    /// started, painting a selection that had since moved.
+    func setIcon(_ image: NSImage) {
+        iconView.image = image
+    }
+
+    /// What VoiceOver's press does: the same launch or folder open as a click.
+    func setPressAction(_ action: @escaping () -> Void) {
+        (view as? PressActionView)?.onPress = action
     }
 
     /// Test hook: the selection tile's own frame, for checking it stays a

@@ -421,6 +421,44 @@ private func accessibilityDescendants(of root: Any) -> [Any] {
 
 private enum GridTestError: Error { case unexpectedLayout }
 
+/// VoiceOver presses a cell with `AXPress`; a button role with nothing behind it
+/// looks actionable and does nothing.
+@Test @MainActor func accessibilityPressLaunchesTheApp() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 14, directory: dir)
+    defer { harness.teardown() }
+    try await harness.waitForIcons(1)
+
+    guard case .app(let id) = harness.model.pages[0][2],
+          let expected = harness.model.record(for: id)?.bundleIdentifier
+    else { throw GridTestError.unexpectedLayout }
+    let cell = try #require(harness.cell(at: 2))
+    #expect(cell.view.accessibilityPerformPress())
+    #expect(harness.launchedApps == [expected])
+}
+
+/// The selection VoiceOver reads follows the arrow keys on cells that already
+/// exist, and a late icon does not put an old selection back.
+@Test @MainActor func accessibilitySelectionFollowsTheKeyboardAndSurvivesALateIcon() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 14, directory: dir)
+    defer { harness.teardown() }
+    try await harness.waitForIcons(1)
+
+    harness.controller.moveSelection(deltaColumns: 0, deltaRows: 0)
+    harness.controller.moveSelection(deltaColumns: 1, deltaRows: 0)
+
+    let first = try #require(harness.cell(at: 0))
+    let second = try #require(harness.cell(at: 1))
+    #expect(!first.view.isAccessibilitySelected())
+    #expect(second.view.isAccessibilitySelected())
+
+    first.setIcon(NSImage())
+    #expect(!first.view.isAccessibilitySelected())
+}
+
 /// The tile hugs the icon rather than the icon *and* its label: it should read
 /// as the icon sitting on a tile, and a band wide enough to hold a long name
 /// reads as a text selection instead.

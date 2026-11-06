@@ -1360,6 +1360,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             return NSCollectionViewItem()
         }
         let isSelected = keyboardSelectionActive && collectionView.selectionIndexPaths.contains(indexPath)
+        cell.setPressAction { [weak self, weak cell] in
+            guard let self, let cell, let path = self.collectionView.indexPath(for: cell) else { return }
+            self.activate(at: path)
+        }
         let metrics = currentIconLayoutMetrics
         let iconSize = metrics.baseSize
         let visualScale = metrics.visualScale
@@ -1382,7 +1386,8 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                     // every grid-settings Apply and search keystroke) — only
                     // apply if it's still showing what we started fetching for.
                     guard cell.currentRequestKey == expectedKey else { return }
-                    cell.configureAsApp(record: record, icon: icon, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, displayName: displayName)
+                    // The picture only: the selection captured above may be old by now.
+                    cell.setIcon(icon)
                 }
             }
         case .folder(let folderID):
