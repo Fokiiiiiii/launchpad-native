@@ -38,4 +38,9 @@ jobs:
       - name: Build
         run: swift build
       - name: Test
-        run: swift test
+        timeout-minutes: 10
+        run: |
+          # The suite takes under a minute. If it is still running well after that it
+          # is stuck, and the stack of the test process says where.
+          ( sleep 180; pid=$(pgrep -f swiftpm-testing | awk 'NR==1'); if [ -n "$pid" ]; then sample "$pid" 3 -file "$RUNNER_TEMP/stuck.txt" >/dev/null 2>&1; awk 'NR<=250' "$RUNNER_TEMP/stuck.txt"; fi ) &
+          swift test
