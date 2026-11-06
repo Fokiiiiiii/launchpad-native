@@ -136,17 +136,36 @@ public struct GridSettings: Codable, Sendable, Hashable {
         case columns, rows, horizontalSpacing, verticalSpacing, labelVisible, pageMargins, folderGridSize, sortMode, iconScale
     }
 
+    /// What a decoded value is held to. These are wider than the Settings
+    /// controls offer: the point is not to re-check what the UI already limits,
+    /// but to keep a damaged or hand-edited file from reaching arithmetic that
+    /// traps (`columns * rows` overflows on an extreme integer, and the app then
+    /// crashes at every launch) or a layout that cannot be drawn.
+    static let columnRange = 1...24
+    static let rowRange = 1...16
+    static let spacingRange = 0.0...200.0
+    static let marginRange = 0.0...400.0
+    static let folderGridSizeRange = 1...100
+    static let iconScaleRange = 0.5...2.0
+
+    private static func clamped<Value: Comparable>(_ value: Value, to range: ClosedRange<Value>) -> Value {
+        min(max(value, range.lowerBound), range.upperBound)
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        columns = try container.decode(Int.self, forKey: .columns)
-        rows = try container.decode(Int.self, forKey: .rows)
-        horizontalSpacing = try container.decode(Double.self, forKey: .horizontalSpacing)
-        verticalSpacing = try container.decode(Double.self, forKey: .verticalSpacing)
+        columns = Self.clamped(try container.decode(Int.self, forKey: .columns), to: Self.columnRange)
+        rows = Self.clamped(try container.decode(Int.self, forKey: .rows), to: Self.rowRange)
+        horizontalSpacing = Self.clamped(try container.decode(Double.self, forKey: .horizontalSpacing), to: Self.spacingRange)
+        verticalSpacing = Self.clamped(try container.decode(Double.self, forKey: .verticalSpacing), to: Self.spacingRange)
         labelVisible = try container.decode(Bool.self, forKey: .labelVisible)
-        pageMargins = try container.decode(Double.self, forKey: .pageMargins)
-        folderGridSize = try container.decode(Int.self, forKey: .folderGridSize)
-        sortMode = try container.decodeIfPresent(SortMode.self, forKey: .sortMode) ?? .custom
-        iconScale = try container.decodeIfPresent(Double.self, forKey: .iconScale) ?? 1.05
+        pageMargins = Self.clamped(try container.decode(Double.self, forKey: .pageMargins), to: Self.marginRange)
+        folderGridSize = Self.clamped(try container.decode(Int.self, forKey: .folderGridSize), to: Self.folderGridSizeRange)
+        // A value this version does not know — written by a newer one — falls
+        // back to the default for that one setting; failing here took the whole
+        // document down with it, and the layout with it.
+        sortMode = (try? container.decodeIfPresent(SortMode.self, forKey: .sortMode)) ?? .custom
+        iconScale = Self.clamped(try container.decodeIfPresent(Double.self, forKey: .iconScale) ?? 1.05, to: Self.iconScaleRange)
     }
 
     public static let `default` = GridSettings(
@@ -518,7 +537,7 @@ public struct LayoutDocument: Codable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
-        layoutMode = try container.decode(LayoutMode.self, forKey: .layoutMode)
+        layoutMode = (try? container.decode(LayoutMode.self, forKey: .layoutMode)) ?? .paged
         gridSettings = try container.decode(GridSettings.self, forKey: .gridSettings)
         pages = try container.decode([[LayoutItem]].self, forKey: .pages)
         folders = try container.decode([FolderID: Folder].self, forKey: .folders)
@@ -529,14 +548,14 @@ public struct LayoutDocument: Codable, Sendable {
         hideDockWhileLauncherOpen = try container.decodeIfPresent(Bool.self, forKey: .hideDockWhileLauncherOpen) ?? false
         dateAddedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .dateAddedByID) ?? [:]
         lastUsedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .lastUsedByID) ?? [:]
-        appIconStyle = try container.decodeIfPresent(AppIconStyle.self, forKey: .appIconStyle) ?? .classic
+        appIconStyle = (try? container.decodeIfPresent(AppIconStyle.self, forKey: .appIconStyle)) ?? .classic
         showsMenuBarIcon = try container.decodeIfPresent(Bool.self, forKey: .showsMenuBarIcon) ?? true
         showMenuBarApplications = try container.decodeIfPresent(Bool.self, forKey: .showMenuBarApplications) ?? true
         showsHiddenAppsInSearch = try container.decodeIfPresent(Bool.self, forKey: .showsHiddenAppsInSearch) ?? false
-        backgroundMode = try container.decodeIfPresent(LauncherBackgroundMode.self, forKey: .backgroundMode) ?? .glass
-        glassMaterialIntensity = try container.decodeIfPresent(Double.self, forKey: .glassMaterialIntensity) ?? 0.35
+        backgroundMode = (try? container.decodeIfPresent(LauncherBackgroundMode.self, forKey: .backgroundMode)) ?? .glass
+        glassMaterialIntensity = min(max(try container.decodeIfPresent(Double.self, forKey: .glassMaterialIntensity) ?? 0.35, 0), 1)
         blursWallpaper = try container.decodeIfPresent(Bool.self, forKey: .blursWallpaper) ?? true
-        menuIconVisibility = try container.decodeIfPresent(MenuIconVisibility.self, forKey: .menuIconVisibility) ?? .automatic
+        menuIconVisibility = (try? container.decodeIfPresent(MenuIconVisibility.self, forKey: .menuIconVisibility)) ?? .automatic
     }
 
     public static let currentSchemaVersion = 1
