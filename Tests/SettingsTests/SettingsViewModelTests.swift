@@ -132,6 +132,47 @@ import Testing
     #expect(model.triggerSettings == previous)
 }
 
+/// Showing the window again refreshes the controls from the model. While an edit
+/// is still being applied, the model is the older value: reading it back dropped
+/// the edit queued behind the one in flight.
+@Test @MainActor func refreshLeavesATriggerEditThatIsStillBeingApplied() async {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("launchpad-settings-refresh-pending-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let model = GridModel(layoutStore: LayoutStore(directory: directory))
+    let previous = model.triggerSettings
+    var applied: [TriggerSettings] = []
+    var releaseFirst = false
+    let viewModel = SettingsViewModel(
+        model: model,
+        onTriggerSettingsChanged: { settings in
+            applied.append(settings)
+            if applied.count == 1 {
+                while !releaseFirst { await Task.yield() }
+            }
+            return TriggerSettingsApplyResult(
+                f4Active: false, multitouchActive: false, multitouchEventArbitrationActive: false,
+                gestureConflictStatus: .unchanged, gestureConflictBackup: nil
+            )
+        },
+        onDockVisibilityChanged: { _ in }
+    )
+
+    viewModel.f4Enabled = !previous.f4Enabled
+    for _ in 0..<40 where applied.isEmpty { await Task.yield() }
+    #expect(applied.count == 1)
+
+    viewModel.hotkeyEnabled = !previous.hotkeyEnabled
+    viewModel.refresh()
+    #expect(viewModel.hotkeyEnabled == !previous.hotkeyEnabled, "refresh overwrote an edit that had not been applied yet")
+
+    releaseFirst = true
+    for _ in 0..<120 { await Task.yield() }
+    #expect(applied.last?.hotkeyEnabled == !previous.hotkeyEnabled, "the queued edit never reached the apply callback")
+    #expect(viewModel.hotkeyEnabled == !previous.hotkeyEnabled)
+}
+
 @Test @MainActor func trackpadArbitrationFailureIsPublishedSeparatelyFromRawListener() async {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("launchpad-settings-trackpad-status-test-\(UUID().uuidString)", isDirectory: true)

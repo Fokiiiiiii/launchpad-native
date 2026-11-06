@@ -678,25 +678,32 @@ public final class SettingsViewModel: ObservableObject {
         glassMaterialIntensity = model.glassMaterialIntensity
         blursWallpaper = model.blursWallpaper
 
+        // An edit still waiting to be applied, or being applied, is newer than the
+        // model: reading the model back over the controls would drop it, and
+        // re-applying what the model holds would then undo it for good.
+        let triggerEditInFlight = triggerApplyTask != nil || pendingTriggerSettings != nil
         let triggers = model.triggerSettings
-        f4Enabled = triggers.f4Enabled
-        hotkeyEnabled = triggers.hotkeyEnabled
-        hotkeyKeyCode = triggers.hotkeyKeyCode
-        hotkeyCarbonModifiers = triggers.hotkeyModifierFlags
-        hotCornerTopLeft = triggers.hotCornersEnabled["topLeft"] ?? false
-        hotCornerTopRight = triggers.hotCornersEnabled["topRight"] ?? false
-        hotCornerBottomLeft = triggers.hotCornersEnabled["bottomLeft"] ?? false
-        hotCornerBottomRight = triggers.hotCornersEnabled["bottomRight"] ?? false
-        multitouchEnabled = triggers.multitouchGestureEnabled
-        multitouchSensitivity = triggers.multitouchSensitivity
-        multitouchFingerCount = triggers.multitouchFingerCount
-        gestureConflictPreventionEnabled = triggers.gestureConflictPreventionEnabled
+        if !triggerEditInFlight {
+            f4Enabled = triggers.f4Enabled
+            hotkeyEnabled = triggers.hotkeyEnabled
+            hotkeyKeyCode = triggers.hotkeyKeyCode
+            hotkeyCarbonModifiers = triggers.hotkeyModifierFlags
+            hotCornerTopLeft = triggers.hotCornersEnabled["topLeft"] ?? false
+            hotCornerTopRight = triggers.hotCornersEnabled["topRight"] ?? false
+            hotCornerBottomLeft = triggers.hotCornersEnabled["bottomLeft"] ?? false
+            hotCornerBottomRight = triggers.hotCornersEnabled["bottomRight"] ?? false
+            multitouchEnabled = triggers.multitouchGestureEnabled
+            multitouchSensitivity = triggers.multitouchSensitivity
+            multitouchFingerCount = triggers.multitouchFingerCount
+            gestureConflictPreventionEnabled = triggers.gestureConflictPreventionEnabled
+        }
 
         customSources = model.customSources
         hiddenApps = model.hiddenApplicationIdentifiers.compactMap { identifier in
             guard let record = model.record(for: identifier) else { return nil }
             return (identifier, model.displayName(for: record))
         }
+        guard !triggerEditInFlight else { return }
         let prior = triggerApplyTask
         triggerApplyGeneration &+= 1
         let generation = triggerApplyGeneration
