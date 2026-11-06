@@ -63,7 +63,22 @@ public enum ContextMenuBuilder {
             menu.addItem(makeItem(L10n.menuGetInfo, symbolName: "info.circle", iconVisibility: iconVisibility, action: getInfo))
         }
 
+        removeRedundantSeparators(from: menu)
         return menu
+    }
+
+    /// The groups above each bring their own separator, and a group that has
+    /// nothing to offer for this app leaves its separator behind — at the end of
+    /// the menu, or twice in a row.
+    private static func removeRedundantSeparators(from menu: NSMenu) {
+        var index = menu.items.count - 1
+        while index >= 0 {
+            let isLast = index == menu.items.count - 1
+            if menu.items[index].isSeparatorItem, index == 0 || isLast || menu.items[index + 1].isSeparatorItem {
+                menu.removeItem(at: index)
+            }
+            index -= 1
+        }
     }
 
     public static func folderMenu(
