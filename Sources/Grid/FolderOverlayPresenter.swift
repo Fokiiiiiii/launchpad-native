@@ -271,6 +271,7 @@ final class FolderOverlayPresenter {
         closeID: UUID
     ) {
         backdrop.removeFromSuperview()
+        closingController?.tearDown()
         if contentsViewController === closingController {
             contentsViewController = nil
         }

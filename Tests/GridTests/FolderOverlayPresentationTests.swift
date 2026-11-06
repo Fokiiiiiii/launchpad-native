@@ -96,6 +96,24 @@ private func openFolder(
     return (presenter, window, host)
 }
 
+/// Closing the folder with a drag still going used to leave its mouse-up monitor
+/// registered for good; the drag's own drop or cancel were the only things that
+/// removed it.
+@Test @MainActor func closingAFolderMidDragReleasesTheDragMonitor() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let (presenter, window, _) = await openFolder(itemCount: 6, directory: dir)
+    defer { window.orderOut(nil) }
+
+    let panel = try #require(presenter.presentedPanelForTesting)
+    panel.beginTileDragForTesting(id: "any")
+    #expect(panel.hasDragSafetyNetForTesting)
+
+    presenter.close(animated: false)
+
+    #expect(!panel.hasDragSafetyNetForTesting, "the monitor outlived the folder")
+}
+
 /// The regression that 273 tests missed: the panel is held by the presenter and
 /// nothing else. Losing that hold renders the folder as empty placeholders.
 @Test @MainActor func anOpenedFolderKeepsItsPanelAliveAndFillsInIcons() async throws {

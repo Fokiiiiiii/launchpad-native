@@ -671,6 +671,19 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         }
         folderDragGlobalMouseUpMonitor = nil
     }
+
+    /// Called when the folder is taken away. A drag still in progress had its
+    /// monitor released only by its own drop or cancel, so closing mid-drag left a
+    /// registration that nothing would ever remove, one more each time.
+    func tearDown() {
+        disarmFolderDragSafetyNet()
+        gridModel.draggingID = nil
+    }
+
+    /// Test hooks: start a drag the way a tile does, and say whether the mouse-up
+    /// monitor for an abandoned drag is installed.
+    func beginTileDragForTesting(id: String) { beginTileDrag(id: id) }
+    var hasDragSafetyNetForTesting: Bool { folderDragGlobalMouseUpMonitor != nil }
 }
 
 /// The panel's own root. Exists only so a scroll gesture that lands anywhere on
