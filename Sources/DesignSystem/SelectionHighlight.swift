@@ -3,19 +3,16 @@ import AppKit
 /// The tile a selected icon sits on.
 ///
 /// Keyboard selection has to be visible at a glance across a whole page of
-/// icons, on top of a wallpaper that can be any colour. A wash of translucent
-/// white reads as a smudge over a bright wallpaper; a dark, saturated tile
-/// holds its shape against anything behind it and leaves the icon itself the
-/// brightest thing inside it.
+/// icons, on top of a wallpaper that can be any colour. A neutral, lightly
+/// frosted tile brings no colour of its own to clash with the wallpaper, and
+/// its fine edge keeps the shape readable where the fill is faint.
 ///
 /// Shared by the grid and the search results so a selection looks the same
 /// wherever the arrow keys move it.
 @MainActor
 public enum SelectionHighlight {
-    /// Deep indigo rather than neutral black: against a dark wallpaper a black
-    /// tile disappears, and against a bright one it reads as a hole.
-    private static let fill = NSColor(srgbRed: 0.14, green: 0.11, blue: 0.42, alpha: 0.92)
-    private static let border = NSColor.white.withAlphaComponent(0.16)
+    private static let fill = NSColor.white.withAlphaComponent(0.2)
+    private static let border = NSColor.white.withAlphaComponent(0.34)
 
     /// A macOS app icon is a rounded square drawn inside a canvas that leaves
     /// a margin around it — the artwork occupies 824 of the canvas's 1024
