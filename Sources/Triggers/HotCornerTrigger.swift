@@ -23,6 +23,10 @@ public struct HotCornerConfig: Sendable {
 public final class HotCornerTrigger {
     private var configs: [ScreenCorner: HotCornerConfig] = [:]
     private var monitor: Any?
+    /// The global monitor never sees events sent to this app's own windows, and
+    /// the launcher is one: with only the global one, the pointer leaving a corner
+    /// over the open launcher was never noticed, so the corner stayed disarmed.
+    private var localMonitor: Any?
     private var armedCorners: Set<ScreenCorner> = Set(ScreenCorner.allCases)
     private var pendingActivation: DispatchWorkItem?
     /// Invalidates delayed activations that have been cancelled by `stop()`
@@ -41,20 +45,34 @@ public final class HotCornerTrigger {
     }
 
     public func start() {
-        guard monitor == nil else { return }
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
-            // AppKit invokes global-monitor callbacks outside the actor
-            // isolation of this `@MainActor` trigger. Hop explicitly before
-            // touching any trigger state to avoid crossing the actor
-            // boundary from an AppKit callback.
-            Task { @MainActor [weak self] in
-                self?.handleMouseMoved(event)
+        // Each is registered once; a global monitor that could not be registered
+        // (no permission yet) is tried again on the next `start()`.
+        if monitor == nil {
+            monitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+                // AppKit invokes global-monitor callbacks outside the actor
+                // isolation of this `@MainActor` trigger. Hop explicitly before
+                // touching any trigger state to avoid crossing the actor
+                // boundary from an AppKit callback.
+                Task { @MainActor [weak self] in
+                    self?.handleMouseMoved(event)
+                }
+            }
+            if monitor == nil {
+                DiagnosticsLog.triggers.error("Global mouseMoved monitor unavailable (likely missing Accessibility/Input Monitoring permission)")
             }
         }
-        if monitor == nil {
-            DiagnosticsLog.triggers.error("Global mouseMoved monitor unavailable (likely missing Accessibility/Input Monitoring permission)")
+        if localMonitor == nil {
+            localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+                Task { @MainActor [weak self] in
+                    self?.handleMouseMoved(event)
+                }
+                return event
+            }
         }
     }
+
+    /// Test hook: whether the monitor for events sent to this app is installed.
+    var hasLocalMonitor: Bool { localMonitor != nil }
 
     public func stop() {
         activationGeneration &+= 1
@@ -62,6 +80,10 @@ public final class HotCornerTrigger {
             NSEvent.removeMonitor(monitor)
         }
         monitor = nil
+        if let localMonitor {
+            NSEvent.removeMonitor(localMonitor)
+        }
+        localMonitor = nil
         pendingActivation?.cancel()
         pendingActivation = nil
     }
