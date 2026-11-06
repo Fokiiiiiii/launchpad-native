@@ -18,6 +18,40 @@ import Testing
     #expect(loaded.aliases[StableAppIdentifier(value: "abc")] == "My Alias")
 }
 
+/// After `load()` fell back to the backup, the damaged primary was copied over
+/// that backup on the next save — so a failure while writing the new file left
+/// nothing readable at all.
+@Test func aDamagedPrimaryIsSetAsideInsteadOfReplacingTheGoodBackup() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = LayoutStore(directory: dir)
+
+    var first = LayoutDocument.empty
+    first.gridSettings.columns = 5
+    try await store.save(first)
+    var second = LayoutDocument.empty
+    second.gridSettings.columns = 6
+    try await store.save(second)
+
+    try Data("not json".utf8).write(to: dir.appendingPathComponent("layout.json"))
+    #expect(await store.load().gridSettings.columns == 5)
+
+    var third = LayoutDocument.empty
+    third.gridSettings.columns = 7
+    try await store.save(third)
+
+    let backup = try JSONDecoder().decode(
+        LayoutDocument.self,
+        from: Data(contentsOf: dir.appendingPathComponent("layout.lastknowngood.json"))
+    )
+    #expect(backup.gridSettings.columns == 5, "the good backup was replaced by the damaged file")
+    #expect(await store.load().gridSettings.columns == 7)
+
+    let setAside = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        .filter { $0.hasPrefix("layout.unreadable-") }
+    #expect(setAside.count == 1)
+}
+
 @Test func dateAddedAndLastUsedRoundTrip() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }

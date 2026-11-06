@@ -73,7 +73,14 @@ public actor LayoutStore {
             throw LayoutStoreError.encodingFailed(error)
         }
 
-        if FileManager.default.fileExists(atPath: primaryURL.path) {
+        // Only a primary that still decodes is worth keeping as the backup. A
+        // damaged one — after `load()` fell back to the backup — used to be
+        // copied over that good backup, so a failure while writing the new file
+        // left nothing readable at all. It is set aside instead, and the backup
+        // stays as it was.
+        if FileManager.default.fileExists(atPath: primaryURL.path), case .failure = Self.decode(at: primaryURL) {
+            quarantineUnreadablePrimary()
+        } else if FileManager.default.fileExists(atPath: primaryURL.path) {
             let temporaryBackupURL = backupURL.appendingPathExtension("tmp")
             do {
                 if FileManager.default.fileExists(atPath: temporaryBackupURL.path) {
@@ -97,6 +104,20 @@ public actor LayoutStore {
             _ = try FileManager.default.replaceItemAt(primaryURL, withItemAt: tempURL)
         } catch {
             throw LayoutStoreError.writeFailed(error)
+        }
+    }
+
+    /// Moves a primary file that cannot be decoded out of the way, keeping it
+    /// for inspection rather than deleting it.
+    private func quarantineUnreadablePrimary() {
+        let stamp = Int(Date().timeIntervalSince1970)
+        let destination = primaryURL.deletingLastPathComponent()
+            .appendingPathComponent("layout.unreadable-\(stamp)-\(UUID().uuidString.prefix(8)).json")
+        do {
+            try FileManager.default.moveItem(at: primaryURL, to: destination)
+            DiagnosticsLog.persistence.error("layout.json could not be decoded; set it aside instead of promoting it to the backup")
+        } catch {
+            DiagnosticsLog.persistence.error("Could not set the unreadable layout.json aside: \(error.localizedDescription, privacy: .public)")
         }
     }
 

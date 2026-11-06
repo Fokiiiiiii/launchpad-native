@@ -54,13 +54,25 @@ public final class UninstallPanelViewModel: ObservableObject {
     private let measureSize: @Sendable (URL) async -> Int64?
     private var loadTask: Task<Void, Never>?
 
-    public init(
+    public convenience init(
         record: ApplicationRecord,
         allRecords: [ApplicationRecord],
-        operationReportStore: OperationReportStore = OperationReportStore(),
-        measureSize: @escaping @Sendable (URL) async -> Int64? = { path in
-            await Task.detached { DiskSizeEstimator.estimatedSize(at: path) }.value
-        }
+        operationReportStore: OperationReportStore = OperationReportStore()
+    ) {
+        self.init(
+            record: record,
+            allRecords: allRecords,
+            operationReportStore: operationReportStore,
+            measureSize: { path in await Task.detached { DiskSizeEstimator.estimatedSize(at: path) }.value }
+        )
+    }
+
+    /// `measureSize` is a parameter so a test can hold a measurement open.
+    init(
+        record: ApplicationRecord,
+        allRecords: [ApplicationRecord],
+        operationReportStore: OperationReportStore,
+        measureSize: @escaping @Sendable (URL) async -> Int64?
     ) {
         self.record = record
         self.operationReportStore = operationReportStore

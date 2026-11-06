@@ -24,9 +24,27 @@ public actor ApplicationScanner {
     private var pendingChangedPaths: Set<String> = []
     private var debounceTask: Task<Void, Never>?
     private let changeDebounceNanoseconds: UInt64 = 200_000_000
+    /// Numbers each scan as it starts, and records per source the newest one
+    /// whose result was accepted — see `integrate`.
+    private var nextScanToken = 0
+    private var lastAcceptedToken: [String: Int] = [:]
+    private let scanReport: @Sendable (ApplicationSource, [String: ApplicationBundleReader.KnownSignature]) async -> ApplicationBundleReader.ScanReport
 
     public init(sources: [ApplicationSource] = ApplicationSource.standardSources) {
         self.sources = sources
+        self.scanReport = { source, known in
+            await ApplicationBundleReader.scanReport(source: source, knownSignatures: known)
+        }
+    }
+
+    /// `scanReport` is a parameter so a test can hold a scan open and finish it
+    /// after another has already been accepted.
+    init(
+        sources: [ApplicationSource],
+        scanReport: @escaping @Sendable (ApplicationSource, [String: ApplicationBundleReader.KnownSignature]) async -> ApplicationBundleReader.ScanReport
+    ) {
+        self.sources = sources
+        self.scanReport = scanReport
     }
 
     public func currentSnapshot() -> Snapshot { snapshot }
@@ -54,28 +72,68 @@ public actor ApplicationScanner {
     @discardableResult
     public func performFullScan() async -> Snapshot {
         let start = DispatchTime.now()
+        nextScanToken += 1
+        let token = nextScanToken
         let known = knownSignatures()
-        var merged: [StableAppID: ApplicationRecord] = [:]
+        var reports: [(source: ApplicationSource, report: ApplicationBundleReader.ScanReport)] = []
         for source in sources.sorted(by: { $0.priority < $1.priority }) {
-            switch await ApplicationBundleReader.scanOutcome(source: source, knownSignatures: known) {
-            case .scanned(let records):
-                for record in records {
-                    merged[record.id] = record
-                }
-            case .unreadable:
-                carryForward(source: source, into: &merged)
-            }
+            reports.append((source, await scanReport(source, known)))
         }
-        let changed = merged != snapshot.recordsByID
-        snapshot = Snapshot(recordsByID: merged)
+        let changed = integrate(reports, token: token)
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.catalog.info(
-            "Full scan complete: \(merged.count, privacy: .public) applications across \(self.sources.count, privacy: .public) sources in \(ms, privacy: .public)ms"
+            "Full scan complete: \(self.snapshot.recordsByID.count, privacy: .public) applications across \(self.sources.count, privacy: .public) sources in \(ms, privacy: .public)ms"
         )
         if changed {
             broadcast()
         }
         return snapshot
+    }
+
+    /// Folds scan results into the snapshot.
+    ///
+    /// Awaiting a scan lets other work run on this actor — a change of sources,
+    /// a newer scan — so by the time the results arrive they may describe a
+    /// source that is no longer configured, or be older than what has already
+    /// been accepted for it. Taking them anyway let a slow scan of the old
+    /// configuration put back apps the user had just removed, and the grid then
+    /// pruned and saved on that. Each source's result is accepted only when its
+    /// source is still configured and the scan started after the last one
+    /// accepted for it; everything else keeps what the snapshot has now.
+    ///
+    /// Returns whether the snapshot changed.
+    private func integrate(
+        _ reports: [(source: ApplicationSource, report: ApplicationBundleReader.ScanReport)],
+        token: Int
+    ) -> Bool {
+        let configured = Set(sources.map(\.id))
+        let fresh = reports
+            .filter { configured.contains($0.source.id) && token > (lastAcceptedToken[$0.source.id] ?? 0) }
+            .sorted { $0.source.priority < $1.source.priority }
+        let freshIDs = Set(fresh.map { $0.source.id })
+
+        var merged = snapshot.recordsByID.filter {
+            configured.contains($0.value.sourceID) && !freshIDs.contains($0.value.sourceID)
+        }
+        for (source, report) in fresh {
+            lastAcceptedToken[source.id] = token
+            switch report.outcome {
+            case .scanned(let records):
+                for record in records {
+                    merged[record.id] = record
+                }
+                // Folders that could not be listed say nothing about the apps in
+                // them, so what was known there stays.
+                if !report.failedDirectories.isEmpty {
+                    carryForward(source: source, into: &merged, within: report.failedDirectories)
+                }
+            case .unreadable:
+                carryForward(source: source, into: &merged, within: nil)
+            }
+        }
+        guard merged != snapshot.recordsByID else { return false }
+        snapshot = Snapshot(recordsByID: merged)
+        return true
     }
 
     /// Keeps whatever a source last contributed when this scan could not read
@@ -89,8 +147,19 @@ public actor ApplicationScanner {
     /// records forward keeps the catalog honest until the source is readable
     /// again, and a genuinely deleted app still disappears the moment its
     /// source can be read and no longer lists it.
-    private func carryForward(source: ApplicationSource, into merged: inout [StableAppID: ApplicationRecord]) {
-        let carried = snapshot.recordsByID.values.filter { $0.sourceID == source.id }
+    ///
+    /// With `directories`, only what was known inside those folders is kept —
+    /// the rest of the source was read fine and is taken from this scan.
+    private func carryForward(
+        source: ApplicationSource,
+        into merged: inout [StableAppID: ApplicationRecord],
+        within directories: [URL]?
+    ) {
+        let carried = snapshot.recordsByID.values.filter { record in
+            guard record.sourceID == source.id, merged[record.id] == nil else { return false }
+            guard let directories else { return true }
+            return directories.contains { isPath(record.bundleURL.path, inside: $0) }
+        }
         for record in carried {
             merged[record.id] = record
         }
@@ -203,21 +272,14 @@ public actor ApplicationScanner {
         }
         guard !affectedSources.isEmpty else { return }
 
+        nextScanToken += 1
+        let token = nextScanToken
         let known = knownSignatures()
-        let affectedSourceIDs = Set(affectedSources.map(\.id))
-        var merged = snapshot.recordsByID.filter { !affectedSourceIDs.contains($0.value.sourceID) }
+        var reports: [(source: ApplicationSource, report: ApplicationBundleReader.ScanReport)] = []
         for source in affectedSources {
-            switch await ApplicationBundleReader.scanOutcome(source: source, knownSignatures: known) {
-            case .scanned(let records):
-                for record in records {
-                    merged[record.id] = record
-                }
-            case .unreadable:
-                carryForward(source: source, into: &merged)
-            }
+            reports.append((source, await scanReport(source, known)))
         }
-        guard merged != snapshot.recordsByID else { return }
-        snapshot = Snapshot(recordsByID: merged)
+        guard integrate(reports, token: token) else { return }
         DiagnosticsLog.catalog.info(
             "Incremental rescan of \(affectedSources.count, privacy: .public) source(s) after filesystem change"
         )

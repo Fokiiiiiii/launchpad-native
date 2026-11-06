@@ -45,6 +45,15 @@ public struct ApplicationSource: Hashable, Sendable {
 
     public static let standardSources: [ApplicationSource] = [
         ApplicationSource(id: "system", rootURL: URL(fileURLWithPath: "/System/Applications"), recursive: false, priority: 0),
+        // Terminal, Activity Monitor, Disk Utility and the rest live one level
+        // down; the folder above is not walked recursively, because /System has
+        // bundles inside bundles that are not apps to launch.
+        ApplicationSource(
+            id: "system-utilities",
+            rootURL: URL(fileURLWithPath: "/System/Applications/Utilities"),
+            recursive: false,
+            priority: 1
+        ),
         ApplicationSource(id: "applications", rootURL: URL(fileURLWithPath: "/Applications"), recursive: true, priority: 10),
         ApplicationSource(
             id: "user",
