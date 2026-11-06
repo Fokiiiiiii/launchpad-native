@@ -229,10 +229,24 @@ final class FolderOverlayPresenter {
         }
     }
 
-    func close() {
+    /// - Parameter animated: `false` takes the panel away at once, for when the
+    ///   launcher itself is being reset and nobody is watching it close.
+    func close(animated: Bool = true) {
         guard let backdrop else { return }
         self.backdrop = nil
-        if let panel = contentsViewController?.view {
+        // Taken now, not when the fade ends. An `open` that begins inside the
+        // fade installs its own controller and its own handler, and finishing
+        // the old close must neither throw those away nor call them — that left
+        // the new folder with no controller behind its icons.
+        let closingController = contentsViewController
+        let closingHandler = onDidCloseHandler
+        onDidCloseHandler = nil
+
+        guard animated else {
+            finishClose(backdrop: backdrop, closingController: closingController, closingHandler: closingHandler)
+            return
+        }
+        if let panel = closingController?.view {
             Self.scalePanel(panel, from: 1, to: 0.97, damping: 1.0, response: 0.2, key: "close")
         }
         NSAnimationContext.runAnimationGroup({ context in
@@ -241,12 +255,21 @@ final class FolderOverlayPresenter {
             backdrop.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             Task { @MainActor [weak self] in
-                backdrop.removeFromSuperview()
-                self?.contentsViewController = nil
-                self?.onDidCloseHandler?()
-                self?.onDidCloseHandler = nil
+                self?.finishClose(backdrop: backdrop, closingController: closingController, closingHandler: closingHandler)
             }
         })
+    }
+
+    private func finishClose(
+        backdrop: NSView,
+        closingController: FolderContentsViewController?,
+        closingHandler: (() -> Void)?
+    ) {
+        backdrop.removeFromSuperview()
+        if contentsViewController === closingController {
+            contentsViewController = nil
+        }
+        closingHandler?()
     }
 }
 

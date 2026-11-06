@@ -13,7 +13,10 @@ public enum ContextMenuBuilder {
         public var addToDock: (() -> Void)? = nil
         public var rename: () -> Void
         public var hide: () -> Void
-        public var getInfo: () -> Void
+        /// Left out unless something provides a real Info window: the only public
+        /// way to open Finder's own needs Automation permission, and an item that
+        /// does what Show in Finder already does is not Get Info.
+        public var getInfo: (() -> Void)?
         public var showWindows: (() -> Void)?
         public var uninstall: (() -> Void)?
     }
@@ -55,8 +58,10 @@ public enum ContextMenuBuilder {
             menu.addItem(item)
         }
 
-        menu.addItem(.separator())
-        menu.addItem(makeItem(L10n.menuGetInfo, symbolName: "info.circle", iconVisibility: iconVisibility, action: actions.getInfo))
+        if let getInfo = actions.getInfo {
+            menu.addItem(.separator())
+            menu.addItem(makeItem(L10n.menuGetInfo, symbolName: "info.circle", iconVisibility: iconVisibility, action: getInfo))
+        }
 
         return menu
     }

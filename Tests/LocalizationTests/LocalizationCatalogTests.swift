@@ -58,6 +58,16 @@ private func specifiers(in value: String) -> [String] {
     #expect(catalogs.contains { $0.language == "en" })
 }
 
+/// `\u{2022}` is Swift's spelling. A `.strings` file does not read it, so the
+/// text shows up as typed — "u{2022}" in the middle of a Japanese sentence.
+@Test func noValueUsesSwiftStyleUnicodeEscapes() {
+    for catalog in loadCatalogs() {
+        for (key, value) in catalog.entries {
+            #expect(!value.contains("\\u{"), "\(catalog.language): \(key)")
+        }
+    }
+}
+
 /// A key present in one language and missing in another silently falls back to
 /// English — the app looks translated until it reaches that one screen.
 @Test func everyLanguageDefinesExactlyTheSameKeys() throws {

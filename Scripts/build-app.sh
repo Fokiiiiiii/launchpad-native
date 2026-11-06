@@ -76,10 +76,27 @@ echo "Built $APP"
 # NO_INSTALL=1 stops here: CI only wants the bundle, not a copy in ~/Applications.
 [ -n "${NO_INSTALL:-}" ] && exit 0
 
-pkill -f "Applications/LaunchpadNative.app/Contents/MacOS/AppHost" 2>/dev/null || true
 mkdir -p "$HOME/Applications"
+# Copy first, into a hidden sibling, and only then touch the running install: a
+# copy that fails (a full disk) leaves the working app where it was instead of
+# having deleted it already.
+STAGED="$HOME/Applications/.LaunchpadNative.app.staged"
+rm -rf "$STAGED"
+cp -R "$APP" "$STAGED"
+
+# Ask the running app to quit the normal way — that is what lets it put back the
+# trackpad gesture settings it changed — and only insist if it has not gone.
+if pgrep -f "Applications/LaunchpadNative.app/Contents/MacOS/AppHost" >/dev/null 2>&1; then
+    osascript -e 'tell application id "com.launchpadnative.app" to quit' >/dev/null 2>&1 || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        pgrep -f "Applications/LaunchpadNative.app/Contents/MacOS/AppHost" >/dev/null 2>&1 || break
+        sleep 0.5
+    done
+    pkill -f "Applications/LaunchpadNative.app/Contents/MacOS/AppHost" 2>/dev/null || true
+fi
+
 rm -rf "$INSTALLED_APP"
-cp -R "$APP" "$INSTALLED_APP"
+mv "$STAGED" "$INSTALLED_APP"
 # Finder/the Dock/LaunchServices cache icons aggressively by (bundle path,
 # mtime); touching the bundle after install nudges LaunchServices to notice
 # the icon changed rather than keep showing a stale generic-app glyph.

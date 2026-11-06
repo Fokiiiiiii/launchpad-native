@@ -38,6 +38,18 @@ private func contextMenuRecord() -> ApplicationRecord {
     #expect(withDockAction.items.count == withoutDockAction.items.count + 1)
 }
 
+/// Get Info used to open Finder with the app selected — what Show in Finder
+/// already does — so it is offered only when something really provides it.
+@Test @MainActor func getInfoAppearsOnlyWhenThereIsSomethingToRun() {
+    let record = contextMenuRecord()
+    let without = ContextMenuBuilder.menu(for: record, actions: .init(open: {}, showInFinder: {}, rename: {}, hide: {}))
+    let with = ContextMenuBuilder.menu(for: record, actions: .init(open: {}, showInFinder: {}, rename: {}, hide: {}, getInfo: {}))
+
+    #expect(!without.items.contains { $0.title == L10n.menuGetInfo })
+    #expect(with.items.contains { $0.title == L10n.menuGetInfo })
+    #expect(without.items.last?.isSeparatorItem != true)
+}
+
 @Test @MainActor func hiddenMenuIconsLeaveEveryItemWithoutAnImage() {
     let record = contextMenuRecord()
     let appMenu = ContextMenuBuilder.menu(

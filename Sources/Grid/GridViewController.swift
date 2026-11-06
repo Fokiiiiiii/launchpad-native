@@ -1134,6 +1134,13 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// Uses opacity, not `isHidden`: this project has twice shipped a stuck
     /// `isHidden` that left the grid permanently blank. `openFolder` also resets
     /// it on every open, and the launcher restores it whenever it is shown.
+    /// Takes an open folder panel away at once. The launcher calls this when it
+    /// is reset: a folder left open when the launcher was dismissed would
+    /// otherwise be waiting, with its backdrop, the next time it opens.
+    public func closeFolderIfOpen() {
+        folderOverlay.close(animated: false)
+    }
+
     public func setGridContentHidden(_ hidden: Bool) {
         let target: CGFloat = hidden ? 0 : 1
         guard abs(collectionView.alphaValue - target) > 0.001 else { return }
@@ -1203,7 +1210,6 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             showInFinder: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
             rename: { [weak self] in self?.promptRenameApp(record: record) },
             hide: { [weak self] in self?.hideApp(record) },
-            getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
             showWindows: showWindows,
             // The record itself, not its bundle identifier: two copies of an app share
             // one, and the request has to name the one that was chosen.

@@ -116,11 +116,11 @@
 "onboarding.triggers.hotcorner" = "ホットコーナー — 右下、デフォルトでオン";
 "onboarding.triggers.hotkey" = "F4 / Spotlightキー";
 "onboarding.triggers.gesture" = "トラックパッドのピンチジェスチャー(デフォルトでオフ)";
-"onboarding.triggers.footnote" = "これらはすべて、検索バー横の\u{2022}\u{2022}\u{2022}メニューからいつでも変更できます。";
+"onboarding.triggers.footnote" = "これらはすべて、検索バー横の•••メニューからいつでも変更できます。";
 "onboarding.permissions.title" = "任意の権限が1つ";
 "onboarding.permissions.body" = "F4/Spotlightキーとトラックパッドジェスチャーにはアクセシビリティと入力監視の権限が必要です。それ以外はこの権限なしで動作します。";
 "onboarding.done.title" = "準備完了です";
-"onboarding.done.body" = "設定は検索バー横の\u{2022}\u{2022}\u{2022}メニューからいつでも開けます。";
+"onboarding.done.body" = "設定は検索バー横の•••メニューからいつでも開けます。";
 "onboarding.back" = "戻る";
 "onboarding.next" = "次へ";
 "onboarding.getstarted" = "始める";

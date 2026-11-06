@@ -7,7 +7,7 @@ A native replacement for the Launchpad that macOS 26 removed. Press a key or pin
 - **Open it your way** — F4, a hot corner, a global hotkey, or a four- or five-finger pinch.
 - **Fast search** — just start typing. Matches by name, abbreviation (`vsc`), and Japanese reading.
 - **Your layout** — drag to reorder, make folders, add pages. Imports your old Launchpad layout on first launch.
-- **Right-click an icon** — reveal in Finder, keep in Dock, rename, hide, list windows, or uninstall.
+- **Right-click an icon** — reveal in Finder, rename, hide, list windows, or uninstall.
 - **Uninstaller** — finds leftover caches and preferences and moves what you tick to the Trash.
 - **Wallpaper background** — blurred, and follows your desktop, including dynamic wallpapers.
 - English, Japanese, Chinese, Korean, German, French and Spanish.

@@ -4,12 +4,17 @@ on:
   push:
     branches: [master]
   pull_request:
+  # The release workflow runs this first, so nothing is published from a commit
+  # whose tests have not passed.
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # The workflow name is the caller's when this is called, so a release run and a
+  # push run on the same commit do not cancel each other.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -18,7 +23,7 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Build
         run: swift build
       - name: Test

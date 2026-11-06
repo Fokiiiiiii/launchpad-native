@@ -37,6 +37,9 @@ final class WindowBrowserPopoverController: NSViewController, NSCollectionViewDa
         layout.sectionInset = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
 
         collectionView.collectionViewLayout = layout
+        // Off by default, and the only way a thumbnail is chosen is the
+        // selection callback — without this clicking one did nothing.
+        collectionView.isSelectable = true
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.register(WindowBrowserCellItem.self, forItemWithIdentifier: itemIdentifier)

@@ -152,12 +152,20 @@ public enum DiagnosticsArchive {
             options: [.forUploading],
             error: &coordinatorError
         ) { zipped in
+            // Copied beside the destination first and swapped in afterwards: a
+            // copy that fails (full disk, a medium that went away) used to leave
+            // the previous export deleted as well.
+            let staged = destination.deletingLastPathComponent()
+                .appendingPathComponent(".\(destination.lastPathComponent).\(UUID().uuidString).partial")
             do {
+                try FileManager.default.copyItem(at: zipped, to: staged)
                 if FileManager.default.fileExists(atPath: destination.path) {
-                    try FileManager.default.removeItem(at: destination)
+                    _ = try FileManager.default.replaceItemAt(destination, withItemAt: staged)
+                } else {
+                    try FileManager.default.moveItem(at: staged, to: destination)
                 }
-                try FileManager.default.copyItem(at: zipped, to: destination)
             } catch {
+                try? FileManager.default.removeItem(at: staged)
                 copyError = error
             }
         }
