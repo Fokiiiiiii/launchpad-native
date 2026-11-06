@@ -28,6 +28,12 @@ public enum DiagnosticsArchive {
     /// fill it. Errors are still never dropped; this stops them from crowding
     /// out the context that makes them readable.
     static let routineFloorFraction = 0.5
+    /// A message can be arbitrarily long (a dumped payload); one line may not be.
+    static let maxLineLength = 4_000
+
+    static func clamped(_ line: String) -> String {
+        line.count > maxLineLength ? String(line.prefix(maxLineLength)) + "… [cut]" : line
+    }
 
     /// Groups by local calendar day — the day a user names when reporting.
     static func groupByDay(
@@ -87,7 +93,7 @@ public enum DiagnosticsArchive {
                 guard let log = entry as? OSLogEntryLog else { continue }
                 collected.append((
                     log.date,
-                    "\(formatter.string(from: log.date)) [\(log.category)] [\(log.level.exportName)] \(log.composedMessage)"
+                    clamped("\(formatter.string(from: log.date)) [\(log.category)] [\(log.level.exportName)] \(log.composedMessage)")
                 ))
             }
             return collected
@@ -101,6 +107,19 @@ public enum DiagnosticsArchive {
             )
             return (try? collect(from: OSLogStore(scope: .currentProcessIdentifier))) ?? []
         }
+    }
+
+    /// `write` off the calling thread. Reading thirty days of the unified log and
+    /// compressing it takes as long as there is log, which is not a time to hold
+    /// the main thread for.
+    public static func writeInBackground(
+        to destination: URL,
+        days: Int = defaultDayCount,
+        entriesPerDay: Int = defaultEntriesPerDay
+    ) async throws -> Summary {
+        try await Task.detached(priority: .utility) {
+            try write(to: destination, days: days, entriesPerDay: entriesPerDay)
+        }.value
     }
 
     /// Writes the archive to `destination`, replacing anything already there.

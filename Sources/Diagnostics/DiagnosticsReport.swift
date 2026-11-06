@@ -117,9 +117,11 @@ public enum DiagnosticsReport {
             for entry in try store.getEntries(at: position) {
                 guard let logEntry = entry as? OSLogEntryLog,
                       logEntry.subsystem == DiagnosticsLog.subsystem else { continue }
-                lines.append("\(formatter.string(from: logEntry.date)) [\(logEntry.category)] [\(logEntry.level.exportName)] \(logEntry.composedMessage)")
+                lines.append(DiagnosticsArchive.clamped("\(formatter.string(from: logEntry.date)) [\(logEntry.category)] [\(logEntry.level.exportName)] \(logEntry.composedMessage)"))
+                // Only the newest `limit` are wanted; do not hold the whole run.
+                if lines.count > limit { lines.removeFirst() }
             }
-            return Array(lines.suffix(limit))
+            return lines
         } catch {
             DiagnosticsLog.appHost.error("Diagnostics report could not read the log store: \(error.localizedDescription, privacy: .public)")
             return []

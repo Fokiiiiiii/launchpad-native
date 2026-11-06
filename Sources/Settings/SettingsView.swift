@@ -13,6 +13,7 @@ public struct SettingsView: View {
     @ScaledMetric(relativeTo: .body) private var tabIconSize: CGFloat = 15
     @ScaledMetric(relativeTo: .caption) private var tabItemHeight: CGFloat = 34
     @State var showResetGridConfirmation = false
+    @State var isExportingDiagnostics = false
 
     enum Metrics {
         static let sectionSpacing: CGFloat = 13

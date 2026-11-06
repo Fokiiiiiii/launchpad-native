@@ -150,6 +150,26 @@ private func entry(_ day: String, _ hour: Int, _ text: String) -> (date: Date, l
 }
 
 /// A normal day is not trimmed at all — the cap is a backstop, not a budget.
+@Test func anOverlongLineIsCutAndAShortOneIsLeftAlone() {
+    let short = "2026-01-01T00:00:00Z [x] [info] fine"
+    #expect(DiagnosticsArchive.clamped(short) == short)
+
+    let long = String(repeating: "a", count: DiagnosticsArchive.maxLineLength * 5)
+    let cut = DiagnosticsArchive.clamped(long)
+    #expect(cut.count < DiagnosticsArchive.maxLineLength + 20)
+    #expect(cut.hasSuffix("[cut]"))
+}
+
+@Test func writingInTheBackgroundGivesTheSameArchive() async throws {
+    let destination = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).zip")
+    defer { try? FileManager.default.removeItem(at: destination) }
+
+    let summary = try await DiagnosticsArchive.writeInBackground(to: destination, days: 1)
+
+    #expect(FileManager.default.fileExists(atPath: destination.path))
+    #expect(summary.byteCount > 0)
+}
+
 @Test func aNormalDayIsNotTrimmed() {
     let entries = (0..<3_000).map { entry("2026-08-20", 9, "[notice] line \($0)") }
     let grouped = DiagnosticsArchive.groupByDay(entries, calendar: calendar)

@@ -70,6 +70,7 @@ extension SettingsView {
                                     Label(L10n.diagnosticsSaveReport, systemImage: "square.and.arrow.down")
                                 }
                                 .controlSize(.small)
+                                .disabled(isExportingDiagnostics)
                             }
                         }
                     }
@@ -92,8 +93,17 @@ extension SettingsView {
         panel.nameFieldStringValue = "LaunchpadNative-logs-\(formatter.string(from: Date())).zip"
         panel.allowedContentTypes = [.zip]
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard !isExportingDiagnostics else { return }
+        isExportingDiagnostics = true
+        Task { @MainActor in
+            defer { isExportingDiagnostics = false }
+            await exportDiagnostics(to: url)
+        }
+    }
+
+    private func exportDiagnostics(to url: URL) async {
         do {
-            let summary = try DiagnosticsArchive.write(to: url)
+            let summary = try await DiagnosticsArchive.writeInBackground(to: url)
             DiagnosticsLog.settings.notice(
                 "Exported logs: \(summary.dayCount, privacy: .public) day(s), \(summary.entryCount, privacy: .public) entries, \(summary.byteCount, privacy: .public) bytes"
             )
