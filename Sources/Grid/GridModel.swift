@@ -374,8 +374,14 @@ public final class GridModel {
         let previousPages = pages
         let previousFolders = folders
         let previousDateAdded = document.dateAddedByID
+        let previousKnown = document.knownApplications
 
         recordsByIDValue = Dictionary(uniqueKeysWithValues: records.map { ($0.id.value, $0) })
+        // Before anything is pruned: an app that has moved looks, to the code
+        // below, like one that was uninstalled and another that was installed.
+        if prunesMissingItems {
+            migrateMovedApplications(previousRecords: previousRecords)
+        }
         let hiddenIDs = Set(document.hiddenApplicationIDs.map(\.value))
         let validIDs = Set(recordsByIDValue.values.filter(isEligibleForGrid(_:)).map { $0.id.value })
             .subtracting(hiddenIDs)
@@ -398,14 +404,96 @@ public final class GridModel {
             document.dateAddedByID[identifier] = Date()
         }
 
+        rememberKnownApplications()
+
         let changed = previousRecords != recordsByIDValue
             || previousPages != pages
             || previousFolders != folders
             || previousDateAdded != document.dateAddedByID
+            || previousKnown != document.knownApplications
         if changed {
             onChange?()
         }
         return changed
+    }
+
+    // MARK: Moved applications
+
+    private func fingerprint(of record: ApplicationRecord) -> KnownApplication {
+        KnownApplication(bundleIdentifier: record.bundleIdentifier, teamIdentifier: record.teamIdentifier)
+    }
+
+    /// Every identifier the layout refers to anywhere: placed, renamed, hidden,
+    /// or carrying a date.
+    private func referencedIdentifierValues() -> Set<String> {
+        var values = allPlacedAppIdentifierValues()
+        values.formUnion(document.aliases.keys.map(\.value))
+        values.formUnion(document.hiddenApplicationIDs.map(\.value))
+        values.formUnion(document.dateAddedByID.keys.map(\.value))
+        values.formUnion(document.lastUsedByID.keys.map(\.value))
+        return values
+    }
+
+    /// Records, for every app known now and every app the layout still refers
+    /// to, what is needed to recognise it after it moves.
+    private func rememberKnownApplications() {
+        let referenced = referencedIdentifierValues()
+        var known = document.knownApplications.filter {
+            referenced.contains($0.key.value) && recordsByIDValue[$0.key.value] == nil
+        }
+        for record in recordsByIDValue.values {
+            known[record.id.asPersistenceIdentifier] = fingerprint(of: record)
+        }
+        document.knownApplications = known
+    }
+
+    /// Carries what the layout holds for an app that has moved over to the app
+    /// at its new path.
+    ///
+    /// An identifier the layout refers to but the catalog no longer has is
+    /// matched with a catalog app the layout has never seen, when both are the
+    /// same bundle identifier and signing team and there is exactly one of each.
+    /// Two of either is ambiguous — which copy went where cannot be told — and is
+    /// left alone, as it always was.
+    private func migrateMovedApplications(previousRecords: [String: ApplicationRecord]) {
+        let referenced = referencedIdentifierValues()
+        let orphans = referenced.filter { recordsByIDValue[$0] == nil }
+        guard !orphans.isEmpty else { return }
+        let newcomers = recordsByIDValue.values.filter { !referenced.contains($0.id.value) }
+        guard !newcomers.isEmpty else { return }
+
+        var orphansByApp: [KnownApplication: [String]] = [:]
+        for orphan in orphans {
+            let known = previousRecords[orphan].map(fingerprint(of:))
+                ?? document.knownApplications[StableAppIdentifier(value: orphan)]
+            guard let known else { continue }
+            orphansByApp[known, default: []].append(orphan)
+        }
+        var newcomersByApp: [KnownApplication: [ApplicationRecord]] = [:]
+        for record in newcomers {
+            newcomersByApp[fingerprint(of: record), default: []].append(record)
+        }
+
+        for (app, olds) in orphansByApp {
+            guard olds.count == 1, let news = newcomersByApp[app], news.count == 1 else { continue }
+            remapIdentifier(from: StableAppIdentifier(value: olds[0]), to: news[0].id.asPersistenceIdentifier)
+        }
+    }
+
+    private func remapIdentifier(from old: StableAppIdentifier, to new: StableAppIdentifier) {
+        func swapped(_ item: LayoutItem) -> LayoutItem {
+            if case .app(let id) = item, id == old { return .app(new) }
+            return item
+        }
+        pages = pages.map { $0.map(swapped) }
+        for (folderID, folder) in folders {
+            folders[folderID]?.pages = folder.pages.map { $0.map(swapped) }
+        }
+        if let alias = document.aliases.removeValue(forKey: old) { document.aliases[new] = alias }
+        if document.hiddenApplicationIDs.remove(old) != nil { document.hiddenApplicationIDs.insert(new) }
+        if let added = document.dateAddedByID.removeValue(forKey: old) { document.dateAddedByID[new] = added }
+        if let used = document.lastUsedByID.removeValue(forKey: old) { document.lastUsedByID[new] = used }
+        document.knownApplications.removeValue(forKey: old)
     }
 
     /// Apps that predate `dateAddedByID` have no timestamp, which would leave

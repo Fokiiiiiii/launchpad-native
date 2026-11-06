@@ -432,6 +432,22 @@ public struct TriggerSettings: Codable, Sendable, Equatable {
     )
 }
 
+/// What the layout remembers about an app besides where it was put: enough to
+/// recognise it again after it moves. An app's identifier is derived from its
+/// path, so moving or renaming it gives it a new one — and everything saved
+/// under the old one (its place, its alias, whether it was hidden) would be
+/// left pointing at nothing. The bundle identifier and the signing team do not
+/// change with the path.
+public struct KnownApplication: Codable, Sendable, Hashable {
+    public var bundleIdentifier: String
+    public var teamIdentifier: String?
+
+    public init(bundleIdentifier: String, teamIdentifier: String?) {
+        self.bundleIdentifier = bundleIdentifier
+        self.teamIdentifier = teamIdentifier
+    }
+}
+
 /// The full persisted state of the launcher, versioned for migration.
 ///
 /// Hand-written `Codable` for the same reason as `GridSettings`/
@@ -496,6 +512,9 @@ public struct LayoutDocument: Codable, Sendable {
     /// `LauncherBackgroundView.Configuration.blursWallpaper`.
     public var blursWallpaper: Bool
     public var menuIconVisibility: MenuIconVisibility
+    /// Kept for every app currently known and every app the layout still refers
+    /// to — see `KnownApplication`. Absent from a file written before it existed.
+    public var knownApplications: [StableAppIdentifier: KnownApplication]
 
     public init(
         schemaVersion: Int,
@@ -517,8 +536,10 @@ public struct LayoutDocument: Codable, Sendable {
         backgroundMode: LauncherBackgroundMode = .glass,
         glassMaterialIntensity: Double = 0.35,
         blursWallpaper: Bool = true,
-        menuIconVisibility: MenuIconVisibility = .automatic
+        menuIconVisibility: MenuIconVisibility = .automatic,
+        knownApplications: [StableAppIdentifier: KnownApplication] = [:]
     ) {
+        self.knownApplications = knownApplications
         self.schemaVersion = schemaVersion
         self.layoutMode = layoutMode
         self.gridSettings = gridSettings
@@ -542,7 +563,7 @@ public struct LayoutDocument: Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, layoutMode, gridSettings, pages, folders, aliases, hiddenApplicationIDs, customSources, triggerSettings, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle, showsMenuBarIcon, showMenuBarApplications, showsHiddenAppsInSearch, backgroundMode, glassMaterialIntensity, blursWallpaper, menuIconVisibility
+        case schemaVersion, layoutMode, gridSettings, pages, folders, aliases, hiddenApplicationIDs, customSources, triggerSettings, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle, showsMenuBarIcon, showMenuBarApplications, showsHiddenAppsInSearch, backgroundMode, glassMaterialIntensity, blursWallpaper, menuIconVisibility, knownApplications
     }
 
     public init(from decoder: Decoder) throws {
@@ -567,6 +588,7 @@ public struct LayoutDocument: Codable, Sendable {
         glassMaterialIntensity = min(max(try container.decodeIfPresent(Double.self, forKey: .glassMaterialIntensity) ?? 0.35, 0), 1)
         blursWallpaper = try container.decodeIfPresent(Bool.self, forKey: .blursWallpaper) ?? true
         menuIconVisibility = (try? container.decodeIfPresent(MenuIconVisibility.self, forKey: .menuIconVisibility)) ?? .automatic
+        knownApplications = (try? container.decodeIfPresent([StableAppIdentifier: KnownApplication].self, forKey: .knownApplications)) ?? [:]
     }
 
     public static let currentSchemaVersion = 1
