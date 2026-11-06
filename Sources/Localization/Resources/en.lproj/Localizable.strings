@@ -95,6 +95,8 @@
 "uninstall.needspermission" = "needs admin permission — skipped";
 "uninstall.computingsizes" = "Calculating…";
 "uninstall.reportsavefailed" = "The selected items were moved to Trash, but the operation history could not be saved.";
+"uninstall.apprunning" = "The app is still running, so nothing was moved. Quit it and try again.";
+"uninstall.somefailed" = "Some items could not be moved to Trash. The rest were moved.";
 "menu.renamefolder" = "Rename Folder";
 "menu.ungroupfolder" = "Ungroup";
 "grid.renamealert.title" = "Rename";

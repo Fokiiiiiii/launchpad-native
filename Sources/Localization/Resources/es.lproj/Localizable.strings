@@ -95,6 +95,8 @@
 "uninstall.needspermission" = "requiere permisos de administrador — omitido";
 "uninstall.computingsizes" = "Calculando…";
 "uninstall.reportsavefailed" = "Los ítems seleccionados se movieron a la papelera, pero no se pudo guardar el historial de la operación.";
+"uninstall.apprunning" = "La app sigue abierta, así que no se movió nada. Ciérrala e inténtalo de nuevo.";
+"uninstall.somefailed" = "Algunos ítems no se pudieron mover a la papelera. El resto sí se movió.";
 "menu.renamefolder" = "Renombrar carpeta";
 "menu.ungroupfolder" = "Desagrupar";
 "grid.renamealert.title" = "Renombrar";

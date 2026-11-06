@@ -136,10 +136,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsWindowController.show(on: launcherWindowController.currentScreen)
         }
 
-        launcherWindowController.setOnRequestUninstall { [weak self] bundleIdentifier in
-            guard let self, launcherWindowController.isVisible,
-                  let record = launcherWindowController.model.allRecords.first(where: { $0.bundleIdentifier == bundleIdentifier })
-            else { return }
+        launcherWindowController.setOnRequestUninstall { [weak self] record in
+            guard let self, launcherWindowController.isVisible else { return }
             settingsWindowController.close()
             uninstallPanelWindowController.show(for: record, allRecords: launcherWindowController.model.allRecords, on: launcherWindowController.currentScreen)
         }

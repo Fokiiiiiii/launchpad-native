@@ -95,6 +95,8 @@
 "uninstall.needspermission" = "관리자 권한 필요 — 건너뜀";
 "uninstall.computingsizes" = "계산 중…";
 "uninstall.reportsavefailed" = "선택한 항목은 휴지통으로 옮겼지만 작업 기록을 저장하지 못했습니다.";
+"uninstall.apprunning" = "앱이 아직 실행 중이라 아무것도 옮기지 않았습니다. 앱을 종료한 뒤 다시 시도하세요.";
+"uninstall.somefailed" = "일부 항목을 휴지통으로 옮기지 못했습니다. 나머지는 옮겼습니다.";
 "menu.renamefolder" = "폴더 이름 변경";
 "menu.ungroupfolder" = "그룹 해제";
 "grid.renamealert.title" = "이름 변경";

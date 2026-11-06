@@ -209,14 +209,14 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
     private func confirmAndClose() {
         guard !isConfirming, let viewModel else { return }
         isConfirming = true
-        _ = viewModel.confirmMoveToTrash { [weak self, weak viewModel] reportSaved in
+        viewModel.confirmMoveToTrash { [weak self, weak viewModel] succeeded in
             guard let self, self.viewModel === viewModel else { return }
             self.isConfirming = false
-            // The removal has already happened either way. Close on the
-            // normal path only after the report is safely persisted; on a
-            // report failure, keep the panel open so the model's warning can
-            // distinguish that bookkeeping failure from the completed move.
-            if reportSaved {
+            // Close only on a clean result: every selected item moved and the
+            // history saved. Otherwise the panel stays open and the view says
+            // what went wrong — the app still running, items that could not be
+            // moved, or a history that could not be written.
+            if succeeded {
                 self.close()
             }
         }

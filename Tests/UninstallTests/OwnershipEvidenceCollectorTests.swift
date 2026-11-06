@@ -15,6 +15,93 @@ import Testing
 /// creates and deletes itself.
 @Suite("OwnershipEvidenceCollector")
 struct OwnershipEvidenceCollectorTests {
+    @Test("a launch item's name has to be the identifier or a dotted child of it")
+    func launchItemNamesRespectTheBoundary() {
+        #expect(OwnershipEvidenceCollector.isOwnName("com.example.app", bundleID: "com.example.app"))
+        #expect(OwnershipEvidenceCollector.isOwnName("com.example.app.helper", bundleID: "com.example.app"))
+        #expect(!OwnershipEvidenceCollector.isOwnName("com.example.app2", bundleID: "com.example.app"))
+        #expect(!OwnershipEvidenceCollector.isOwnName("com.example.appstore.helper", bundleID: "com.example.app"))
+        #expect(!OwnershipEvidenceCollector.isOwnName("com.example", bundleID: "com.example.app"))
+    }
+
+    private func writeAgent(named name: String, label: String?, in directory: URL) throws {
+        var plist: [String: Any] = ["ProgramArguments": ["/usr/bin/true"]]
+        if let label { plist["Label"] = label }
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: directory.appendingPathComponent(name))
+    }
+
+    /// The Label is what gets unloaded from launchd before the file is trashed,
+    /// so a file named like this app's but labelled as another product's job
+    /// must not be taken.
+    @Test("a user LaunchAgent is taken only when its name and its Label both belong to the app")
+    func launchAgentsNeedANameAndALabelThatAgree() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try writeAgent(named: "com.example.app.plist", label: "com.example.app", in: dir)
+        try writeAgent(named: "com.example.app.helper.plist", label: "com.example.app.helper", in: dir)
+        try writeAgent(named: "com.example.app2.plist", label: "com.example.app2", in: dir)
+        try writeAgent(named: "com.example.app.imposter.plist", label: "com.other.product.job", in: dir)
+        try writeAgent(named: "com.example.app.nolabel.plist", label: nil, in: dir)
+
+        let taken = OwnershipEvidenceCollector
+            .launchItems(in: dir, matchingBundleID: "com.example.app", verifyingLabel: true)
+            .map(\.lastPathComponent)
+            .sorted()
+
+        #expect(taken == ["com.example.app.helper.plist", "com.example.app.plist"])
+    }
+
+    @Test("without Label checking a name that fits is enough")
+    func launchItemsWithoutLabelChecking() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try writeAgent(named: "com.example.app.plist", label: "anything", in: dir)
+        try writeAgent(named: "com.example.apple.plist", label: "anything", in: dir)
+
+        let taken = OwnershipEvidenceCollector
+            .launchItems(in: dir, matchingBundleID: "com.example.app", verifyingLabel: false)
+            .map(\.lastPathComponent)
+
+        #expect(taken == ["com.example.app.plist"])
+    }
+
+    /// An identifier is text from the app's own Info.plist. If it climbed out
+    /// of ~/Library, the plan would pre-check, say, the user's Documents.
+    @Test("an identifier that is not a plain file name produces no related paths at all")
+    func hostileIdentifierGivesNoRelatedPaths() {
+        for hostile in ["../../Documents", "a/b", "com.example/../..", ".hidden", "", "x\u{0}y"] {
+            let url = URL(fileURLWithPath: "/tmp/Hostile.app")
+            let record = ApplicationRecord(
+                id: StableAppID(bundleURL: url, bundleIdentifier: hostile, teamIdentifier: nil),
+                bundleIdentifier: hostile,
+                bundleURL: url,
+                executableURL: nil,
+                displayName: "Hostile",
+                originalDisplayName: "Hostile",
+                bundleVersion: "1.0",
+                teamIdentifier: nil,
+                category: nil,
+                sourceID: "test",
+                isSystemProtected: false,
+                isBackgroundOnly: false,
+                iconCacheKey: "hostile",
+                canLaunch: false,
+                canOpenNewInstance: false,
+                lastSeenModificationDate: Date()
+            )
+
+            let evidence = OwnershipEvidenceCollector.collect(for: record)
+
+            #expect(evidence.relatedPaths.isEmpty, "\(hostile.debugDescription)")
+            #expect(evidence.userLaunchAgents.isEmpty)
+            #expect(evidence.systemLaunchItems.isEmpty)
+            #expect(evidence.receiptPackageIDs.isEmpty)
+        }
+    }
+
     @Test("a bundle with NSExtension in its Info.plist is reported")
     func extensionDeclarationDetected() throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -14,7 +14,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     private let onDidLaunch: () -> Void
     private let onDidCancel: () -> Void
     private let onOpenSettings: () -> Void
-    private let onRequestUninstall: (String) -> Void
+    private let onRequestUninstall: (ApplicationRecord) -> Void
 
     private let searchField = NSTextField()
     private let searchIcon = NSImageView()
@@ -34,7 +34,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         iconCache: iconCache,
         onLaunch: { [weak self] record in self?.launch(record) },
         onBackgroundClick: { [weak self] in self?.onDidCancel() },
-        onRequestUninstall: { [weak self] bundleIdentifier in self?.onRequestUninstall(bundleIdentifier) }
+        onRequestUninstall: { [weak self] record in self?.onRequestUninstall(record) }
     )
 
     init(
@@ -44,7 +44,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         onDidLaunch: @escaping () -> Void,
         onDidCancel: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
-        onRequestUninstall: @escaping (String) -> Void = { _ in }
+        onRequestUninstall: @escaping (ApplicationRecord) -> Void = { _ in }
     ) {
         self.viewModel = viewModel
         self.gridModel = gridModel

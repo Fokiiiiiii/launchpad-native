@@ -106,7 +106,8 @@ public final class IconCache: @unchecked Sendable {
     /// Internal test hook for proving the explicit memory/in-flight/write
 
     func cacheFileURL(forKey key: String) -> URL {
-        cacheDirectory.appendingPathComponent("\(key).png")
+        // The key starts with an identifier from the app's own Info.plist.
+        cacheDirectory.appendingPathComponent("\(BundleIdentifier.fileName(for: key)).png")
     }
 
     private func enqueue(

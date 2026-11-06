@@ -77,6 +77,23 @@ public enum OwnershipEvidenceCollector {
         let home = fm.homeDirectoryForCurrentUser
         let bundleID = record.bundleIdentifier
 
+        // The identifier comes from the app's own Info.plist and is about to be
+        // pasted into paths under ~/Library. One with a slash or a ".." in it
+        // would point those paths at something that is not this app's data —
+        // and the plan pre-checks what it finds. No related paths at all is
+        // the safe answer; the app itself can still be removed.
+        guard BundleIdentifier.isSafeFileName(bundleID) else {
+            DiagnosticsLog.uninstall.error("Refusing to look for data of an app whose bundle identifier is not a plain file name")
+            return OwnershipEvidence(
+                bundleURL: record.bundleURL,
+                relatedPaths: [],
+                userLaunchAgents: [],
+                systemLaunchItems: [],
+                receiptPackageIDs: [],
+                systemExtensionIdentifiers: []
+            )
+        }
+
         // Every well-known location a macOS app can leave data in, beyond
         // the "big three" (Application Support/Caches/Preferences) —
         // sandboxed containers, WebKit/cookie storage, saved window state,
@@ -110,10 +127,11 @@ public enum OwnershipEvidenceCollector {
 
         let userLaunchAgents = launchItems(
             in: home.appendingPathComponent("Library/LaunchAgents"),
-            matchingBundleID: bundleID
+            matchingBundleID: bundleID,
+            verifyingLabel: true
         )
-        let systemLaunchItems = launchItems(in: URL(fileURLWithPath: "/Library/LaunchAgents"), matchingBundleID: bundleID)
-            + launchItems(in: URL(fileURLWithPath: "/Library/LaunchDaemons"), matchingBundleID: bundleID)
+        let systemLaunchItems = launchItems(in: URL(fileURLWithPath: "/Library/LaunchAgents"), matchingBundleID: bundleID, verifyingLabel: false)
+            + launchItems(in: URL(fileURLWithPath: "/Library/LaunchDaemons"), matchingBundleID: bundleID, verifyingLabel: false)
 
         let receiptPackageIDs = receipts(matchingBundleID: bundleID)
         let systemExtensionIdentifiers = extensionIdentifiers(in: record.bundleURL)
@@ -149,15 +167,39 @@ public enum OwnershipEvidenceCollector {
             .map { RelatedPath(url: $0, category: category, exists: true) }
     }
 
-    /// Scans a LaunchAgents/LaunchDaemons directory for `.plist` files whose
-    /// `Label` contains the target bundle identifier — the common real-world
-    /// naming convention (e.g. `com.example.app.helper.plist` for
-    /// `com.example.app`), not a guaranteed mapping.
-    private static func launchItems(in directory: URL, matchingBundleID bundleID: String) -> [URL] {
+    /// Whether `name` is the identifier itself or one of its dotted children —
+    /// `com.example.app` and `com.example.app.helper`, but not `com.example.app2`
+    /// or `com.example.appstore`, which a plain prefix test would also take.
+    static func isOwnName(_ name: String, bundleID: String) -> Bool {
+        name == bundleID || name.hasPrefix(bundleID + ".")
+    }
+
+    /// Scans a LaunchAgents/LaunchDaemons directory for `.plist` files named
+    /// after the target bundle identifier — the common real-world convention
+    /// (e.g. `com.example.app.helper.plist` for `com.example.app`), not a
+    /// guaranteed mapping.
+    ///
+    /// With `verifyingLabel`, the plist's own `Label` has to follow the same
+    /// rule: the Label is what gets unloaded from launchd before the file is
+    /// trashed, so a file whose name matches but whose Label names another
+    /// product's job must not be taken.
+    static func launchItems(in directory: URL, matchingBundleID bundleID: String, verifyingLabel: Bool) -> [URL] {
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: nil
         ) else { return [] }
-        return entries.filter { $0.pathExtension == "plist" && $0.deletingPathExtension().lastPathComponent.hasPrefix(bundleID) }
+        return entries.filter { entry in
+            guard entry.pathExtension == "plist",
+                  isOwnName(entry.deletingPathExtension().lastPathComponent, bundleID: bundleID) else {
+                return false
+            }
+            guard verifyingLabel else { return true }
+            guard let data = try? Data(contentsOf: entry),
+                  let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                  let label = plist["Label"] as? String else {
+                return false
+            }
+            return isOwnName(label, bundleID: bundleID)
+        }
     }
 
     /// `pkgutil --pkgs` lists installed package receipt identifiers; this is

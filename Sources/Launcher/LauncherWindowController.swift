@@ -28,7 +28,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     private var hasAttemptedLegacyImport = false
     private var latestRecords: [ApplicationRecord] = []
     private var onOpenSettings: (() -> Void)?
-    private var onRequestUninstall: ((String) -> Void)?
+    private var onRequestUninstall: ((ApplicationRecord) -> Void)?
     private var onDidHide: (() -> Void)?
     /// Incremented on every show()/hide() call — a hide() animation's
     /// completion handler checks this before calling `orderOut`, so an
@@ -156,7 +156,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// Set once by the composition root, same reasoning as
     /// `setOnOpenSettings` — avoids a circular initializer dependency with
     /// the Uninstall panel window controller.
-    public func setOnRequestUninstall(_ handler: @escaping (String) -> Void) {
+    public func setOnRequestUninstall(_ handler: @escaping (ApplicationRecord) -> Void) {
         onRequestUninstall = handler
     }
 
@@ -611,8 +611,8 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             onOpenSettings: { [weak self] in
                 self?.onOpenSettings?()
             },
-            onRequestUninstall: { [weak self] bundleIdentifier in
-                self?.onRequestUninstall?(bundleIdentifier)
+            onRequestUninstall: { [weak self] record in
+                self?.onRequestUninstall?(record)
             }
         )
 

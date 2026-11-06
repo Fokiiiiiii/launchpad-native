@@ -95,6 +95,8 @@
 "uninstall.needspermission" = "nécessite des droits d'administrateur — ignoré";
 "uninstall.computingsizes" = "Calcul en cours…";
 "uninstall.reportsavefailed" = "Les éléments sélectionnés ont été placés dans la corbeille, mais l'historique n'a pas pu être enregistré.";
+"uninstall.apprunning" = "L'app est toujours ouverte, rien n'a donc été déplacé. Quittez-la puis réessayez.";
+"uninstall.somefailed" = "Certains éléments n'ont pas pu être placés dans la corbeille. Les autres l'ont été.";
 "menu.renamefolder" = "Renommer le dossier";
 "menu.ungroupfolder" = "Dissocier";
 "grid.renamealert.title" = "Renommer";

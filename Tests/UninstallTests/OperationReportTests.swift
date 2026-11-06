@@ -55,6 +55,43 @@ struct OperationReportTests {
         #expect(decoded.entries[0].errorDescription == nil)
     }
 
+    @Test("two reports for the same app in the same second are both kept")
+    func sameSecondReportsDoNotReplaceEachOther() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = OperationReportStore(directory: root)
+        let report = OperationReport(
+            bundleIdentifier: "com.example.app",
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            entries: []
+        )
+
+        let first = try await store.save(report)
+        let second = try await store.save(report)
+
+        #expect(first != second)
+        #expect(FileManager.default.fileExists(atPath: first.path))
+        #expect(FileManager.default.fileExists(atPath: second.path))
+    }
+
+    @Test("a hostile identifier cannot place the report outside its directory")
+    func hostileIdentifierStaysInsideTheReportDirectory() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = OperationReportStore(directory: root)
+        let report = OperationReport(
+            bundleIdentifier: "../../escaped",
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            entries: []
+        )
+
+        let url = try await store.save(report)
+
+        #expect(url.deletingLastPathComponent().standardizedFileURL == root.standardizedFileURL)
+    }
+
     @Test("save reports directory creation failures")
     func saveReportsDirectoryCreationFailure() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

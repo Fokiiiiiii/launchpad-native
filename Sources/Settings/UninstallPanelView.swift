@@ -191,16 +191,14 @@ struct UninstallPanelView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if viewModel.isBlockedByRunningApp {
+                notice(L10n.uninstallAppStillRunningNotice)
+            }
+            if viewModel.failedRemovalCount > 0 {
+                notice(L10n.uninstallSomeItemsFailedNotice)
+            }
             if viewModel.operationReportError != nil {
-                Label {
-                    Text(L10n.uninstallReportSaveFailedNotice)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isStaticText)
+                notice(L10n.uninstallReportSaveFailedNotice)
             }
 
             HStack {
@@ -225,7 +223,7 @@ struct UninstallPanelView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
-                .disabled(viewModel.hasConfirmedRemoval || viewModel.isRecordingOperationReport)
+                .disabled(viewModel.hasConfirmedRemoval || viewModel.isRecordingOperationReport || viewModel.isLoadingPlan)
                 // Deliberately no `.keyboardShortcut(.defaultAction)` — an
                 // accidental Return keypress must never trigger a Trash move,
                 // unlike the reference's own button (see this type's doc
@@ -233,6 +231,18 @@ struct UninstallPanelView: View {
             }
         }
         .padding(16)
+    }
+
+    private func notice(_ text: String) -> some View {
+        Label {
+            Text(text)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill")
+        }
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(.orange)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityAddTraits(.isStaticText)
     }
 
     private func sectionTitle(_ kind: UninstallPanelViewModel.SectionKind) -> String {

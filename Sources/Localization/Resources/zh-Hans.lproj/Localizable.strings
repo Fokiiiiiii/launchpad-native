@@ -95,6 +95,8 @@
 "uninstall.needspermission" = "需要管理员权限 — 已跳过";
 "uninstall.computingsizes" = "正在计算…";
 "uninstall.reportsavefailed" = "所选项目已移到废纸篓，但操作记录未能保存。";
+"uninstall.apprunning" = "该 App 仍在运行，因此未移动任何内容。请先退出，然后重试。";
+"uninstall.somefailed" = "部分项目无法移到废纸篓，其余项目已移动。";
 "menu.renamefolder" = "重命名文件夹";
 "menu.ungroupfolder" = "取消分组";
 "grid.renamealert.title" = "重命名";

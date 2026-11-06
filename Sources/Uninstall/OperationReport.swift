@@ -1,3 +1,4 @@
+import Catalog
 import Diagnostics
 import Foundation
 
@@ -130,8 +131,13 @@ public actor OperationReportStore {
         // Each report is a new, uniquely-named file (bundle ID + timestamp),
         // never overwritten — so a plain atomic write is enough; there's no
         // previous version at this exact path to preserve as a backup.
+        // The identifier comes from the app's own Info.plist, and two removals
+        // of the same app can land in the same second — the unique suffix keeps
+        // the later write from replacing the earlier report.
         let timestamp = Int(report.generatedAt.timeIntervalSince1970)
-        let url = directory.appendingPathComponent("\(report.bundleIdentifier)-\(timestamp).json")
+        let unique = UUID().uuidString.prefix(8)
+        let name = "\(BundleIdentifier.fileName(for: report.bundleIdentifier))-\(timestamp)-\(unique).json"
+        let url = directory.appendingPathComponent(name)
         do {
             try data.write(to: url, options: .atomic)
         } catch {

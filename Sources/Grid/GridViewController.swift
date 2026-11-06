@@ -18,7 +18,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     private static let maxPrefetchIcons = 160
     private let onLaunch: (ApplicationRecord) -> Void
     private let onBackgroundClick: () -> Void
-    private let onRequestUninstall: (String) -> Void
+    private let onRequestUninstall: (ApplicationRecord) -> Void
 
     private let collectionView = GridCollectionView()
     private let scrollView = NSScrollView()
@@ -64,7 +64,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         iconCache: IconCache,
         onLaunch: @escaping (ApplicationRecord) -> Void,
         onBackgroundClick: @escaping () -> Void,
-        onRequestUninstall: @escaping (String) -> Void = { _ in }
+        onRequestUninstall: @escaping (ApplicationRecord) -> Void = { _ in }
     ) {
         self.model = model
         self.iconCache = iconCache
@@ -1205,7 +1205,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             hide: { [weak self] in self?.hideApp(record) },
             getInfo: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
             showWindows: showWindows,
-            uninstall: { [weak self] in self?.onRequestUninstall(record.bundleIdentifier) }
+            // The record itself, not its bundle identifier: two copies of an app share
+            // one, and the request has to name the one that was chosen.
+            uninstall: { [weak self] in self?.onRequestUninstall(record) }
         )
         return ContextMenuBuilder.menu(for: record, actions: actions, iconVisibility: model.menuIconVisibility)
     }

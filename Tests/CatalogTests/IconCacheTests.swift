@@ -61,6 +61,19 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
     #expect(first === second) // same NSImage instance returned from memory
 }
 
+/// The key starts with an identifier from the app's own Info.plist.
+@Test func aHostileKeyStillCachesInsideTheCacheDirectory() {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let cache = IconCache(cacheDirectory: dir)
+
+    for key in ["../../../etc/evil-1", "a/b/c-2", "..-3"] {
+        let url = cache.cacheFileURL(forKey: key)
+        #expect(url.deletingLastPathComponent().standardizedFileURL == dir.standardizedFileURL, "\(key)")
+        #expect(url.pathExtension == "png")
+    }
+}
+
 @Test func diskCachePathIncludesTheRequestedKey() {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }

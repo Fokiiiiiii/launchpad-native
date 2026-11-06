@@ -189,6 +189,12 @@ public enum L10n {
     public static var uninstallMoveToTrashButton: String { string("uninstall.movetotrash", "Move to Trash") }
     public static var uninstallNeedsPermissionNotice: String { string("uninstall.needspermission", "needs admin permission — skipped") }
     public static var uninstallComputingSizesLabel: String { string("uninstall.computingsizes", "Calculating…") }
+    public static var uninstallAppStillRunningNotice: String {
+        string("uninstall.apprunning", "The app is still running, so nothing was moved. Quit it and try again.")
+    }
+    public static var uninstallSomeItemsFailedNotice: String {
+        string("uninstall.somefailed", "Some items could not be moved to Trash. The rest were moved.")
+    }
     public static var uninstallReportSaveFailedNotice: String {
         string(
             "uninstall.reportsavefailed",

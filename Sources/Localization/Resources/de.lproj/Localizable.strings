@@ -95,6 +95,8 @@
 "uninstall.needspermission" = "benötigt Administratorrechte — übersprungen";
 "uninstall.computingsizes" = "Wird berechnet…";
 "uninstall.reportsavefailed" = "Die ausgewählten Objekte wurden in den Papierkorb gelegt, das Protokoll konnte jedoch nicht gesichert werden.";
+"uninstall.apprunning" = "Die App läuft noch, daher wurde nichts verschoben. Beenden Sie sie und versuchen Sie es erneut.";
+"uninstall.somefailed" = "Einige Objekte konnten nicht in den Papierkorb gelegt werden. Die übrigen wurden verschoben.";
 "menu.renamefolder" = "Ordner umbenennen";
 "menu.ungroupfolder" = "Gruppierung aufheben";
 "grid.renamealert.title" = "Umbenennen";

@@ -95,6 +95,8 @@
 "uninstall.needspermission" = "管理者権限が必要なためスキップ";
 "uninstall.computingsizes" = "計算中…";
 "uninstall.reportsavefailed" = "選択した項目はゴミ箱に移動しましたが、操作履歴を保存できませんでした。";
+"uninstall.apprunning" = "アプリがまだ実行中のため、何も移動していません。終了してからやり直してください。";
+"uninstall.somefailed" = "一部の項目をゴミ箱に移動できませんでした。残りは移動しました。";
 "menu.renamefolder" = "フォルダ名を変更";
 "menu.ungroupfolder" = "グループ解除";
 "grid.renamealert.title" = "名称変更";

@@ -189,6 +189,68 @@ struct RemovalPlannerTests {
         #expect(plan[0].classification == .sharedRisk)
     }
 
+    // MARK: Another copy of the same app
+
+    private func makeCopy(of record: ApplicationRecord, at path: String) -> ApplicationRecord {
+        let url = URL(fileURLWithPath: path)
+        return ApplicationRecord(
+            id: StableAppID(bundleURL: url, bundleIdentifier: record.bundleIdentifier, teamIdentifier: record.teamIdentifier),
+            bundleIdentifier: record.bundleIdentifier,
+            bundleURL: url,
+            executableURL: nil,
+            displayName: record.displayName,
+            originalDisplayName: record.originalDisplayName,
+            bundleVersion: "1.0",
+            teamIdentifier: record.teamIdentifier,
+            category: nil,
+            sourceID: "test",
+            isSystemProtected: false,
+            isBackgroundOnly: false,
+            iconCacheKey: record.iconCacheKey,
+            canLaunch: true,
+            canOpenNewInstance: false,
+            lastSeenModificationDate: Date()
+        )
+    }
+
+    /// Keeping a second copy of an app is ordinary — an old version beside the
+    /// new one — and both read the same folders under ~/Library.
+    @Test("data shared with another installed copy of the same app is not offered as owned")
+    func sharedWithAnotherCopyIsSharedRisk() {
+        let record = makeRecord(bundleIdentifier: "com.example.twice", teamIdentifier: nil)
+        let other = makeCopy(of: record, at: "/tmp/elsewhere/com.example.twice.app")
+        let evidence = OwnershipEvidence(
+            bundleURL: record.bundleURL,
+            relatedPaths: [RelatedPath(url: URL(fileURLWithPath: "/tmp/com.example.twice"), category: .applicationSupport, exists: true)],
+            userLaunchAgents: [URL(fileURLWithPath: "/tmp/com.example.twice.helper.plist")],
+            systemLaunchItems: [],
+            receiptPackageIDs: [],
+            systemExtensionIdentifiers: []
+        )
+
+        let plan = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: [other])
+
+        #expect(plan.count == 2)
+        #expect(plan.allSatisfy { $0.classification == .sharedRisk })
+    }
+
+    @Test("the app's own entry in the list of installed apps is not another copy")
+    func ownEntryIsNotAnotherCopy() {
+        let record = makeRecord(bundleIdentifier: "com.example.once", teamIdentifier: nil)
+        let evidence = OwnershipEvidence(
+            bundleURL: record.bundleURL,
+            relatedPaths: [RelatedPath(url: URL(fileURLWithPath: "/tmp/com.example.once"), category: .applicationSupport, exists: true)],
+            userLaunchAgents: [],
+            systemLaunchItems: [],
+            receiptPackageIDs: [],
+            systemExtensionIdentifiers: []
+        )
+
+        let plan = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: [record])
+
+        #expect(plan.map(\.classification) == [.owned])
+    }
+
     @Test("nonexistent related paths are excluded from the plan")
     func nonexistentPathsExcluded() {
         let record = makeRecord(bundleIdentifier: "com.example.solo", teamIdentifier: nil)

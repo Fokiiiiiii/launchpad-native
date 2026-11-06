@@ -64,8 +64,15 @@ public enum RemovalPlanner {
             items.append(RemovalItem(path: related.url, classification: classification, requiresPrivilegedHelper: false))
         }
 
+        // Another copy of the same app keeps using the same data and the same
+        // agents, so removing this copy must leave them alone.
+        let hasOtherCopy = hasOtherInstalledCopy(of: record, in: siblingRecords)
         for agent in evidence.userLaunchAgents {
-            items.append(RemovalItem(path: agent, classification: .owned, requiresPrivilegedHelper: false))
+            items.append(RemovalItem(
+                path: agent,
+                classification: hasOtherCopy ? .sharedRisk : .owned,
+                requiresPrivilegedHelper: false
+            ))
         }
 
         for systemItem in evidence.systemLaunchItems {
@@ -85,7 +92,18 @@ public enum RemovalPlanner {
         return items
     }
 
-    /// A path is `.sharedRisk` if either:
+    /// Whether the same app (by bundle identifier) is installed somewhere else
+    /// too. Two copies share one set of folders under ~/Library, whatever their
+    /// signatures say.
+    static func hasOtherInstalledCopy(of record: ApplicationRecord, in siblingRecords: [ApplicationRecord]) -> Bool {
+        let own = record.bundleURL.standardizedFileURL
+        return siblingRecords.contains {
+            $0.bundleIdentifier == record.bundleIdentifier && $0.bundleURL.standardizedFileURL != own
+        }
+    }
+
+    /// A path is `.sharedRisk` if any of:
+    /// - another copy of the same app is installed (see `hasOtherInstalledCopy`),
     /// - it's a Group Container — shared *by design* across every app in
     ///   the group, regardless of whether a sibling with a matching
     ///   code-signing team is even currently installed, or
@@ -100,6 +118,7 @@ public enum RemovalPlanner {
         siblingRecords: [ApplicationRecord]
     ) -> OwnershipClassification {
         if case .groupContainers = related.category { return .sharedRisk }
+        if hasOtherInstalledCopy(of: record, in: siblingRecords) { return .sharedRisk }
         let path = related.url
 
         guard let teamIdentifier = record.teamIdentifier else { return .owned }
