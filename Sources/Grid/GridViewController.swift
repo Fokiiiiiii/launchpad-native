@@ -462,12 +462,12 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         /// A page leaving, and the same page coming back when a drag is
         /// abandoned.
-        static let exitResponse: CGFloat = 0.30
+        static let exitResponse: CGFloat = 0.22
         /// A page arriving. Slightly longer than the exit so the incoming page
         /// settles rather than snapping into place.
-        static let entryResponse: CGFloat = 0.36
+        static let entryResponse: CGFloat = 0.30
         /// A trackpad swipe carried far enough to commit.
-        static let commitResponse: CGFloat = 0.34
+        static let commitResponse: CGFloat = 0.28
 
         /// How long to let the spring run before swapping the data source
         /// under it. A critically damped spring has visually arrived after

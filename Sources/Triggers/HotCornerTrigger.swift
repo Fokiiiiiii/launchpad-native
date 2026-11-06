@@ -66,10 +66,10 @@ public final class HotCornerTrigger {
 
     func installLocalMonitor() {
         guard localMonitor == nil else { return }
+        // Local monitors run on the main thread, so the event is handled where it
+        // arrives: a task per mouse move over the launcher was work for nothing.
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.handleMouseMoved(event)
-            }
+            MainActor.assumeIsolated { self?.handleMouseMoved(event) }
             return event
         }
     }
@@ -92,6 +92,8 @@ public final class HotCornerTrigger {
     }
 
     private func handleMouseMoved(_ event: NSEvent) {
+        // No corner turned on: nothing to look at, and this runs on every move.
+        guard configs.values.contains(where: \.enabled) || pendingActivation != nil else { return }
         let point = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { NSMouseInRect(point, $0.frame, false) }) else { return }
 
