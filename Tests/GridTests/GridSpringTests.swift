@@ -30,6 +30,45 @@ import Testing
     }
 }
 
+/// What a pull past the last page shows: it follows the fingers, in either
+/// direction, and never goes beyond the limit however far they travel.
+@Test @MainActor func anEdgePullFollowsTheFingersButNeverPastTheLimit() {
+    let limit = GridViewController.edgePullLimit
+    #expect(GridViewController.edgePullOffset(for: 0) == 0)
+    #expect(GridViewController.edgePullOffset(for: -40) == -GridViewController.edgePullOffset(for: 40))
+
+    var previous: CGFloat = 0
+    for travel in stride(from: CGFloat(10), through: 400, by: 10) {
+        let shown = GridViewController.edgePullOffset(for: travel)
+        #expect(shown > previous, "a longer pull (\(travel)) did not show more")
+        #expect(shown <= limit)
+        previous = shown
+    }
+}
+
+/// The return depends on how far the grid was drawn: a light tug settles softly
+/// and without overshoot, a deep one snaps back quicker and bouncier. Every pull
+/// used to return on one and the same spring.
+@Test @MainActor func theFurtherAnEdgePullWasDrawnTheQuickerAndBouncierItReturns() {
+    var previous = GridViewController.edgeReturnSpring(pull: 0)
+    #expect(previous.damping == GridViewController.PageTransition.damping, "no pull should return as an ordinary settle")
+
+    for pull in stride(from: CGFloat(2), through: GridViewController.edgePullLimit, by: 2) {
+        let spring = GridViewController.edgeReturnSpring(pull: pull)
+        #expect(spring.damping <= previous.damping, "pull \(pull) was not at least as bouncy as a shorter one")
+        #expect(spring.response <= previous.response, "pull \(pull) did not return at least as fast")
+        previous = spring
+    }
+
+    let light = GridViewController.edgeReturnSpring(pull: 3)
+    let deep = GridViewController.edgeReturnSpring(pull: GridViewController.edgePullLimit)
+    #expect(light.damping > deep.damping && light.response > deep.response)
+    // A deep pull overshoots a little; it must still read as a settle, not a wobble.
+    #expect(deep.damping >= 0.6)
+    // Left-hand pulls are the same as right-hand ones.
+    #expect(GridViewController.edgeReturnSpring(pull: -10).damping == GridViewController.edgeReturnSpring(pull: 10).damping)
+}
+
 @Test func rubberBandIsSymmetricAndPassesThroughZero() {
     #expect(GridSpring.rubberBand(0, dimension: 24) == 0)
     #expect(GridSpring.rubberBand(-40, dimension: 24) == -GridSpring.rubberBand(40, dimension: 24))

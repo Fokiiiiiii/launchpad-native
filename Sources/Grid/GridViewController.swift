@@ -655,17 +655,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         }
 
         let hasNeighborPage = dragNeighborView != nil
-        // An edge pull is a hint, not a second page-sized animation. Using
-        // the viewport width as the rubber-band dimension made the terminal
-        // page travel far enough to look like a broken page turn.
-        let effective: CGFloat
-        if hasNeighborPage {
-            effective = deltaX
-        } else {
-            let edgePullLimit: CGFloat = 12
-            let resisted = GridSpring.rubberBand(abs(deltaX), dimension: edgePullLimit)
-            effective = min(resisted, edgePullLimit) * (deltaX < 0 ? -1 : 1)
-        }
+        let effective = hasNeighborPage ? deltaX : Self.edgePullOffset(for: deltaX)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -677,6 +667,32 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     private static let pageDragCommitDistance: CGFloat = 20
+
+    /// The most the grid can be drawn past the first or last page. An edge pull is
+    /// a hint, not a second page-sized animation: using the viewport width as the
+    /// rubber-band dimension made the terminal page travel far enough to look like
+    /// a broken page turn.
+    static let edgePullLimit: CGFloat = 24
+
+    /// What a swipe of `deltaX` shows when there is no page to reveal. Resisted, so
+    /// it keeps following the fingers but never goes far.
+    static func edgePullOffset(for deltaX: CGFloat) -> CGFloat {
+        let resisted = GridSpring.rubberBand(abs(deltaX), dimension: edgePullLimit)
+        return min(resisted, edgePullLimit) * (deltaX < 0 ? -1 : 1)
+    }
+
+    /// The pull at which the return is as springy as it gets. Short of that the
+    /// return grows into it smoothly.
+    private static let edgePullFullStrength: CGFloat = 16
+
+    /// The spring a released edge pull returns on, by how far it was drawn. A light
+    /// tug settles softly and without overshoot; the further it was drawn the
+    /// quicker and bouncier it snaps back, as stretched rubber does. Every pull
+    /// used to return on the same spring, which read as mechanical.
+    static func edgeReturnSpring(pull: CGFloat) -> (damping: CGFloat, response: CGFloat) {
+        let strength = min(abs(pull) / edgePullFullStrength, 1)
+        return (damping: PageTransition.damping - 0.28 * strength, response: 0.30 - 0.12 * strength)
+    }
 
     private func endPageDrag(deltaX: CGFloat, velocity: CGFloat) {
         let width = max(collectionView.bounds.width, 1)
@@ -696,16 +712,23 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         DiagnosticsLog.grid.notice("endPageDrag: hasNeighbor=\(hasNeighbor, privacy: .public), deltaX=\(deltaX, privacy: .public), velocity=\(velocity, privacy: .public), commit=\(commit, privacy: .public)")
 
         let targetTranslation: CGFloat = commit ? (dragDirection > 0 ? -width : width) : 0
-        let distanceRemaining = targetTranslation - deltaX
+        // Where the grid actually is. With no page beyond, that is the resisted pull
+        // that was on screen, not the distance the fingers travelled: starting the
+        // return from the latter made the grid jump the moment it was let go.
+        let shownTranslation = hasNeighbor ? deltaX : Self.edgePullOffset(for: deltaX)
+        let distanceRemaining = targetTranslation - shownTranslation
 
-        let response = commit ? PageTransition.commitResponse : PageTransition.exitResponse
-        let damping = PageTransition.damping
-        let boundedVelocity = min(max(velocity, -1600), 1600)
+        let edgeReturn = hasNeighbor ? nil : Self.edgeReturnSpring(pull: shownTranslation)
+        let response = commit ? PageTransition.commitResponse : (edgeReturn?.response ?? PageTransition.exitResponse)
+        let damping = edgeReturn?.damping ?? PageTransition.damping
+        // The finger's speed is in the units of the fingers' travel, which is not
+        // the grid's at an edge; the pull alone sets how it returns there.
+        let boundedVelocity = hasNeighbor ? min(max(velocity, -1600), 1600) : 0
         let relativeVelocity = abs(distanceRemaining) > 1 ? boundedVelocity / distanceRemaining : 0
 
         let spring = GridSpring.animation(
             keyPath: "transform.translation.x",
-            from: deltaX,
+            from: shownTranslation,
             to: targetTranslation,
             damping: damping,
             response: response,
@@ -719,7 +742,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         if let neighborLayer = dragNeighborView?.layer {
             let neighborSpring = GridSpring.animation(
                 keyPath: "transform.translation.x",
-                from: neighborOffset + deltaX,
+                from: neighborOffset + shownTranslation,
                 to: neighborOffset + targetTranslation,
                 damping: damping,
                 response: response,
@@ -741,7 +764,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // arrived — measured 417ms for a page that looked settled in about
         // half that, and the data swap sat waiting for all of it. That wait was
         // the lag: the swap itself takes ~7ms.
-        let settleDuration = PageTransition.swapDelay(response: response)
+        // An edge return that bounces must be left to finish; nothing is swapped
+        // there, so waiting costs no lag.
+        let settleDuration = edgeReturn == nil
+            ? PageTransition.swapDelay(response: response)
+            : max(PageTransition.swapDelay(response: response), min(spring.settlingDuration, 0.45))
         DispatchQueue.main.asyncAfter(deadline: .now() + settleDuration) { [weak self] in
             Task { @MainActor in
                 guard let self, self.dragGeneration == generation else { return }
