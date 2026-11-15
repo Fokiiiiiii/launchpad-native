@@ -176,3 +176,23 @@ struct UninstallPanelViewModelTests {
         #expect(viewModel.lastOutcomes.isEmpty)
     }
 }
+
+@Test func diskSizeMatchesFoundationForFilesAndDirectories() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let folder = root.appendingPathComponent("nested", isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let file = folder.appendingPathComponent("file")
+    try Data(repeating: 1, count: 1025).write(to: file)
+    let symlink = folder.appendingPathComponent("link")
+    try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: root)
+    let enumerator = try #require(FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.fileAllocatedSizeKey, .isDirectoryKey]))
+    var expected: Int64 = 0
+    for case let entry as URL in enumerator {
+        guard let values = try? entry.resourceValues(forKeys: [.fileAllocatedSizeKey, .isDirectoryKey]), values.isDirectory != true else { continue }
+        expected += Int64(values.fileAllocatedSize ?? 0)
+    }
+    #expect(DiskSizeEstimator.estimatedSize(at: root) == expected)
+    #expect(DiskSizeEstimator.estimatedSize(at: file) == 1025)
+    #expect(DiskSizeEstimator.estimatedSize(at: root.appendingPathComponent("missing")) == 0)
+}

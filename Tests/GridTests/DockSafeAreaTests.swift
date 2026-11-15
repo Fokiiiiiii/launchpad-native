@@ -81,3 +81,14 @@ import Testing
 
     #expect(frame == CGRect(x: 0, y: 1080, width: 1920, height: 108))
 }
+
+@Test func detectsVisibleDocksUnderThePointer() {
+    let screen = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+    let dock = CGRect(x: 400, y: 0, width: 800, height: 100)
+    #expect(DockSafeArea.containsDock(point: CGPoint(x: 500, y: 50), screenFrame: screen, dockFrames: [dock]))
+    #expect(!DockSafeArea.containsDock(point: CGPoint(x: 50, y: 50), screenFrame: screen, dockFrames: [dock]))
+    #expect(!DockSafeArea.containsDock(point: CGPoint(x: 500, y: 50), screenFrame: screen, dockFrames: [screen]))
+    let side = CGRect(x: 0, y: 150, width: 80, height: 700)
+    #expect(DockSafeArea.containsDock(point: CGPoint(x: 40, y: 500), screenFrame: screen, dockFrames: [side]))
+    #expect(!DockSafeArea.containsDock(point: CGPoint(x: 500, y: 500), screenFrame: screen, dockFrames: [side]))
+}

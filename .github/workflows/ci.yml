@@ -35,6 +35,10 @@ jobs:
           key: swift-debug-${{ runner.os }}-${{ hashFiles('Package.swift') }}-${{ github.sha }}
           restore-keys: |
             swift-debug-${{ runner.os }}-${{ hashFiles('Package.swift') }}-
+      - name: Build Rust core
+        run: |
+          cargo test --manifest-path launchpad-core/Cargo.toml --target-dir .build/rust --locked
+          MACOSX_DEPLOYMENT_TARGET=15.0 cargo build --manifest-path launchpad-core/Cargo.toml --target-dir .build/rust --release --locked
       - name: Build
         run: swift build
       - name: Test

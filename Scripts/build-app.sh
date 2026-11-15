@@ -27,6 +27,11 @@ SCRATCH="${SCRATCH:-$HOME/.cache/launchpad-native/build}"
 APP="$SCRATCH/LaunchpadNative.app"
 INSTALLED_APP="$HOME/Applications/LaunchpadNative.app"
 
+CARGO="${CARGO:-cargo}"
+if ! command -v "$CARGO" >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
+    CARGO="$HOME/.cargo/bin/cargo"
+fi
+MACOSX_DEPLOYMENT_TARGET=15.0 "$CARGO" build --manifest-path "$ROOT/launchpad-core/Cargo.toml" --target-dir "$ROOT/.build/rust" --release --locked
 swift build --package-path "$ROOT" --scratch-path "$SCRATCH" -c "$CONFIG"
 
 BIN="$SCRATCH/$CONFIG/AppHost"

@@ -66,7 +66,8 @@ let package = Package(
             name: "Settings",
             dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Uninstall", "Localization", "DesignSystem"],
             path: "Sources/Settings",
-            swiftSettings: [debugHooks]
+            swiftSettings: [debugHooks],
+            linkerSettings: [.unsafeFlags(["-L", String(#filePath.dropLast("Package.swift".count)) + ".build/rust/release", "-llaunchpad_core"])]
         ),
         .target(
             name: "WindowBrowser",

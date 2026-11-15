@@ -38,6 +38,15 @@ private final class NonInteractiveImageView: NSImageView {
 }
 
 @MainActor
+private final class DockDragSource: NSObject, NSDraggingSource {
+    static let shared = DockDragSource()
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .outsideApplication ? [.copy, .link] : []
+    }
+}
+
+@MainActor
 final class ItemDragController {
     /// The parts of the grid this does not own.
     ///
@@ -101,6 +110,9 @@ final class ItemDragController {
     private var lastAnimatedValueByLayer: [ObjectIdentifier: (x: CGFloat, xTime: CFTimeInterval, y: CGFloat, yTime: CFTimeInterval)] = [:]
 
 
+    private var cachedDockFrames: [CGRect] = []
+    private var lastDockFrameCheck: CFTimeInterval = 0
+
     func handleItemMouseDown(indexPath: IndexPath, event: NSEvent) {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(indexPath.item) else { return }
         if let staleSession = activeItemDrag {
@@ -126,6 +138,29 @@ final class ItemDragController {
     func handleItemMouseDragged(event: NSEvent) {
         let point = collectionView.convert(event.locationInWindow, from: nil)
         if let session = activeItemDrag {
+            if case .app(let identifier) = session.draggedItem,
+               let record = model.record(for: identifier),
+               let screen = collectionView.window?.screen {
+                let mouse = NSEvent.mouseLocation
+                if mouse.y <= screen.frame.minY + screen.frame.height * 0.25 ||
+                    mouse.x <= screen.frame.minX + screen.frame.width * 0.25 ||
+                    mouse.x >= screen.frame.maxX - screen.frame.width * 0.25 {
+                    let now = CACurrentMediaTime()
+                    if now - lastDockFrameCheck >= 0.15 {
+                        cachedDockFrames = DockSafeArea.visibleDockFrames(on: screen)
+                        lastDockFrameCheck = now
+                    }
+                }
+                if DockSafeArea.containsDock(point: mouse, screenFrame: screen.frame, dockFrames: cachedDockFrames) {
+                    let image = (session.floatingView as? NSImageView)?.image ?? NSWorkspace.shared.icon(forFile: record.bundleURL.path)
+                    let item = NSDraggingItem(pasteboardWriter: record.bundleURL as NSURL)
+                    item.setDraggingFrame(NSRect(x: point.x - session.grabOffset.x, y: point.y - session.grabOffset.y, width: session.originalFrame.width, height: session.originalFrame.height), contents: image)
+                    revertItemDrag(session: session)
+                    session.floatingView?.removeFromSuperview()
+                    collectionView.beginDraggingSession(with: [item], event: event, source: DockDragSource.shared)
+                    return
+                }
+            }
             updateItemDrag(session: session, point: point)
             return
         }

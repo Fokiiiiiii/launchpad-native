@@ -65,7 +65,15 @@ enum DockSafeArea {
         return min(max(visibleFrameInset, dockFrameInset), screenFrame.height)
     }
 
-    static func visibleBottomDockFrames(on screen: NSScreen) -> [CGRect] {
+    static func containsDock(point: CGPoint, screenFrame: CGRect, dockFrames: [CGRect]) -> Bool {
+        dockFrames.contains { frame in
+            let bottom = frame.minY <= screenFrame.minY + 1 && frame.width >= frame.height && frame.height <= screenFrame.height * 0.25
+            let side = (frame.minX <= screenFrame.minX + 1 || frame.maxX >= screenFrame.maxX - 1) && frame.height > frame.width && frame.width <= screenFrame.width * 0.25
+            return (bottom || side) && frame.contains(point)
+        }
+    }
+
+    static func visibleDockFrames(on screen: NSScreen) -> [CGRect] {
         let windowServerScreenFrame = windowServerScreenFrame(for: screen)
         let desktopMaxY = NSScreen.screens.map(\.frame.maxY).max() ?? screen.frame.maxY
         let dockProcessIDs = Set(
@@ -104,8 +112,8 @@ enum DockSafeArea {
                 appKitFrame(fromWindowServerFrame: frame, desktopMaxY: desktopMaxY)
             }
             guard appKitFrame.intersects(screen.frame),
-                  appKitFrame.width >= appKitFrame.height,
-                  appKitFrame.height <= screen.frame.height * 0.25 else {
+                  ((appKitFrame.width >= appKitFrame.height && appKitFrame.height <= screen.frame.height * 0.25) ||
+                   (appKitFrame.height > appKitFrame.width && appKitFrame.width <= screen.frame.width * 0.25)) else {
                 return nil
             }
             return appKitFrame

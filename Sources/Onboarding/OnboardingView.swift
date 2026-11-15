@@ -12,7 +12,9 @@ import SwiftUI
 /// transforms, since this is SwiftUI content, not the AppKit grid.
 struct OnboardingView: View {
     let onFinished: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pageIndex = 0
+    @State private var movingForward = true
 
     private let pageCount = 4
 
@@ -27,9 +29,9 @@ struct OnboardingView: View {
                 }
             }
             .id(pageIndex)
-            .transition(.asymmetric(
-                insertion: .move(edge: .trailing).combined(with: .opacity),
-                removal: .move(edge: .leading).combined(with: .opacity)
+            .transition(reduceMotion ? .opacity : .asymmetric(
+                insertion: .move(edge: movingForward ? .trailing : .leading).combined(with: .opacity),
+                removal: .move(edge: movingForward ? .leading : .trailing).combined(with: .opacity)
             ))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -52,15 +54,6 @@ struct OnboardingView: View {
             .padding(.bottom, 24)
         }
         .padding(EdgeInsets(top: 44, leading: 48, bottom: 30, trailing: 48))
-        // Real, confirmed constraint: each page (`WelcomePage`/`TriggersPage`/
-        // etc.) below is built around `Spacer()`s that vertically-center
-        // its content inside a *fixed*-height container — matching the
-        // reference's own content-driven variable height here would mean
-        // restructuring all 4 pages to size themselves intrinsically
-        // instead, which is exactly the "existing page content/logic"
-        // this pass is scoped to leave untouched. Keeps the previous
-        // 420pt height, only widens to the reference's 660pt and applies
-        // its asymmetric padding.
         .frame(width: 660, height: 420)
     }
 
@@ -75,7 +68,8 @@ struct OnboardingView: View {
     }
 
     private func advance(by delta: Int) {
-        withAnimation(.spring(response: 0.4, dampingFraction: 1.0)) {
+        movingForward = delta > 0
+        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.4, dampingFraction: 1.0)) {
             pageIndex = max(0, min(pageCount - 1, pageIndex + delta))
         }
     }

@@ -204,7 +204,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             hideDock: model.hideDockWhileLauncherOpen,
             screenFrame: screen.frame,
             visibleFrame: screen.visibleFrame,
-            dockFrames: DockSafeArea.visibleBottomDockFrames(on: screen)
+            dockFrames: DockSafeArea.visibleDockFrames(on: screen)
         )
         let windowBottomInset = max(window.frame.minY - screen.frame.minY, 0)
         let dockReservedHeight = max(screenDockReservedHeight - windowBottomInset, 0)
