@@ -12,8 +12,7 @@ import Foundation
 /// Cache format switched from TIFF (which encodes multiple resolution
 /// representations) to a single fixed-size PNG, and the disk write is
 /// fire-and-forget so it never delays returning the icon to the caller.
-@_silgen_name("launchpad_trim_icon_cache")
-private func launchpadTrimIconCache(_ path: UnsafePointer<CChar>, _ budget: Int64)
+import CLaunchpadCore
 
 public final class IconCache: @unchecked Sendable {
     private let cacheDirectory: URL
@@ -86,7 +85,7 @@ public final class IconCache: @unchecked Sendable {
     func trimDiskCache(toBytes budget: Int) {
         cacheDirectory.withUnsafeFileSystemRepresentation { path in
             guard let path else { return }
-            launchpadTrimIconCache(path, Int64(budget))
+            launchpad_trim_icon_cache(path, Int64(budget))
         }
     }
 

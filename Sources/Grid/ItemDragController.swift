@@ -38,8 +38,14 @@ private final class NonInteractiveImageView: NSImageView {
 }
 
 @MainActor
-private final class DockDragSource: NSObject, NSDraggingSource {
+final class DockDragSource: NSObject, NSDraggingSource {
     static let shared = DockDragSource()
+
+    static func item(url: URL, image: NSImage, frame: NSRect) -> NSDraggingItem {
+        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        item.setDraggingFrame(frame, contents: image)
+        return item
+    }
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         context == .outsideApplication ? [.copy, .link] : []
@@ -151,10 +157,19 @@ final class ItemDragController {
                         lastDockFrameCheck = now
                     }
                 }
-                if DockSafeArea.containsDock(point: mouse, screenFrame: screen.frame, dockFrames: cachedDockFrames) {
+                var hiddenBottomEdge = false
+                if mouse.y <= screen.frame.minY + 2 && !model.hideDockWhileLauncherOpen {
+                    let preferences = UserDefaults(suiteName: "com.apple.dock")
+                    let mayReveal = NSApp.presentationOptions.contains(.autoHideDock) || (preferences?.bool(forKey: "autohide") ?? false)
+                    hiddenBottomEdge = DockSafeArea.isHiddenBottomDockEdge(
+                        point: mouse, screenFrame: screen.frame,
+                        orientation: preferences?.string(forKey: "orientation") ?? "bottom", canReveal: mayReveal
+                    )
+                }
+                if hiddenBottomEdge || DockSafeArea.containsDock(point: mouse, screenFrame: screen.frame, dockFrames: cachedDockFrames) {
                     let image = (session.floatingView as? NSImageView)?.image ?? NSWorkspace.shared.icon(forFile: record.bundleURL.path)
-                    let item = NSDraggingItem(pasteboardWriter: record.bundleURL as NSURL)
-                    item.setDraggingFrame(NSRect(x: point.x - session.grabOffset.x, y: point.y - session.grabOffset.y, width: session.originalFrame.width, height: session.originalFrame.height), contents: image)
+                    let frame = NSRect(x: point.x - session.grabOffset.x, y: point.y - session.grabOffset.y, width: session.originalFrame.width, height: session.originalFrame.height)
+                    let item = DockDragSource.item(url: record.bundleURL, image: image, frame: frame)
                     revertItemDrag(session: session)
                     session.floatingView?.removeFromSuperview()
                     collectionView.beginDraggingSession(with: [item], event: event, source: DockDragSource.shared)

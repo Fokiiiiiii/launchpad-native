@@ -15,6 +15,7 @@ let package = Package(
         .macOS(.v15)
     ],
     targets: [
+        .systemLibrary(name: "CLaunchpadCore", path: "launchpad-core/include"),
         .executableTarget(
             name: "AppHost",
             dependencies: ["Diagnostics", "Catalog", "Persistence", "Launcher", "Localization", "Triggers", "Settings", "Onboarding", "WhatsNew"],
@@ -36,7 +37,7 @@ let package = Package(
         ),
         .target(
             name: "Catalog",
-            dependencies: ["Diagnostics"],
+            dependencies: ["Diagnostics", "CLaunchpadCore"],
             path: "Sources/Catalog",
             linkerSettings: [.unsafeFlags(["-L", String(#filePath.dropLast("Package.swift".count)) + ".build/rust/release", "-llaunchpad_core"])]
         ),
@@ -65,7 +66,7 @@ let package = Package(
         ),
         .target(
             name: "Settings",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Uninstall", "Localization", "DesignSystem"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Uninstall", "Localization", "DesignSystem", "CLaunchpadCore"],
             path: "Sources/Settings",
             swiftSettings: [debugHooks]
         ),

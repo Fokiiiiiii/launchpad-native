@@ -63,11 +63,17 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
     values.isHidden = true
     try flagged.setResourceValues(values)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let external = dir.appendingPathComponent("outside.txt")
+    let link = dir.appendingPathComponent("link.png")
+    try Data(count: 100).write(to: external)
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: external)
     cache.trimDiskCache(toBytes: 0)
     #expect(!FileManager.default.fileExists(atPath: file.path))
     #expect(FileManager.default.fileExists(atPath: hidden.path))
     #expect(FileManager.default.fileExists(atPath: flagged.path))
     #expect(FileManager.default.fileExists(atPath: folder.path))
+    #expect(FileManager.default.fileExists(atPath: external.path))
+    #expect(!FileManager.default.fileExists(atPath: link.path))
 }
 
 /// The cache moved from an `actor` (fully serialized) to a concurrent-queue

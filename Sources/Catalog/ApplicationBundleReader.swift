@@ -4,11 +4,7 @@ import Foundation
 /// LaunchServices SPI dependency — that Tier 3 API's selectors are not
 /// verified, so discovery here relies
 /// only on `Bundle`, `FileManager`, and the public `Security` framework.
-@_silgen_name("launchpad_scan_apps")
-private func launchpadScanApps(
-    _ path: UnsafePointer<CChar>, _ recursive: Int32, _ context: UnsafeMutableRawPointer,
-    _ callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int32) -> Void
-) -> Int32
+import CLaunchpadCore
 enum ApplicationBundleReader {
     /// What a previous scan already learned about a bundle. Reading the code
     /// signature means building a `SecStaticCode` for the bundle, which in a
@@ -132,7 +128,7 @@ enum ApplicationBundleReader {
         }
         let success = source.rootURL.withUnsafeFileSystemRepresentation { path -> Bool in
             guard let path else { return false }
-            return launchpadScanApps(path, source.recursive ? 1 : 0, Unmanaged.passUnretained(collector).toOpaque(), callback) != 0
+            return launchpad_scan_apps(path, source.recursive ? 1 : 0, Unmanaged.passUnretained(collector).toOpaque(), callback) != 0
         }
         guard success else { return nil }
         return BundleListing(

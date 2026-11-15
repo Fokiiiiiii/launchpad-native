@@ -2,6 +2,8 @@ import CoreGraphics
 import Testing
 @testable import Grid
 
+import AppKit
+
 @Test func preservesTheVisibleFrameInsetWhenDockFramesAreUnavailable() {
     let inset = DockSafeArea.bottomInset(
         hideDock: false,
@@ -91,4 +93,22 @@ import Testing
     let side = CGRect(x: 0, y: 150, width: 80, height: 700)
     #expect(DockSafeArea.containsDock(point: CGPoint(x: 40, y: 500), screenFrame: screen, dockFrames: [side]))
     #expect(!DockSafeArea.containsDock(point: CGPoint(x: 500, y: 500), screenFrame: screen, dockFrames: [side]))
+}
+
+@Test func detectsHiddenBottomDockEdgeWithoutCapturingOtherEdges() {
+    let screen = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+    #expect(DockSafeArea.isHiddenBottomDockEdge(point: CGPoint(x: 800, y: 1), screenFrame: screen, orientation: "bottom", canReveal: true))
+    #expect(!DockSafeArea.isHiddenBottomDockEdge(point: CGPoint(x: 800, y: 3), screenFrame: screen, orientation: "bottom", canReveal: true))
+    #expect(!DockSafeArea.isHiddenBottomDockEdge(point: CGPoint(x: 800, y: 1), screenFrame: screen, orientation: "left", canReveal: true))
+    #expect(!DockSafeArea.isHiddenBottomDockEdge(point: CGPoint(x: 800, y: 1), screenFrame: screen, orientation: "bottom", canReveal: false))
+}
+
+@Test @MainActor func dockDragCarriesTheApplicationFileURL() throws {
+    let url = URL(fileURLWithPath: "/Applications/Example.app")
+    let frame = NSRect(x: 10, y: 20, width: 60, height: 60)
+    let item = DockDragSource.item(url: url, image: NSImage(size: frame.size), frame: frame)
+    let writer = try #require(item.item as? NSURL)
+    #expect(writer as URL == url)
+    #expect(writer.writableTypes(for: .general).contains(.fileURL))
+    #expect(item.draggingFrame == frame)
 }

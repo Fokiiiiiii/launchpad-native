@@ -1,0 +1,4 @@
+module CLaunchpadCore [system] {
+    header "launchpad_core.h"
+    export *
+}
