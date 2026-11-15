@@ -48,6 +48,28 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
     #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path).count == 2, "a folder within budget was trimmed")
 }
 
+@Test func trimmingPreservesHiddenFilesAndDirectories() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let cache = IconCache(cacheDirectory: dir)
+    let file = dir.appendingPathComponent("image.png")
+    let hidden = dir.appendingPathComponent(".hidden.png")
+    let folder = dir.appendingPathComponent("folder.png", isDirectory: true)
+    try Data(count: 100).write(to: file)
+    try Data(count: 100).write(to: hidden)
+    var flagged = dir.appendingPathComponent("flagged.png")
+    try Data(count: 100).write(to: flagged)
+    var values = URLResourceValues()
+    values.isHidden = true
+    try flagged.setResourceValues(values)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    cache.trimDiskCache(toBytes: 0)
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+    #expect(FileManager.default.fileExists(atPath: hidden.path))
+    #expect(FileManager.default.fileExists(atPath: flagged.path))
+    #expect(FileManager.default.fileExists(atPath: folder.path))
+}
+
 /// The cache moved from an `actor` (fully serialized) to a concurrent-queue
 /// backed class specifically so multiple icon fetches can run in parallel
 /// instead of one at a time — this test exercises many concurrent callers

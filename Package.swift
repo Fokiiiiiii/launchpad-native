@@ -37,7 +37,8 @@ let package = Package(
         .target(
             name: "Catalog",
             dependencies: ["Diagnostics"],
-            path: "Sources/Catalog"
+            path: "Sources/Catalog",
+            linkerSettings: [.unsafeFlags(["-L", String(#filePath.dropLast("Package.swift".count)) + ".build/rust/release", "-llaunchpad_core"])]
         ),
         .target(
             name: "Persistence",
@@ -66,8 +67,7 @@ let package = Package(
             name: "Settings",
             dependencies: ["Diagnostics", "Catalog", "Persistence", "Grid", "Uninstall", "Localization", "DesignSystem"],
             path: "Sources/Settings",
-            swiftSettings: [debugHooks],
-            linkerSettings: [.unsafeFlags(["-L", String(#filePath.dropLast("Package.swift".count)) + ".build/rust/release", "-llaunchpad_core"])]
+            swiftSettings: [debugHooks]
         ),
         .target(
             name: "WindowBrowser",

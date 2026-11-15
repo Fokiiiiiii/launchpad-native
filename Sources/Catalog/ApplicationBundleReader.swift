@@ -4,6 +4,11 @@ import Foundation
 /// LaunchServices SPI dependency — that Tier 3 API's selectors are not
 /// verified, so discovery here relies
 /// only on `Bundle`, `FileManager`, and the public `Security` framework.
+@_silgen_name("launchpad_scan_apps")
+private func launchpadScanApps(
+    _ path: UnsafePointer<CChar>, _ recursive: Int32, _ context: UnsafeMutableRawPointer,
+    _ callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int32) -> Void
+) -> Int32
 enum ApplicationBundleReader {
     /// What a previous scan already learned about a bundle. Reading the code
     /// signature means building a `SecStaticCode` for the bundle, which in a
@@ -48,6 +53,11 @@ enum ApplicationBundleReader {
     private struct BundleListing {
         let appURLs: [URL]
         let failedDirectories: [URL]
+    }
+
+    private final class ListingCollector {
+        var appURLs: [URL] = []
+        var failedDirectories: [URL] = []
     }
 
     /// Convenience for callers that have nothing to fall back on. An
@@ -105,52 +115,29 @@ enum ApplicationBundleReader {
         }
     }
 
-    /// `FileManager`'s directory enumerator cannot be iterated from an
-    /// asynchronous context, so the walk stays in its own synchronous step.
+    /// The synchronous walk reports unreadable folders for reconciliation.
     ///
     /// Returns nil when the root cannot be read at all — see `ScanOutcome`.
     private static func bundleListing(in source: ApplicationSource) -> BundleListing? {
-        let fm = FileManager.default
-
-        // Checked before enumerating because `enumerator(at:)` is lazy and
-        // hands back a non-nil enumerator that then yields nothing for a path
-        // that is not there — indistinguishable from an empty folder.
-        var isDirectory: ObjCBool = false
-        guard fm.fileExists(atPath: source.rootURL.path, isDirectory: &isDirectory),
-              isDirectory.boolValue else { return nil }
-
-        var appURLs: [URL] = []
-        var failedDirectories: [URL] = []
-
-        if source.recursive {
-            guard let enumerator = fm.enumerator(
-                at: source.rootURL,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles],
-                errorHandler: { url, _ in
-                    // Keep walking; what was inside is remembered as unread.
-                    failedDirectories.append(url)
-                    return true
-                }
-            ) else { return nil }
-            for case let url as URL in enumerator {
-                if url.pathExtension == "app" {
-                    appURLs.append(url)
-                    enumerator.skipDescendants()
-                }
+        let collector = ListingCollector()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int32) -> Void = { context, path, kind in
+            guard let context, let path else { return }
+            let collector = Unmanaged<ListingCollector>.fromOpaque(context).takeUnretainedValue()
+            let url = URL(fileURLWithFileSystemRepresentation: path, isDirectory: kind != 0, relativeTo: nil)
+            if kind == 0 {
+                collector.appURLs.append(url)
+            } else {
+                collector.failedDirectories.append(url)
             }
-        } else {
-            guard let contents = try? fm.contentsOfDirectory(
-                at: source.rootURL,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            ) else { return nil }
-            appURLs = contents.filter { $0.pathExtension == "app" }
         }
-
+        let success = source.rootURL.withUnsafeFileSystemRepresentation { path -> Bool in
+            guard let path else { return false }
+            return launchpadScanApps(path, source.recursive ? 1 : 0, Unmanaged.passUnretained(collector).toOpaque(), callback) != 0
+        }
+        guard success else { return nil }
         return BundleListing(
-            appURLs: appURLs.filter { source.matches(bundleFilename: $0.lastPathComponent) },
-            failedDirectories: failedDirectories
+            appURLs: collector.appURLs.filter { source.matches(bundleFilename: $0.lastPathComponent) },
+            failedDirectories: collector.failedDirectories
         )
     }
 

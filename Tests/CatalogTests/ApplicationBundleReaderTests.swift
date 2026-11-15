@@ -59,6 +59,27 @@ private func makeFixtureApp(
     #expect(record.canOpenNewInstance == true)
 }
 
+@Test func recursiveScanSkipsHiddenAndNestedApps() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let nested = root.appendingPathComponent("nested", isDirectory: true)
+    let hidden = root.appendingPathComponent(".hidden", isDirectory: true)
+    try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: hidden, withIntermediateDirectories: true)
+    let outer = try makeFixtureApp(named: "Outer", bundleIdentifier: "example.outer", in: nested)
+    _ = try makeFixtureApp(named: "Inside", bundleIdentifier: "example.inside", in: outer)
+    _ = try makeFixtureApp(named: "Hidden", bundleIdentifier: "example.hidden", in: hidden)
+    _ = try makeFixtureApp(named: "Top", bundleIdentifier: "example.top", in: root)
+    var hiddenByFlag = try makeFixtureApp(named: "Flagged", bundleIdentifier: "example.flagged", in: root)
+    var values = URLResourceValues()
+    values.isHidden = true
+    try hiddenByFlag.setResourceValues(values)
+    let recursive = ApplicationSource(id: "fixture", rootURL: root, recursive: true, priority: 0)
+    let shallow = ApplicationSource(id: "fixture", rootURL: root, recursive: false, priority: 0)
+    #expect(Set(await ApplicationBundleReader.scan(source: recursive).map(\.bundleIdentifier)) == ["example.outer", "example.top"])
+    #expect(Set(await ApplicationBundleReader.scan(source: shallow).map(\.bundleIdentifier)) == ["example.top"])
+}
+
 @Test func backgroundOnlyAndMultipleInstanceFlagsAreRead() async throws {
     let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)

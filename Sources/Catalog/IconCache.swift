@@ -12,6 +12,9 @@ import Foundation
 /// Cache format switched from TIFF (which encodes multiple resolution
 /// representations) to a single fixed-size PNG, and the disk write is
 /// fire-and-forget so it never delays returning the icon to the caller.
+@_silgen_name("launchpad_trim_icon_cache")
+private func launchpadTrimIconCache(_ path: UnsafePointer<CChar>, _ budget: Int64)
+
 public final class IconCache: @unchecked Sendable {
     private let cacheDirectory: URL
     /// CoreGraphics/NSWorkspace icon work is finite-concurrency rather than
@@ -81,19 +84,9 @@ public final class IconCache: @unchecked Sendable {
     /// modification time, i.e. when it was written; an icon still in use that is
     /// older than the budget allows is simply drawn and written once more.
     func trimDiskCache(toBytes budget: Int) {
-        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey]
-        guard let urls = try? FileManager.default.contentsOfDirectory(
-            at: cacheDirectory, includingPropertiesForKeys: Array(keys), options: .skipsHiddenFiles
-        ) else { return }
-        var files = urls.compactMap { url -> (url: URL, date: Date, size: Int)? in
-            guard url.pathExtension == "png", let values = try? url.resourceValues(forKeys: keys) else { return nil }
-            return (url, values.contentModificationDate ?? .distantPast, values.fileSize ?? 0)
-        }
-        var total = files.reduce(0) { $0 + $1.size }
-        guard total > budget else { return }
-        files.sort { $0.date < $1.date }
-        for file in files where total > budget {
-            if (try? FileManager.default.removeItem(at: file.url)) != nil { total -= file.size }
+        cacheDirectory.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return }
+            launchpadTrimIconCache(path, Int64(budget))
         }
     }
 
