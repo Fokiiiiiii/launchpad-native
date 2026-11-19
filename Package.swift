@@ -79,7 +79,7 @@ let package = Package(
         ),
         .target(
             name: "Uninstall",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "CLaunchpadCore"],
+            dependencies: ["Diagnostics", "Catalog", "CLaunchpadCore"],
             path: "Sources/Uninstall"
         ),
         .target(

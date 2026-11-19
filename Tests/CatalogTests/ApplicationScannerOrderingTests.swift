@@ -144,41 +144,6 @@ private func ids(_ scanner: ApplicationScanner) async -> Set<StableAppID> {
     #expect(after.recordsByID.count == 1)
 }
 
-@Test func rustCatalogMergeMatchesPreviousPolicyAcrossUpdates() async {
-    let alpha = source("alpha")
-    let beta = ApplicationSource(id: "beta", rootURL: URL(fileURLWithPath: "/tmp/beta"), recursive: false, priority: 10)
-    let sources = [alpha, beta]
-    let alphaRecords = (0..<12).map { makeRecord("A\($0)", in: "alpha", subfolder: $0.isMultiple(of: 2) ? "locked" : nil) }
-    let betaRecords = (0..<12).map { makeRecord("B\($0)", in: "beta", subfolder: $0.isMultiple(of: 2) ? "locked" : nil) }
-    var collision = alphaRecords[0]
-    collision.sourceID = "beta"
-    collision.displayName = "Beta copy"
-    let duplicate = collision
-    let rust = ApplicationScanner(sources: sources, scanReport: { _, _ in report([]) })
-    let reference = ApplicationScanner(sources: sources, scanReport: { _, _ in report([]) })
-    for round in 0..<30 {
-        var reports: [(source: ApplicationSource, report: ApplicationBundleReader.ScanReport)] = []
-        for (index, source) in sources.enumerated() {
-            if round > 0 && (round + index) % 7 == 0 {
-                reports.append((source, .init(outcome: .unreadable, failedDirectories: [])))
-                continue
-            }
-            let pool = index == 0 ? alphaRecords : betaRecords
-            var records = pool.enumerated().filter { round == 0 || ($0.offset + round + index) % 3 != 0 }.map(\.element)
-            if index == 1 && round % 3 == 0 { records.append(duplicate) }
-            let failed = round % 4 == 0 ? [source.rootURL.appendingPathComponent("locked")] : []
-            reports.append((source, report(records, failed: failed)))
-        }
-        let token = round / 2 + 1
-        let actualChanged = await rust.integrate(reports, token: token)
-        let expectedChanged = await reference.integrateFallback(reports, token: token)
-        let actual = await rust.currentSnapshot()
-        let expected = await reference.currentSnapshot()
-        #expect(actualChanged == expectedChanged)
-        #expect(actual.recordsByID == expected.recordsByID)
-    }
-}
-
 @Test func aChangedSourceWithTheSameIDRejectsAnOlderScan() async throws {
     let gate = Gate()
     let old = ApplicationSource(id: "apps", rootURL: URL(fileURLWithPath: "/tmp/old-apps"), recursive: false, priority: 0)

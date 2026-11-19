@@ -5,18 +5,6 @@ import Foundation
 /// when explicitly requested; day-to-day updates come from `FSEventsWatcher`
 /// rescanning just the affected source, not the whole catalog — satisfying
 /// "no full scan on every launcher open."
-import CLaunchpadCore
-
-private final class CatalogMergeBuffer {
-    var indices: [UInt32] = []
-    var received = false
-}
-
-private enum CatalogMergeCandidate {
-    case previous(StableAppID)
-    case scanned(Int, Int)
-}
-
 public actor ApplicationScanner {
     public struct Snapshot: Sendable {
         public var recordsByID: [StableAppID: ApplicationRecord]
@@ -128,94 +116,6 @@ public actor ApplicationScanner {
     ///
     /// Returns whether the snapshot changed.
     func integrate(
-        _ reports: [(source: ApplicationSource, report: ApplicationBundleReader.ScanReport)],
-        token: Int
-    ) -> Bool {
-        let configured = Set(sources.map(\.id))
-        let fresh = reports
-            .filter { sources.contains($0.source) && token > (lastAcceptedToken[$0.source.id] ?? 0) }
-            .sorted { $0.source.priority < $1.source.priority }
-        let freshIDs = Set(fresh.map { $0.source.id })
-        var wire = Data(repeating: 0, count: 4)
-        var candidates: [CatalogMergeCandidate] = []
-        var carryReports: [(String, Range<Int>)] = []
-
-        func append(_ id: StableAppID, mode: UInt8, candidate: CatalogMergeCandidate) -> Bool {
-            guard candidates.count < Int(UInt32.max) else { return false }
-            let value = id.value.utf8.allSatisfy { $0 < 0x80 } ? id.value : id.value.precomposedStringWithCanonicalMapping
-            let bytes = value.utf8
-            guard let length = UInt32(exactly: bytes.count), length != UInt32.max else { return false }
-            wire.append(mode)
-            var little = length.littleEndian
-            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
-            wire.append(contentsOf: bytes)
-            candidates.append(candidate)
-            return true
-        }
-
-        for (id, record) in snapshot.recordsByID where configured.contains(record.sourceID) && !freshIDs.contains(record.sourceID) {
-            guard append(id, mode: 0, candidate: .previous(id)) else { return integrateFallback(reports, token: token) }
-        }
-        for (reportIndex, entry) in fresh.enumerated() {
-            let directories: [URL]?
-            switch entry.report.outcome {
-            case .scanned(let records):
-                for (index, record) in records.enumerated() {
-                    guard append(record.id, mode: 0, candidate: .scanned(reportIndex, index)) else { return integrateFallback(reports, token: token) }
-                }
-                guard !entry.report.failedDirectories.isEmpty else { continue }
-                directories = entry.report.failedDirectories
-            case .unreadable:
-                directories = nil
-            }
-            let start = candidates.count
-            for (id, record) in snapshot.recordsByID where record.sourceID == entry.source.id {
-                if let directories, !directories.contains(where: { isPath(record.bundleURL.path, inside: $0) }) { continue }
-                guard append(id, mode: 1, candidate: .previous(id)) else { return integrateFallback(reports, token: token) }
-            }
-            carryReports.append((entry.source.id, start..<candidates.count))
-        }
-        guard let candidateCount = UInt32(exactly: candidates.count) else { return integrateFallback(reports, token: token) }
-        var countLE = candidateCount.littleEndian
-        withUnsafeBytes(of: &countLE) { wire.replaceSubrange(0..<4, with: $0) }
-        let output = CatalogMergeBuffer()
-        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
-            guard let context, let count = Int(exactly: count), count == 0 || indices != nil else { return }
-            let output = Unmanaged<CatalogMergeBuffer>.fromOpaque(context).takeUnretainedValue()
-            output.indices = Array(UnsafeBufferPointer(start: indices, count: count))
-            output.received = true
-        }
-        let status = wire.withUnsafeBytes { bytes in
-            launchpad_merge_catalog(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
-        }
-        guard status == 1, output.received, candidates.isEmpty || !output.indices.isEmpty else { return integrateFallback(reports, token: token) }
-        var merged: [StableAppID: ApplicationRecord] = [:]
-        merged.reserveCapacity(output.indices.count)
-        for rawIndex in output.indices {
-            let index = Int(rawIndex)
-            guard candidates.indices.contains(index) else { return integrateFallback(reports, token: token) }
-            let record: ApplicationRecord
-            switch candidates[index] {
-            case .previous(let id):
-                guard let previous = snapshot.recordsByID[id] else { return integrateFallback(reports, token: token) }
-                record = previous
-            case .scanned(let reportIndex, let recordIndex):
-                guard fresh.indices.contains(reportIndex), case .scanned(let records) = fresh[reportIndex].report.outcome, records.indices.contains(recordIndex) else { return integrateFallback(reports, token: token) }
-                record = records[recordIndex]
-            }
-            guard merged.updateValue(record, forKey: record.id) == nil else { return integrateFallback(reports, token: token) }
-        }
-        for entry in fresh { lastAcceptedToken[entry.source.id] = token }
-        for (sourceID, range) in carryReports {
-            let kept = output.indices.reduce(into: 0) { count, value in if range.contains(Int(value)) { count += 1 } }
-            DiagnosticsLog.catalog.error("Source \(sourceID, privacy: .public) could not be read; kept \(kept, privacy: .public) previously known records rather than reporting them uninstalled")
-        }
-        guard merged != snapshot.recordsByID else { return false }
-        snapshot = Snapshot(recordsByID: merged)
-        return true
-    }
-
-    func integrateFallback(
         _ reports: [(source: ApplicationSource, report: ApplicationBundleReader.ScanReport)],
         token: Int
     ) -> Bool {

@@ -93,38 +93,6 @@ pub unsafe extern "C" fn launchpad_order_records(bytes: *const u8, length: usize
     1
 }
 
-fn merged_indices(bytes: &[u8]) -> Option<Vec<u32>> {
-    let mut reader = Reader { bytes };
-    let count = reader.number()? as usize;
-    if count > reader.bytes.len() / 5 { return None; }
-    let mut chosen: HashMap<&str, u32> = HashMap::with_capacity(count.min(1024));
-    for index in 0..count {
-        let (&mode, rest) = reader.bytes.split_first()?;
-        reader.bytes = rest;
-        let id = reader.string(false)??;
-        let index = u32::try_from(index).ok()?;
-        match mode {
-            0 => { chosen.insert(id, index); }
-            1 => { chosen.entry(id).or_insert(index); }
-            _ => return None,
-        }
-    }
-    if !reader.bytes.is_empty() { return None; }
-    let mut output: Vec<u32> = chosen.into_values().collect();
-    output.sort_unstable();
-    Some(output)
-}
-
-/// Selects the latest scanned record while retaining unreadable prior records.
-#[no_mangle]
-pub unsafe extern "C" fn launchpad_merge_catalog(bytes: *const u8, length: usize, context: *mut c_void, callback: Option<unsafe extern "C" fn(*mut c_void, *const u32, usize)>) -> i32 {
-    if bytes.is_null() || length > isize::MAX as usize { return 0; }
-    let Some(callback) = callback else { return 0 };
-    let Some(indices) = merged_indices(std::slice::from_raw_parts(bytes, length)) else { return 0 };
-    callback(context, indices.as_ptr(), indices.len());
-    1
-}
-
 fn unplaced_indices(bytes: &[u8]) -> Option<Vec<u32>> {
     use std::collections::HashSet;
     let mut reader = Reader { bytes };
@@ -278,32 +246,6 @@ mod tests {
                 let expected: Vec<_> = candidates.iter().enumerate().filter_map(|(index, id)| seen.insert(*id).then_some(index as u32)).collect();
                 assert_eq!(first_missing_indices(&packet), Some(expected));
                 assert!(first_missing_indices(&packet[..packet.len() - 1]).is_none());
-            }
-        }
-    }
-
-    #[test]
-    fn catalog_merge_matches_upsert_and_carry_reference() {
-        let ids = ["a", "b", "c"];
-        for count in 0..=6 {
-            for mut case in 0..6_usize.pow(count as u32) {
-                let mut data = Vec::new();
-                data.extend_from_slice(&(count as u32).to_le_bytes());
-                let mut expected = HashMap::new();
-                for index in 0..count {
-                    let choice = case % 6; case /= 6;
-                    let id = ids[choice % 3];
-                    let mode = (choice / 3) as u8;
-                    data.push(mode);
-                    data.extend_from_slice(&(id.len() as u32).to_le_bytes());
-                    data.extend_from_slice(id.as_bytes());
-                    if mode == 0 { expected.insert(id, index as u32); }
-                    else { expected.entry(id).or_insert(index as u32); }
-                }
-                let mut values: Vec<u32> = expected.into_values().collect();
-                values.sort_unstable();
-                assert_eq!(merged_indices(&data), Some(values));
-                if count > 0 { assert!(merged_indices(&data[..data.len() - 1]).is_none()); }
             }
         }
     }

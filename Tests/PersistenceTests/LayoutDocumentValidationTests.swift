@@ -11,7 +11,7 @@ private func decodedDocument(editing edit: (inout [String: Any]) -> Void) throws
     let encoded = try JSONEncoder().encode(LayoutDocument.empty)
     var json = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
     edit(&json)
-    return try RustLayoutJSON.decode(JSONSerialization.data(withJSONObject: json))
+    return try LayoutJSON.decode(JSONSerialization.data(withJSONObject: json))
 }
 
 private func editingGridSettings(_ edit: @escaping (inout [String: Any]) -> Void) -> (inout [String: Any]) -> Void {

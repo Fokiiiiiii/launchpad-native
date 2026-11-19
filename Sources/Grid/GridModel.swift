@@ -1456,13 +1456,13 @@ public final class GridModel {
     }
 
     public func exportLayoutBackup(to url: URL) async throws {
-        let data = try RustLayoutJSON.encode(backupDocument())
+        let data = try LayoutJSON.encode(backupDocument())
         try await layoutStore.writeBackup(data, to: url)
     }
 
     public func restoreLayoutBackup(from url: URL) async throws {
         let data = try await layoutStore.readBackup(at: url)
-        let backup = try RustLayoutJSON.decode(data)
+        let backup = try LayoutJSON.decode(data)
         guard backup.schemaVersion == LayoutDocument.currentSchemaVersion,
               backup.pages.count <= 1_000, backup.folders.count <= 1_000 else {
             throw LayoutBackupError.invalidFormat
@@ -1499,7 +1499,7 @@ public final class GridModel {
         }
         guard appIDs.isDisjoint(with: backup.hiddenApplicationIDs) else { throw LayoutBackupError.invalidFormat }
 
-        let before = try RustLayoutJSON.encode(currentDocument())
+        let before = try LayoutJSON.encode(currentDocument())
         var candidate = currentDocument()
         candidate.gridSettings = backup.gridSettings
         candidate.pages = backup.pages.filter { !$0.isEmpty }
@@ -1511,13 +1511,13 @@ public final class GridModel {
         candidate.lastUsedByID = backup.lastUsedByID
         candidate.knownApplications = backup.knownApplications
         try await layoutStore.save(currentDocument())
-        guard try RustLayoutJSON.encode(currentDocument()) == before else {
+        guard try LayoutJSON.encode(currentDocument()) == before else {
             try await layoutStore.save(currentDocument())
             throw LayoutBackupError.changedDuringRestore
         }
         try await layoutStore.save(candidate)
 
-        if try RustLayoutJSON.encode(currentDocument()) != before {
+        if try LayoutJSON.encode(currentDocument()) != before {
             try await layoutStore.save(currentDocument())
             throw LayoutBackupError.changedDuringRestore
         }

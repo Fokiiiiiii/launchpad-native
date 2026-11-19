@@ -69,11 +69,6 @@ pub(crate) fn text(bytes: &[u8]) -> Option<Cow<'_, str>> {
     }
 }
 
-pub(crate) fn parse_first(bytes: &[u8]) -> Option<Value> {
-    let text = text(bytes)?;
-    serde_json::from_str::<FirstValue>(&text).ok().map(|value| value.0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,7 +89,7 @@ mod tests {
             cases.push(utf32);
         }
         for bytes in cases {
-            let parsed = parse_first(&bytes).unwrap();
+            let parsed = serde_json::from_str::<FirstValue>(&super::text(&bytes).unwrap()).unwrap().0;
             assert_eq!(parsed["x"], 1);
             assert_eq!(parsed["名前"], "値");
         }

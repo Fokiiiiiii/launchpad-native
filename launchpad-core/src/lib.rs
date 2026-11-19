@@ -9,16 +9,7 @@ mod fs_ops;
 
 mod layout;
 
-mod json;
-
-mod json_compact;
-pub use json_compact::*;
-
 mod json_parse;
-
-mod json_builder;
-pub use json_builder::*;
-pub use json::*;
 
 pub use layout::launchpad_layout_repack;
 
@@ -35,8 +26,6 @@ mod search;
 
 pub use search::launchpad_match_graphemes;
 mod catalog;
-
-pub use catalog::reconcile::launchpad_merge_catalog;
 
 pub use catalog::reconcile::launchpad_order_records;
 

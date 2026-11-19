@@ -75,8 +75,8 @@ struct OperationReportTests {
         #expect(FileManager.default.fileExists(atPath: second.path))
     }
 
-    @Test("Rust report encoding keeps the ISO 8601 format and optional values")
-    func rustReportEncodingMatchesLegacyFormat() async throws {
+    @Test("report encoding keeps the ISO 8601 format and optional values")
+    func reportEncodingKeepsTheIsoFormatAndOptionalValues() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }

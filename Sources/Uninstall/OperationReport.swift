@@ -6,19 +6,6 @@ import Foundation
 /// Dry-run entries have `executed == false` and no result yet; execution
 /// entries carry the outcome and any failure reason returned by the executor.
 import CLaunchpadCore
-import Persistence
-
-private struct OperationReportJSON: Encodable {
-    let bundleIdentifier: String
-    let generatedAt: String
-    let entries: [OperationReport.Entry]
-
-    init(_ report: OperationReport) {
-        bundleIdentifier = report.bundleIdentifier
-        generatedAt = ISO8601DateFormatter().string(from: report.generatedAt)
-        entries = report.entries
-    }
-}
 
 public struct OperationReport: Codable, Sendable {
     public struct Entry: Codable, Sendable {
@@ -132,9 +119,13 @@ public actor OperationReportStore {
             throw OperationReportStoreError.directoryCreationFailed(directoryCreationError)
         }
 
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
         let data: Data
         do {
-            data = try RustJSONCodec.encode(OperationReportJSON(report), prettyPrinted: true)
+            data = try encoder.encode(report)
         } catch {
             throw OperationReportStoreError.encodingFailed(error)
         }
