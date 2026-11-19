@@ -1,4 +1,5 @@
 import AppKit
+import Localization
 import WindowBrowser
 
 /// Shown in a transient popover from the "Show Windows" context menu item.
@@ -15,7 +16,7 @@ final class WindowBrowserPopoverController: NSViewController, NSCollectionViewDa
 
     private var windows: [WindowInfo] = []
     private let collectionView = NSCollectionView()
-    private let emptyLabel = NSTextField(labelWithString: "No open windows")
+    private let emptyLabel = NSTextField(labelWithString: L10n.windowBrowserEmpty)
 
     init(bundleIdentifier: String, thumbnailService: WindowThumbnailService, onDismiss: @escaping () -> Void) {
         self.bundleIdentifier = bundleIdentifier

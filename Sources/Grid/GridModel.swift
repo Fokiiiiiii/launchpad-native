@@ -1,6 +1,7 @@
 import Catalog
 import Diagnostics
 import Foundation
+import Localization
 import Persistence
 
 /// The composition layer between `Catalog` (what's installed) and
@@ -1088,7 +1089,7 @@ public final class GridModel {
             var folder: Folder
             switch target {
             case .app:
-                folder = Folder(name: "New Folder", pages: [[]])
+                folder = Folder(name: L10n.defaultFolderName, pages: [[]])
                 appendToFolder(&folder, item: target)
             case .folder(let id):
                 guard let existing = folders[id] else { return nil }
@@ -1174,7 +1175,7 @@ public final class GridModel {
 
     /// Dragging one item onto another: onto a bare app, both merge into a new
     /// folder; onto an existing folder, the dragged item joins it.
-    public func createOrJoinFolder(sourcePage: Int, sourceIndex: Int, destinationPage: Int, destinationIndex: Int, defaultFolderName: String = "New Folder") {
+    public func createOrJoinFolder(sourcePage: Int, sourceIndex: Int, destinationPage: Int, destinationIndex: Int, defaultFolderName: String = L10n.defaultFolderName) {
         guard pages.indices.contains(sourcePage), pages[sourcePage].indices.contains(sourceIndex),
               pages.indices.contains(destinationPage), pages[destinationPage].indices.contains(destinationIndex),
               !(sourcePage == destinationPage && sourceIndex == destinationIndex) else { return }

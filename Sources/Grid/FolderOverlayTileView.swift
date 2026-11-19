@@ -46,16 +46,18 @@ private let tileSnappy = Animation.spring(response: 0.26, dampingFraction: 0.90)
 
 private struct TileButtonStyle: ButtonStyle {
     let hovering: Bool
+    let reduceMotion: Bool
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.90 : 1)
             .offset(y: hovering ? -2 : 0)
-            .animation(tileSnappy, value: configuration.isPressed)
-            .animation(tileSnappy, value: hovering)
+            .animation(reduceMotion ? nil : tileSnappy, value: configuration.isPressed)
+            .animation(reduceMotion ? nil : tileSnappy, value: hovering)
     }
 }
 
 struct FolderOverlayTileView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let tile: FolderOverlayTile
     let iconSize: CGFloat
     /// Whether *this* tile is the one currently being dragged — passed down
@@ -95,15 +97,15 @@ struct FolderOverlayTileView: View {
                     .padding(.horizontal, -8)
                     .padding(.vertical, -4)
             )
-            .animation(tileSnappy, value: isSelected)
+            .animation(reduceMotion ? nil : tileSnappy, value: isSelected)
             .contentShape(Rectangle())
         }
         .accessibilityLabel(Text(tile.name))
-        .buttonStyle(TileButtonStyle(hovering: hovering))
+        .buttonStyle(TileButtonStyle(hovering: hovering, reduceMotion: reduceMotion))
         .onHover { hovering = $0 }
         .opacity(isDragging ? 0.35 : 1)
         .scaleEffect(isDragging ? 0.92 : 1)
-        .animation(tileSnappy, value: isDragging)
+        .animation(reduceMotion ? nil : tileSnappy, value: isDragging)
         // `NSString` conforms to `NSItemProviderWriting`/`-Reading` out of
         // the box — the payload is just this tile's own `id`, which
         // `FolderContentsViewController`'s drag callbacks use to look up

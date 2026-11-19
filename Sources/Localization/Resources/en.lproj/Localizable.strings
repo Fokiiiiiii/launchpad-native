@@ -109,6 +109,11 @@
 "grid.pagecontrol.previous" = "Previous Page";
 "grid.pagecontrol.next" = "Next Page";
 "grid.pagecontrol.pagenumber" = "Page %d";
+"grid.folder.accessibility" = "%@ folder";
+"windowbrowser.empty" = "No open windows";
+"windowbrowser.close" = "Close Window";
+"windowbrowser.minimize" = "Minimize Window";
+"windowbrowser.untitled" = "Untitled Window";
 "launcher.search.placeholder" = "Search applications";
 "launcher.search.accessibility" = "Search applications";
 "settings.hotkey.clicktorecord" = "Click to record";

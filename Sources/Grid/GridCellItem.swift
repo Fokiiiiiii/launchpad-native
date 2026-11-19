@@ -300,7 +300,7 @@ final class GridCellItem: NSCollectionViewItem {
         applySelection(isSelected)
         view.setAccessibilityElement(true)
         view.setAccessibilityRole(.button)
-        view.setAccessibilityLabel("\(name) folder")
+        view.setAccessibilityLabel(L10n.folderAccessibilityLabel(name))
         view.setAccessibilitySelected(isSelected)
         view.setAccessibilityValue(isSelected ? L10n.selectedAccessibilityValue : nil)
         resetVisualTransforms()

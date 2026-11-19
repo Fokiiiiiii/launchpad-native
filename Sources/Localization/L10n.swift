@@ -242,6 +242,9 @@ public enum L10n {
     public static var renameAlertTitle: String { string("grid.renamealert.title", "Rename") }
     public static var renameConfirmButton: String { string("grid.renamealert.confirm", "Rename") }
     public static var defaultFolderName: String { string("grid.defaultfoldername", "Folder") }
+    public static func folderAccessibilityLabel(_ name: String) -> String {
+        String(format: string("grid.folder.accessibility", "%@ folder"), name)
+    }
 
     // MARK: Grid — page control
 
@@ -250,6 +253,13 @@ public enum L10n {
     public static func pageNumberAccessibilityLabel(_ n: Int) -> String {
         String(format: string("grid.pagecontrol.pagenumber", "Page %d"), n)
     }
+
+    // MARK: Grid — window browser
+
+    public static var windowBrowserEmpty: String { string("windowbrowser.empty", "No open windows") }
+    public static var windowBrowserCloseWindow: String { string("windowbrowser.close", "Close Window") }
+    public static var windowBrowserMinimizeWindow: String { string("windowbrowser.minimize", "Minimize Window") }
+    public static var windowBrowserUntitledWindow: String { string("windowbrowser.untitled", "Untitled Window") }
 
     // MARK: Launcher
 

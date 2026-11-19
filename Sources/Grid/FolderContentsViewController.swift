@@ -546,7 +546,9 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         view.window?.layoutIfNeeded()
     }
 
-    private static let tileDragHoverSpring = Animation.spring(response: 0.30, dampingFraction: 0.85)
+    private static var tileDragHoverSpring: Animation? {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : Animation.spring(response: 0.30, dampingFraction: 0.85)
+    }
 
     private func beginTileDrag(id: String) {
         gridModel.draggingID = id
@@ -585,7 +587,7 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         }
         model.moveItemWithinFolder(folderID, page: from.page, fromIndex: from.index, toIndex: toIndex)
         Task { await model.save() }
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
+        withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : Animation.spring(response: 0.35, dampingFraction: 0.86)) {
             refresh()
         }
         return true

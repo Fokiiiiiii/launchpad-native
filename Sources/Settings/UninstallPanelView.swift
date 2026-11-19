@@ -16,6 +16,7 @@ struct UninstallPanelView: View {
     /// that don't care about window sizing don't need to pass one.
     var onContentHeightChange: (CGFloat) -> Void = { _ in }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expandedSections: Set<UninstallPanelViewModel.SectionKind> = Set(UninstallPanelViewModel.SectionKind.allCases)
     @State private var sectionsContentHeight: CGFloat = 0
     private static let maxSectionsHeight: CGFloat = 296
@@ -120,7 +121,7 @@ struct UninstallPanelView: View {
                 }
             }
         }
-        .animation(.spring(response: 0.26, dampingFraction: 0.90), value: isExpanded)
+        .animation(reduceMotion ? nil : Animation.spring(response: 0.26, dampingFraction: 0.90), value: isExpanded)
     }
 
     private func rowView(_ row: UninstallPanelViewModel.Row) -> some View {

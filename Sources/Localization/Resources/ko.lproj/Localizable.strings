@@ -109,6 +109,11 @@
 "grid.pagecontrol.previous" = "이전 페이지";
 "grid.pagecontrol.next" = "다음 페이지";
 "grid.pagecontrol.pagenumber" = "%d페이지";
+"grid.folder.accessibility" = "%@ 폴더";
+"windowbrowser.empty" = "열린 윈도우 없음";
+"windowbrowser.close" = "윈도우 닫기";
+"windowbrowser.minimize" = "윈도우 최소화";
+"windowbrowser.untitled" = "제목 없는 윈도우";
 "launcher.search.placeholder" = "앱 검색";
 "launcher.search.accessibility" = "앱 검색";
 "settings.hotkey.clicktorecord" = "클릭해서 기록";

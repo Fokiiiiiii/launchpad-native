@@ -109,6 +109,11 @@
 "grid.pagecontrol.previous" = "Página anterior";
 "grid.pagecontrol.next" = "Página siguiente";
 "grid.pagecontrol.pagenumber" = "Página %d";
+"grid.folder.accessibility" = "Carpeta %@";
+"windowbrowser.empty" = "No hay ventanas abiertas";
+"windowbrowser.close" = "Cerrar ventana";
+"windowbrowser.minimize" = "Minimizar ventana";
+"windowbrowser.untitled" = "Ventana sin título";
 "launcher.search.placeholder" = "Buscar apps";
 "launcher.search.accessibility" = "Buscar apps";
 "settings.hotkey.clicktorecord" = "Haz clic para grabar";

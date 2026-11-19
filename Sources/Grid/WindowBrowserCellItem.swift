@@ -1,4 +1,5 @@
 import AppKit
+import Localization
 
 /// One window thumbnail cell: preview image, title, close/minimize buttons.
 final class WindowBrowserCellItem: NSCollectionViewItem {
@@ -29,8 +30,8 @@ final class WindowBrowserCellItem: NSCollectionViewItem {
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.maximumNumberOfLines = 1
 
-        configureButton(closeButton, symbol: "xmark.circle.fill", label: "Close Window", action: #selector(closeTapped))
-        configureButton(minimizeButton, symbol: "minus.circle.fill", label: "Minimize Window", action: #selector(minimizeTapped))
+        configureButton(closeButton, symbol: "xmark.circle.fill", label: L10n.windowBrowserCloseWindow, action: #selector(closeTapped))
+        configureButton(minimizeButton, symbol: "minus.circle.fill", label: L10n.windowBrowserMinimizeWindow, action: #selector(minimizeTapped))
 
         container.addSubview(thumbnailView)
         container.addSubview(titleLabel)
@@ -82,7 +83,7 @@ final class WindowBrowserCellItem: NSCollectionViewItem {
 
     func configure(windowID: Int, title: String, thumbnail: NSImage?) {
         currentWindowID = windowID
-        let resolvedTitle = title.isEmpty ? "Untitled Window" : title
+        let resolvedTitle = title.isEmpty ? L10n.windowBrowserUntitledWindow : title
         titleLabel.stringValue = resolvedTitle
         thumbnailView.image = thumbnail
         view.setAccessibilityElement(true)

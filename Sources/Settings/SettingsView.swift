@@ -10,6 +10,7 @@ public struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
     let onClose: () -> Void
 
+    @Environment(\.colorSchemeContrast) private var contrast
     @ScaledMetric(relativeTo: .body) private var tabIconSize: CGFloat = 20
     @ScaledMetric(relativeTo: .caption) private var tabItemHeight: CGFloat = 52
     @State var showResetGridConfirmation = false
@@ -42,7 +43,7 @@ public struct SettingsView: View {
             settingsTabBar
 
             Rectangle()
-                .fill(Color.white.opacity(0.10))
+                .fill(contrast == .increased ? Color.primary.opacity(0.45) : Color.white.opacity(0.10))
                 .frame(height: 1)
 
             selectedTabContent

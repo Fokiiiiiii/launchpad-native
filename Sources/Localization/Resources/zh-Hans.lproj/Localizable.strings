@@ -109,6 +109,11 @@
 "grid.pagecontrol.previous" = "上一页";
 "grid.pagecontrol.next" = "下一页";
 "grid.pagecontrol.pagenumber" = "第 %d 页";
+"grid.folder.accessibility" = "%@ 文件夹";
+"windowbrowser.empty" = "没有打开的窗口";
+"windowbrowser.close" = "关闭窗口";
+"windowbrowser.minimize" = "最小化窗口";
+"windowbrowser.untitled" = "未命名窗口";
 "launcher.search.placeholder" = "搜索应用";
 "launcher.search.accessibility" = "搜索应用";
 "settings.hotkey.clicktorecord" = "点按以录制";

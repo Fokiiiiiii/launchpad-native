@@ -139,7 +139,6 @@ public final class PageControlView: NSView {
             let button = NSButton(title: "", target: self, action: #selector(dotClicked(_:)))
             button.tag = index
             button.isBordered = false
-            button.focusRingType = .none
             button.image = NSImage(
                 systemSymbolName: "circle.fill",
                 accessibilityDescription: nil

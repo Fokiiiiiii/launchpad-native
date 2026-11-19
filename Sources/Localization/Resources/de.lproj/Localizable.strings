@@ -109,6 +109,11 @@
 "grid.pagecontrol.previous" = "Vorherige Seite";
 "grid.pagecontrol.next" = "Nächste Seite";
 "grid.pagecontrol.pagenumber" = "Seite %d";
+"grid.folder.accessibility" = "Ordner %@";
+"windowbrowser.empty" = "Keine offenen Fenster";
+"windowbrowser.close" = "Fenster schließen";
+"windowbrowser.minimize" = "Fenster im Dock ablegen";
+"windowbrowser.untitled" = "Unbenanntes Fenster";
 "launcher.search.placeholder" = "Apps suchen";
 "launcher.search.accessibility" = "Apps suchen";
 "settings.hotkey.clicktorecord" = "Klicken zum Aufzeichnen";

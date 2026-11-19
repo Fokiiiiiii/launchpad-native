@@ -109,6 +109,11 @@
 "grid.pagecontrol.previous" = "前のページ";
 "grid.pagecontrol.next" = "次のページ";
 "grid.pagecontrol.pagenumber" = "ページ %d";
+"grid.folder.accessibility" = "%@ フォルダ";
+"windowbrowser.empty" = "開いているウインドウはありません";
+"windowbrowser.close" = "ウインドウを閉じる";
+"windowbrowser.minimize" = "ウインドウをしまう";
+"windowbrowser.untitled" = "名称未設定のウインドウ";
 "launcher.search.placeholder" = "アプリケーションを検索";
 "launcher.search.accessibility" = "アプリを検索";
 "settings.hotkey.clicktorecord" = "クリックして記録";

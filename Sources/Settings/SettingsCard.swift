@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsCard<Content: View>: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     @ViewBuilder var content: () -> Content
 
@@ -16,7 +17,10 @@ struct SettingsCard<Content: View>: View {
     }
 
     private var border: Color {
-        Color.white.opacity(colorScheme == .dark ? 0.06 : 0.42)
+        if contrast == .increased {
+            return Color.primary.opacity(0.45)
+        }
+        return Color.white.opacity(colorScheme == .dark ? 0.06 : 0.42)
     }
 
     var body: some View {
@@ -79,9 +83,11 @@ struct SettingsCardRow<Content: View>: View {
 }
 
 struct SettingsCardDivider: View {
+    @Environment(\.colorSchemeContrast) private var contrast
+
     var body: some View {
         Divider()
-            .opacity(0.55)
+            .opacity(contrast == .increased ? 1 : 0.55)
             .padding(.horizontal, 11)
     }
 }
