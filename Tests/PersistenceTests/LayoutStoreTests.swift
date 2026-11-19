@@ -2,6 +2,8 @@ import Foundation
 import Testing
 @testable import Persistence
 
+import Darwin
+
 @Test func saveThenLoadRoundTrips() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
@@ -16,6 +18,183 @@ import Testing
 
     #expect(loaded.gridSettings.columns == 3)
     #expect(loaded.aliases[StableAppIdentifier(value: "abc")] == "My Alias")
+}
+
+@Test func rustLayoutDecoderMatchesLegacyCodable() throws {
+    var document = LayoutDocument.empty
+    let app = StableAppIdentifier(value: "app-日本")
+    let folderID = FolderID(value: "folder-1")
+    document.pages = [[.app(app), .folder(folderID)]]
+    document.folders[folderID] = Folder(id: folderID, name: "仕事 👨‍👩‍👧", pages: [[.app(StableAppIdentifier(value: "inside"))]])
+    document.aliases[app] = "別名\u{0}終"
+    document.hiddenApplicationIDs = [StableAppIdentifier(value: "hidden")]
+    document.dateAddedByID[app] = Date(timeIntervalSinceReferenceDate: -123.25)
+    document.lastUsedByID[app] = Date(timeIntervalSinceReferenceDate: 123456.75)
+    document.knownApplications[app] = KnownApplication(bundleIdentifier: "com.example", teamIdentifier: nil)
+    document.triggerSettings.gestureConflictBackup = GestureConflictBackup(fingerCount: 4, values: ["absent": nil, "present": 2], valuesByFingerCount: [4: ["a": nil, "b": 1]], launchpadGestureValue: nil, launchpadGestureWasPresent: false, launchpadGestureCaptured: true)
+    document.customSources = [CustomSourceConfig(id: "source", rootPath: "/tmp/日本 語", recursive: true, includeGlobs: ["*.app"], excludeGlobs: [], priority: -1, enabled: true)]
+    let encoded = try JSONEncoder().encode(document)
+    let swift = try JSONDecoder().decode(LayoutDocument.self, from: encoded)
+    let rust = try RustLayoutJSON.decode(encoded)
+    #expect(rust.pages == swift.pages)
+    #expect(rust.folders == swift.folders)
+    #expect(rust.aliases == swift.aliases)
+    #expect(rust.hiddenApplicationIDs == swift.hiddenApplicationIDs)
+    #expect(rust.dateAddedByID == swift.dateAddedByID)
+    #expect(rust.lastUsedByID == swift.lastUsedByID)
+    #expect(rust.knownApplications == swift.knownApplications)
+    #expect(rust.triggerSettings == swift.triggerSettings)
+    #expect(rust.customSources == swift.customSources)
+    #expect(rust.gridSettings == swift.gridSettings)
+    let encodedRust = try RustLayoutJSON.encode(document)
+    let swiftObject = try #require(JSONSerialization.jsonObject(with: encoded) as? NSDictionary)
+    let rustObject = try #require(JSONSerialization.jsonObject(with: encodedRust) as? NSDictionary)
+    #expect(swiftObject == rustObject)
+    let decodedSwift = try JSONDecoder().decode(LayoutDocument.self, from: encodedRust)
+    let decodedRust = try RustLayoutJSON.decode(encodedRust)
+    #expect(decodedSwift.pages == swift.pages)
+    #expect(decodedSwift.folders == swift.folders)
+    #expect(decodedSwift.aliases == swift.aliases)
+    #expect(decodedSwift.hiddenApplicationIDs == swift.hiddenApplicationIDs)
+    #expect(decodedSwift.dateAddedByID == swift.dateAddedByID)
+    #expect(decodedSwift.lastUsedByID == swift.lastUsedByID)
+    #expect(decodedSwift.knownApplications == swift.knownApplications)
+    #expect(decodedSwift.triggerSettings == swift.triggerSettings)
+    #expect(decodedSwift.customSources == swift.customSources)
+    #expect(decodedRust.triggerSettings == swift.triggerSettings)
+    #expect(decodedRust.pages == swift.pages)
+    #expect(throws: (any Error).self) { try RustLayoutJSON.decode(Data("{\"schemaVersion\":1}".utf8)) }
+}
+
+@Test func rustJSONEncoderMatchesFoundationForDataAndDates() throws {
+    struct Fixture: Encodable {
+        let payload: Data
+        let list: [Data]
+        let date: Date
+        let url: URL
+    }
+    let fixture = Fixture(payload: Data([0, 255, 1]), list: [Data(), Data([42])], date: Date(timeIntervalSinceReferenceDate: 42.5), url: URL(fileURLWithPath: "/tmp/日本 語"))
+    let expected = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture)) as? NSDictionary)
+    let actual = try #require(JSONSerialization.jsonObject(with: RustJSONCodec.encode(fixture)) as? NSDictionary)
+    #expect(actual == expected)
+}
+
+@Test func rustLayoutCodecHandlesIntegerLimitsAndOptionalNulls() throws {
+    for index in 0..<30 {
+        var document = LayoutDocument.empty
+        document.gridSettings.columns = 1 + index % 12
+        document.gridSettings.rows = 1 + index % 8
+        document.triggerSettings.hotkeyModifierFlags = index.isMultiple(of: 2) ? UInt.max : UInt(index)
+        document.triggerSettings.hotkeyKeyCode = index.isMultiple(of: 2) ? UInt16.max : nil
+        document.triggerSettings.gestureConflictBackup = GestureConflictBackup(fingerCount: 4, values: ["nil": nil, "number": index], valuesByFingerCount: [4: ["x": nil]], launchpadGestureValue: index.isMultiple(of: 2) ? index : nil, launchpadGestureWasPresent: index.isMultiple(of: 2), launchpadGestureCaptured: true)
+        let id = StableAppIdentifier(value: "日本-\(index)")
+        document.pages = [[.app(id)]]
+        document.aliases[id] = "名\(index)"
+        document.dateAddedByID[id] = Date(timeIntervalSinceReferenceDate: Double(index) - 100.25)
+        let swiftData = try JSONEncoder().encode(document)
+        let rustData = try RustLayoutJSON.encode(document)
+        let fromSwift = try RustLayoutJSON.decode(swiftData)
+        let fromRust = try JSONDecoder().decode(LayoutDocument.self, from: rustData)
+        #expect(fromSwift.triggerSettings == document.triggerSettings)
+        #expect(fromRust.triggerSettings == document.triggerSettings)
+        #expect(fromSwift.pages == document.pages)
+        #expect(fromRust.pages == document.pages)
+        #expect(fromSwift.aliases == document.aliases)
+        #expect(fromRust.dateAddedByID == document.dateAddedByID)
+    }
+}
+
+@Test func rustLayoutDecoderHandlesLegacyUnicodeEncodingsAndDuplicateKeys() throws {
+    var document = LayoutDocument.empty
+    document.aliases[StableAppIdentifier(value: "日本")] = "名前"
+    let encoded = try JSONEncoder().encode(document)
+    let text = try #require(String(data: encoded, encoding: .utf8))
+    for encoding: String.Encoding in [.utf8, .utf16LittleEndian, .utf16BigEndian, .utf32LittleEndian, .utf32BigEndian] {
+        let bytes = try #require(text.data(using: encoding))
+        let expected = try JSONDecoder().decode(LayoutDocument.self, from: bytes)
+        let actual = try RustLayoutJSON.decode(bytes)
+        #expect(actual.aliases == expected.aliases)
+        #expect(actual.gridSettings == expected.gridSettings)
+    }
+    let duplicate = Data(("{\"schemaVersion\":2," + text.dropFirst()).utf8)
+    let expected = try JSONDecoder().decode(LayoutDocument.self, from: duplicate)
+    let actual = try RustLayoutJSON.decode(duplicate)
+    #expect(expected.schemaVersion == 2)
+    #expect(actual.schemaVersion == expected.schemaVersion)
+}
+
+@Test func rustLayoutCodecPreservesLargePageAndAliasArrays() throws {
+    var document = LayoutDocument.empty
+    let items = (0..<10_000).map { StableAppIdentifier(value: "app-\($0)") }
+    document.pages = stride(from: 0, to: items.count, by: 35).map { start in
+        Array(items[start..<min(start + 35, items.count)]).map(LayoutItem.app)
+    }
+    for item in items { document.aliases[item] = "別名 \(item.value)" }
+    let legacy = try JSONEncoder().encode(document)
+    let decoded = try RustLayoutJSON.decode(legacy)
+    #expect(decoded.pages == document.pages)
+    #expect(decoded.aliases == document.aliases)
+    let encoded = try RustLayoutJSON.encode(document)
+    let restored = try JSONDecoder().decode(LayoutDocument.self, from: encoded)
+    #expect(restored.pages == document.pages)
+    #expect(restored.aliases == document.aliases)
+}
+
+@Test func benchmarkLayoutJSON() throws {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1" else { return }
+    var document = LayoutDocument.empty
+    let items = (0..<1000).map { StableAppIdentifier(value: "app-\($0)") }
+    document.pages = stride(from: 0, to: items.count, by: 35).map { start in
+        Array(items[start..<min(start + 35, items.count)]).map(LayoutItem.app)
+    }
+    for item in items { document.aliases[item] = "アプリ \(item.value)" }
+    var swiftData = Data()
+    let swiftEncodeStart = DispatchTime.now().uptimeNanoseconds
+    for _ in 0..<10 { swiftData = try JSONEncoder().encode(document) }
+    let swiftEncode = DispatchTime.now().uptimeNanoseconds - swiftEncodeStart
+    var rustData = Data()
+    let rustEncodeStart = DispatchTime.now().uptimeNanoseconds
+    for _ in 0..<10 { rustData = try RustLayoutJSON.encode(document) }
+    let rustEncode = DispatchTime.now().uptimeNanoseconds - rustEncodeStart
+    let swiftDecodeStart = DispatchTime.now().uptimeNanoseconds
+    for _ in 0..<10 { #expect(try JSONDecoder().decode(LayoutDocument.self, from: swiftData).pages.count == document.pages.count) }
+    let swiftDecode = DispatchTime.now().uptimeNanoseconds - swiftDecodeStart
+    let rustDecodeStart = DispatchTime.now().uptimeNanoseconds
+    for _ in 0..<10 { #expect(try RustLayoutJSON.decode(rustData).pages.count == document.pages.count) }
+    let rustDecode = DispatchTime.now().uptimeNanoseconds - rustDecodeStart
+    print("LAYOUT_JSON_BENCH items=1000 rounds=10 swift_encode_ns=\(swiftEncode) rust_encode_ns=\(rustEncode) swift_decode_ns=\(swiftDecode) rust_decode_ns=\(rustDecode)")
+}
+
+@Test func benchmarkLayoutMemory() throws {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1",
+          let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_MODE"] else { return }
+    let count = Int(ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_ITEMS"] ?? "1000") ?? 1000
+    guard (1...10_000).contains(count) else { return }
+    var document = LayoutDocument.empty
+    let items = (0..<count).map { StableAppIdentifier(value: "app-\($0)") }
+    document.pages = stride(from: 0, to: items.count, by: 35).map { start in
+        Array(items[start..<min(start + 35, items.count)]).map(LayoutItem.app)
+    }
+    for item in items { document.aliases[item] = "アプリ \(item.value)" }
+    let input = mode.hasPrefix("decode") ? try JSONEncoder().encode(document) : Data()
+    func peak() -> Int {
+        var usage = rusage()
+        _ = getrusage(RUSAGE_SELF, &usage)
+        return usage.ru_maxrss
+    }
+    let baseline = peak()
+    var checksum = 0
+    for _ in 0..<5 {
+        switch mode {
+        case "encode-swift": checksum += try JSONEncoder().encode(document).count
+        case "encode-rust": checksum += try RustLayoutJSON.encode(document).count
+        case "decode-swift": checksum += try JSONDecoder().decode(LayoutDocument.self, from: input).pages.count
+        case "decode-rust": checksum += try RustLayoutJSON.decode(input).pages.count
+        default: return
+        }
+    }
+    #expect(checksum > 0)
+    print("MEMORY_BENCH scenario=layout mode=\(mode) items=\(count) baseline_bytes=\(baseline) peak_bytes=\(peak())")
 }
 
 /// After `load()` fell back to the backup, the damaged primary was copied over
@@ -108,6 +287,10 @@ import Testing
     json.removeValue(forKey: "backgroundMode")
     json.removeValue(forKey: "glassMaterialIntensity")
     json.removeValue(forKey: "blursWallpaper")
+    json.removeValue(forKey: "wallpaperBlurRadius")
+    json.removeValue(forKey: "returnToFirstPage")
+    json.removeValue(forKey: "closeOnBackgroundClick")
+    json.removeValue(forKey: "screenTarget")
     let oldSchemaData = try JSONSerialization.data(withJSONObject: json)
 
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -122,6 +305,10 @@ import Testing
     #expect(loaded.backgroundMode == .glass)
     #expect(loaded.glassMaterialIntensity == 0.35)
     #expect(loaded.blursWallpaper == true)
+    #expect(loaded.wallpaperBlurRadius == 8)
+    #expect(loaded.returnToFirstPage == false)
+    #expect(loaded.closeOnBackgroundClick == true)
+    #expect(loaded.screenTarget == .cursor)
 }
 
 @Test func loadFallsBackToLastKnownGoodWhenPrimaryIsCorrupted() async throws {
@@ -142,6 +329,9 @@ import Testing
 
     let loaded = await store.load()
     #expect(loaded.gridSettings.columns == 7)
+
+    try Data().write(to: dir.appendingPathComponent("layout.json"))
+    #expect(await store.load().gridSettings.columns == 7)
 }
 
 @Test func loadReturnsEmptyWhenNothingExistsYet() async throws {
@@ -274,4 +464,20 @@ import Testing
 
     #expect(didFailWithBackupError)
     #expect((await store.load()).gridSettings.columns == 1)
+}
+
+@Test func exportingBackupCannotOverwriteLiveLayout() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = LayoutStore(directory: dir)
+    var document = LayoutDocument.empty
+    document.gridSettings.columns = 9
+    try await store.save(document)
+    let primary = dir.appendingPathComponent("layout.json")
+    do {
+        try await store.writeBackup(Data("not a layout".utf8), to: primary)
+        Issue.record("the live layout was overwritten")
+    } catch {
+        #expect((await store.load()).gridSettings.columns == 9)
+    }
 }

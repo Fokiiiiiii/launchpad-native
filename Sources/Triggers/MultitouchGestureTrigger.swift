@@ -110,7 +110,7 @@ public final class MultitouchGestureTrigger {
     private let onPinchClose: () -> Void
     /// Spread (fingers opening) — real Launchpad semantics: closes.
     private let onSpreadOpen: () -> Void
-    private let gestureEventTap = GestureEventTapCoordinator()
+    nonisolated(unsafe) private let gestureEventTap = GestureEventTapCoordinator()
     private var selectedFingerCount: Int
     public private(set) var isActive = false
     public private(set) var isEventArbitrationActive = false
@@ -352,11 +352,13 @@ public final class MultitouchGestureTrigger {
     /// to the main actor except (indirectly, via `onPinchDetected` above)
     /// when a gesture actually fires.
     nonisolated private func handleFrame(deviceID: Int32, samples: [TouchSample]) {
+        let uniqueIDs = Self.hasUniqueIDs(samples)
+        gestureEventTap.recordContactFrame(deviceID: deviceID, count: samples.count, valid: uniqueIDs)
         lock.lock()
         guard deviceRouter.accepts(
             deviceID: deviceID,
             sampleCount: samples.count,
-            hasUniqueIDs: Self.hasUniqueIDs(samples)
+            hasUniqueIDs: uniqueIDs
         ) else {
             lock.unlock()
             return

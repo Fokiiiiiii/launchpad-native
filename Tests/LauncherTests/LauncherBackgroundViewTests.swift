@@ -3,24 +3,15 @@ import Testing
 @testable import Launcher
 
 @Test @MainActor
-func glassMaterialIntensityClampsAndChangesAllMaterialParametersMonotonically() {
-    let belowRange = LauncherBackgroundView.glassMaterialParameters(for: -1)
-    let low = LauncherBackgroundView.glassMaterialParameters(for: 0)
-    let middle = LauncherBackgroundView.glassMaterialParameters(for: 0.35)
-    let high = LauncherBackgroundView.glassMaterialParameters(for: 1)
-    let aboveRange = LauncherBackgroundView.glassMaterialParameters(for: 2)
-
-    #expect(belowRange == low)
-    #expect(aboveRange == high)
-    #expect(low.wallpaperOpacity > middle.wallpaperOpacity)
-    #expect(middle.wallpaperOpacity > high.wallpaperOpacity)
-    #expect(low.blurRadius < middle.blurRadius)
-    #expect(middle.blurRadius < high.blurRadius)
-    #expect(low.sheenOpacity < middle.sheenOpacity)
-    #expect(middle.sheenOpacity < high.sheenOpacity)
-    #expect(middle.wallpaperOpacity == 0.6505)
-    #expect(middle.blurRadius == 44)
-    #expect(middle.sheenOpacity == 0.35)
+func glassPresetsUseDistinctNativeMaterials() {
+    #expect(LauncherMaterialSurface.material(for: 0).rawValue == 13)
+    #expect(LauncherMaterialSurface.material(for: 0.25).rawValue == 15)
+    #expect(LauncherMaterialSurface.material(for: 0.5).rawValue == 6)
+    #expect(LauncherMaterialSurface.material(for: 0.75).rawValue == 5)
+    #expect(LauncherMaterialSurface.material(for: 1).rawValue == 21)
+    let view = LauncherMaterialSurface.makeView()
+    #expect(view.blendingMode == .behindWindow)
+    #expect(view.state == .active)
 }
 
 /// Strength used to change the blur radius without anything noticing, and in glass
@@ -42,8 +33,8 @@ func theWallpaperIsPreparedAgainOnlyWhenWhatItWasPreparedWithChanged() {
             "a tiny strength step decoded the wallpaper again")
 
     glass.materialIntensity = 0.9
-    #expect(LauncherBackgroundView.needsWallpaperReload(lastMode: .glass, lastRadius: prepared, configuration: glass),
-            "a large strength change left the blur as it was")
+    #expect(!LauncherBackgroundView.needsWallpaperReload(lastMode: .glass, lastRadius: prepared, configuration: glass),
+            "changing the native material should not reload wallpaper")
 
     var wallpaper = LauncherBackgroundView.Configuration()
     wallpaper.mode = .wallpaper
@@ -57,6 +48,27 @@ func theWallpaperIsPreparedAgainOnlyWhenWhatItWasPreparedWithChanged() {
 
 @Test @MainActor
 func wallpaperBlurStaysSubtle() {
+    #expect(LauncherBackgroundView.wallpaperDimOpacity(isBlurred: true) == 0.3)
+    #expect(LauncherBackgroundView.wallpaperDimOpacity(isBlurred: false) == 0.2)
     #expect(LauncherBackgroundView.wallpaperBlurRadius(isEnabled: true) == 8)
     #expect(LauncherBackgroundView.wallpaperBlurRadius(isEnabled: false) == 0)
+    #expect(LauncherBackgroundView.wallpaperBlurRadius(isEnabled: true, radius: 23) == 23)
+    #expect(LauncherBackgroundView.wallpaperBlurRadius(isEnabled: false, radius: 23) == 0)
+    #expect(LauncherBackgroundView.wallpaperBlurRadius(isEnabled: true, radius: 50) == 40)
+    var configuration = LauncherBackgroundView.Configuration()
+    configuration.mode = .wallpaper
+    configuration.wallpaperBlurRadius = 23
+    #expect(LauncherBackgroundView.needsWallpaperReload(lastMode: .wallpaper, lastRadius: 8, configuration: configuration))
+    configuration.wallpaperBlurRadius = 9
+    #expect(LauncherBackgroundView.needsWallpaperReload(lastMode: .wallpaper, lastRadius: 8, configuration: configuration))
+}
+
+@Test @MainActor
+func glassMaterialPresetsClampAndMapToFiveLevels() {
+    #expect(LauncherMaterialSurface.presetIndex(for: -1) == 0)
+    #expect(LauncherMaterialSurface.presetIndex(for: 0.25) == 1)
+    #expect(LauncherMaterialSurface.presetIndex(for: 0.5) == 2)
+    #expect(LauncherMaterialSurface.presetIndex(for: 0.75) == 3)
+    #expect(LauncherMaterialSurface.presetIndex(for: 2) == 4)
+    #expect(LauncherMaterialSurface.presetIndex(for: .nan) == 1)
 }

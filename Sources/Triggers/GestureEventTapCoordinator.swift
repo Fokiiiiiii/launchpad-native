@@ -18,6 +18,29 @@ public final class GestureEventTapCoordinator {
     nonisolated(unsafe) private static var current: GestureEventTapCoordinator?
     private static let permissionPromptKey = "gestureEventTapPermissionPrompted.v1"
 
+    struct ContactState {
+        private(set) var deviceID: Int32?
+        private var lastFrameTime: TimeInterval = 0
+        private static let staleAfter: TimeInterval = 1
+
+        mutating func record(deviceID: Int32, count: Int, valid: Bool, selected: Int, now: TimeInterval) {
+            if now - lastFrameTime > Self.staleAfter { self.deviceID = nil }
+            if self.deviceID == deviceID {
+                if count == 0 { self.deviceID = nil } else { lastFrameTime = now }
+            } else if self.deviceID == nil && valid && count == selected {
+                self.deviceID = deviceID
+                lastFrameTime = now
+            }
+        }
+
+        func shouldSuppress(eventType: UInt32, eventTouchCount: Int, selected: Int, now: TimeInterval) -> Bool {
+            if eventType == 29 { return eventTouchCount == selected }
+            return eventType == 30 && deviceID != nil && now >= lastFrameTime && now - lastFrameTime <= Self.staleAfter
+        }
+    }
+
+    private var contacts = ContactState()
+
     /// Guards what the callback reads on the tap thread.
     private let stateLock = NSLock()
     private var selectedFingerCount = 4
@@ -54,12 +77,14 @@ public final class GestureEventTapCoordinator {
 
         stateLock.lock()
         selectedFingerCount = selected
+        contacts = ContactState()
         stateLock.unlock()
 
         // NSEvent gesture events are not represented by CGEventType. The
         // public gesture mask is its documented event-bit value.
         let gestureEventTypeRawValue: CGEventType.RawValue = 29
-        let eventMask = CGEventMask(1) << gestureEventTypeRawValue
+        let magnifyEventTypeRawValue: CGEventType.RawValue = 30
+        let eventMask = (CGEventMask(1) << gestureEventTypeRawValue) | (CGEventMask(1) << magnifyEventTypeRawValue)
         Self.lock.lock()
         Self.current = self
         Self.lock.unlock()
@@ -93,6 +118,7 @@ public final class GestureEventTapCoordinator {
         // Thread-safe CoreFoundation objects, handed to the tap thread below.
         nonisolated(unsafe) let tap = self.tap
         self.tap = nil
+        contacts = ContactState()
         stateLock.unlock()
         nonisolated(unsafe) let source = runLoopSource
         runLoopSource = nil
@@ -121,10 +147,16 @@ public final class GestureEventTapCoordinator {
         Self.lock.unlock()
     }
 
-    private func selectedFingerCountSnapshot() -> Int {
+    func recordContactFrame(deviceID: Int32, count: Int, valid: Bool) {
+        stateLock.lock()
+        contacts.record(deviceID: deviceID, count: count, valid: valid, selected: selectedFingerCount, now: ProcessInfo.processInfo.systemUptime)
+        stateLock.unlock()
+    }
+
+    private func shouldSuppress(eventType: UInt32, eventTouchCount: Int) -> Bool {
         stateLock.lock()
         defer { stateLock.unlock() }
-        return selectedFingerCount
+        return contacts.shouldSuppress(eventType: eventType, eventTouchCount: eventTouchCount, selected: selectedFingerCount, now: ProcessInfo.processInfo.systemUptime)
     }
 
     private func reenableTap() {
@@ -154,14 +186,10 @@ public final class GestureEventTapCoordinator {
             coordinator.reenableTap()
             DiagnosticsLog.triggers.error("Gesture event tap was disabled by the system; re-enabled it")
             return Unmanaged.passUnretained(event)
-        case let eventType where eventType.rawValue == 29:
-            guard let nsEvent = NSEvent(cgEvent: event) else {
-                return Unmanaged.passUnretained(event)
-            }
-            let fingerCount = nsEvent.allTouches().count
-            return coordinator.selectedFingerCountSnapshot() == fingerCount
-                ? nil
-                : Unmanaged.passUnretained(event)
+        case let eventType where eventType.rawValue == 29 || eventType.rawValue == 30:
+            let count = eventType.rawValue == 29 ? (NSEvent(cgEvent: event)?.allTouches().count ?? 0) : 0
+            return coordinator.shouldSuppress(eventType: eventType.rawValue, eventTouchCount: count)
+                ? nil : Unmanaged.passUnretained(event)
         default:
             return Unmanaged.passUnretained(event)
         }

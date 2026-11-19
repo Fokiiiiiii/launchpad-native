@@ -5,6 +5,8 @@ import SQLite3
 import Testing
 @testable import Grid
 
+import Darwin
+
 private func record(_ name: String, id: String) -> ApplicationRecord {
     ApplicationRecord(
         id: StableAppID(bundleURL: URL(fileURLWithPath: "/tmp/\(name).app"), bundleIdentifier: id, teamIdentifier: nil),
@@ -123,4 +125,83 @@ private func makeFixtureDatabase(at url: URL) throws {
     let result = LegacyLaunchpadImporter.importLegacyLayout(from: dbURL, matching: [])
     #expect(result.folders.isEmpty)
     #expect(result.unplacedAppOrder.isEmpty)
+}
+
+@Test func importPreservesMultipleFoldersAndSkipsEmptyOnes() throws {
+    let dbURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).db")
+    defer { try? FileManager.default.removeItem(at: dbURL) }
+    try makeFixtureDatabase(at: dbURL)
+    var db: OpaquePointer?
+    #expect(sqlite3_open(dbURL.path, &db) == SQLITE_OK)
+    let statements = [
+        "INSERT INTO items (rowid, uuid, parent_id, ordering) VALUES (30, 'empty', 2, 2)",
+        "INSERT INTO groups (item_id, title) VALUES (30, 'Empty')",
+        "INSERT INTO items (rowid, uuid, parent_id, ordering) VALUES (40, 'second', 2, 3)",
+        "INSERT INTO groups (item_id, title) VALUES (40, 'Second')",
+        "INSERT INTO items (rowid, uuid, parent_id, ordering) VALUES (41, 'nested', 40, 0)",
+        "INSERT INTO items (rowid, uuid, parent_id, ordering) VALUES (42, 'app-c', 41, 0)",
+        "INSERT INTO apps (item_id, bundleid) VALUES (42, 'com.example.c')"
+    ]
+    for statement in statements { #expect(sqlite3_exec(db, statement, nil, nil, nil) == SQLITE_OK) }
+    sqlite3_close(db)
+    let result = LegacyLaunchpadImporter.importLegacyLayout(from: dbURL, matching: [
+        record("AppA", id: "com.example.a"), record("AppB", id: "com.example.b"), record("AppC", id: "com.example.c")
+    ])
+    #expect(result.folders.map(\.name) == ["Utilities", "Second"])
+    #expect(result.folders.map { $0.pages.first?.count } == [1, 1])
+    #expect(result.unplacedAppOrder.count == 3)
+    #expect(result.unresolvedBundleIDs == ["com.example.missing"])
+}
+
+@Test func importRejectsIncompleteOrFailingDatabaseQueries() throws {
+    for failure in 0..<2 {
+        let dbURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(at: dbURL) }
+        try makeFixtureDatabase(at: dbURL)
+        var db: OpaquePointer?
+        #expect(sqlite3_open(dbURL.path, &db) == SQLITE_OK)
+        if failure == 0 {
+            #expect(sqlite3_exec(db, "DROP TABLE groups", nil, nil, nil) == SQLITE_OK)
+        } else {
+            #expect(sqlite3_exec(db, "DROP TABLE apps", nil, nil, nil) == SQLITE_OK)
+            #expect(sqlite3_exec(db, "CREATE VIEW apps AS SELECT 10 AS item_id, 'com.example.a' AS bundleid UNION ALL SELECT abs(-9223372036854775808), 'failure'", nil, nil, nil) == SQLITE_OK)
+        }
+        sqlite3_close(db)
+        let result = LegacyLaunchpadImporter.importLegacyLayout(from: dbURL, matching: [record("AppA", id: "com.example.a")])
+        #expect(!result.succeeded)
+        #expect(result.folders.isEmpty)
+        #expect(result.unplacedAppOrder.isEmpty)
+        #expect(result.unresolvedBundleIDs.isEmpty)
+    }
+}
+
+@Test func benchmarkLegacyImportMemory() throws {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1" else { return }
+    let count = 4096
+    let dbURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).db")
+    defer { try? FileManager.default.removeItem(at: dbURL) }
+    try makeFixtureDatabase(at: dbURL)
+    var db: OpaquePointer?
+    #expect(sqlite3_open(dbURL.path, &db) == SQLITE_OK)
+    #expect(sqlite3_exec(db, "BEGIN", nil, nil, nil) == SQLITE_OK)
+    for index in 0..<count {
+        let row = index + 100
+        let statements = "INSERT INTO items (rowid, uuid, parent_id, ordering) VALUES (\(row), 'fixture', 2, \(row)); INSERT INTO apps (item_id, bundleid) VALUES (\(row), 'org.fixture.app\(index)');"
+        #expect(sqlite3_exec(db, statements, nil, nil, nil) == SQLITE_OK)
+    }
+    #expect(sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK)
+    sqlite3_close(db)
+    let records = (0..<count).map { record("App\($0)", id: "org.fixture.app\($0)") }
+    func peak() -> Int {
+        var usage = rusage()
+        _ = getrusage(RUSAGE_SELF, &usage)
+        return usage.ru_maxrss
+    }
+    let baseline = peak()
+    let start = DispatchTime.now().uptimeNanoseconds
+    for _ in 0..<5 {
+        let result = LegacyLaunchpadImporter.importLegacyLayout(from: dbURL, matching: records)
+        #expect(result.unplacedAppOrder.count == count)
+    }
+    print("MEMORY_BENCH scenario=legacy-import items=\(count) baseline_bytes=\(baseline) peak_bytes=\(peak()) elapsed_ns=\(DispatchTime.now().uptimeNanoseconds - start)")
 }

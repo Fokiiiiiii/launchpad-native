@@ -33,7 +33,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         model: gridModel,
         iconCache: iconCache,
         onLaunch: { [weak self] record in self?.launch(record) },
-        onBackgroundClick: { [weak self] in self?.onDidCancel() },
+        onBackgroundClick: { [weak self] in self?.dismissForBackgroundClick() },
         onRequestUninstall: { [weak self] record in self?.onRequestUninstall(record) }
     )
 
@@ -61,7 +61,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     override func loadView() {
         let root = BackgroundClickCatcherView()
-        root.onBackgroundClick = { [weak self] in self?.onDidCancel() }
+        root.onBackgroundClick = { [weak self] in self?.dismissForBackgroundClick() }
 
         searchIcon.translatesAutoresizingMaskIntoConstraints = false
         // 12.5pt medium + opacity 0.65 — the reference's own
@@ -134,7 +134,7 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         searchResultsCollectionView.register(AppIconCollectionViewItem.self, forItemWithIdentifier: itemIdentifier)
         searchResultsCollectionView.isSelectable = true
         searchResultsCollectionView.backgroundColors = [.clear]
-        searchResultsCollectionView.onBackgroundClick = { [weak self] in self?.onDidCancel() }
+        searchResultsCollectionView.onBackgroundClick = { [weak self] in self?.dismissForBackgroundClick() }
         searchResultsCollectionView.menuProvider = { [weak self] indexPath in self?.searchContextMenu(at: indexPath) }
         searchResultsScrollView.hasVerticalScroller = false
         searchResultsScrollView.hasHorizontalScroller = false
@@ -315,6 +315,11 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             guard let self else { return }
             self.view.window?.makeFirstResponder(self.searchField)
         }
+    }
+
+
+    func dismissForBackgroundClick() {
+        if gridModel.closeOnBackgroundClick { onDidCancel() }
     }
 
     func resetSearch() {
@@ -504,6 +509,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
     func reloadGrid() {
         gridViewController.reload()
         applySearchResultsLayoutMetrics()
+    }
+
+    func resetToFirstPage() {
+        gridViewController.resetToFirstPage()
     }
 
     func refreshDockLayout() {

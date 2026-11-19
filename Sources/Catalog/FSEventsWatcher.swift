@@ -4,72 +4,58 @@ import Foundation
 /// Thin wrapper over the public `FSEventStreamCreate` API (CoreServices),
 /// used so `ApplicationScanner` can do differential updates instead of a
 /// full rescan on every launcher open.
-final class FSEventsWatcher: @unchecked Sendable {
-    private var streamRef: FSEventStreamRef?
-    private let onChange: ([String]) -> Void
-    private let queue = DispatchQueue(label: "com.launchpadnative.catalog.fsevents")
-    // Accessed only on the serial callback queue; stop() uses a queue
-    // barrier before invalidating the stream so queued callbacks cannot touch
-    // a deallocated watcher through the unmanaged FSEvents context pointer.
-    private var isStopped = false
+import CLaunchpadCore
 
-    init?(paths: [String], latency: CFTimeInterval = 0.75, onChange: @escaping ([String]) -> Void) {
-        guard !paths.isEmpty else { return nil }
+private final class WatcherCallbackContext {
+    let roots: [String]
+    let onChange: ([String]) -> Void
+    init(roots: [String], onChange: @escaping ([String]) -> Void) {
+        self.roots = roots
         self.onChange = onChange
+    }
+}
 
-        var context = FSEventStreamContext(
-            version: 0,
-            info: Unmanaged.passUnretained(self).toOpaque(),
-            retain: nil,
-            release: nil,
-            copyDescription: nil
-        )
+final class FSEventsWatcher: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handle: UnsafeMutableRawPointer?
+    private var callbackContext: UnsafeMutableRawPointer?
 
-        let callback: FSEventStreamCallback = { _, clientInfo, numEvents, eventPaths, _, _ in
-            guard let clientInfo else { return }
-            let watcher = Unmanaged<FSEventsWatcher>.fromOpaque(clientInfo).takeUnretainedValue()
-            guard !watcher.isStopped else { return }
-            let cPaths = eventPaths.assumingMemoryBound(to: UnsafeMutablePointer<CChar>.self)
-            var changed: [String] = []
-            changed.reserveCapacity(numEvents)
-            for i in 0..<numEvents {
-                changed.append(String(cString: cPaths[i]))
-            }
-            watcher.onChange(changed)
+    init?(paths: [String], latency: CFTimeInterval = 0.15, onChange: @escaping ([String]) -> Void) {
+        guard !paths.isEmpty else { return nil }
+        let allocated = paths.map { strdup($0) }
+        defer { allocated.forEach { free($0) } }
+        guard allocated.allSatisfy({ $0 != nil }) else { return nil }
+        let pointers: [UnsafePointer<CChar>?] = allocated.map { $0.map { UnsafePointer($0) } }
+        let context = Unmanaged.passRetained(WatcherCallbackContext(roots: paths, onChange: onChange)).toOpaque()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UnsafePointer<CChar>?>?, UInt, Int32) -> Void = { context, paths, count, rescan in
+            guard let context else { return }
+            let state = Unmanaged<WatcherCallbackContext>.fromOpaque(context).takeUnretainedValue()
+            if rescan != 0 { state.onChange(state.roots); return }
+            guard let paths, let count = Int(exactly: count) else { return }
+            state.onChange((0..<count).compactMap { paths[$0].map { String(cString: $0) } })
         }
-
-        guard let stream = FSEventStreamCreate(
-            kCFAllocatorDefault,
-            callback,
-            &context,
-            paths as CFArray,
-            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-            latency,
-            FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer)
-        ) else {
+        let watcher = pointers.withUnsafeBufferPointer { buffer in
+            launchpad_watch_start(buffer.baseAddress, UInt(buffer.count), latency, context, callback)
+        }
+        guard let watcher else {
+            Unmanaged<WatcherCallbackContext>.fromOpaque(context).release()
             return nil
         }
-
-        self.streamRef = stream
-        FSEventStreamSetDispatchQueue(stream, queue)
-        FSEventStreamStart(stream)
+        handle = watcher
+        callbackContext = context
     }
 
-    /// Stops the stream and drains its serial callback queue before returning.
-    /// This keeps the unmanaged callback context valid until no callback can
-    /// observe it, which is important when sources are replaced at runtime.
     func stop() {
-        queue.sync {
-            isStopped = true
-        }
-        guard let stream = streamRef else { return }
-        streamRef = nil
-        FSEventStreamStop(stream)
-        FSEventStreamInvalidate(stream)
-        FSEventStreamRelease(stream)
+        lock.lock()
+        defer { lock.unlock() }
+        let watcher = handle
+        let context = callbackContext
+        handle = nil
+        callbackContext = nil
+        guard let watcher else { return }
+        launchpad_watch_stop(watcher)
+        if let context { Unmanaged<WatcherCallbackContext>.fromOpaque(context).release() }
     }
 
-    deinit {
-        stop()
-    }
+    deinit { stop() }
 }

@@ -125,6 +125,7 @@ final class GridCellItem: NSCollectionViewItem {
     /// whatever index path it previously represented.
     override func prepareForReuse() {
         super.prepareForReuse()
+        setIconLoadTask(nil)
         view.layer?.removeAllAnimations()
         view.layer?.transform = CATransform3DIdentity
         view.isHidden = false
@@ -248,7 +249,19 @@ final class GridCellItem: NSCollectionViewItem {
     ///   empty hidden label has no intrinsic height, so the constraints stay
     ///   satisfied). No caller passes `false` today; VoiceOver announces the
     ///   name either way.
+    static let loadingIcon = NSImage(systemSymbolName: "app.fill", accessibilityDescription: nil) ?? NSImage(size: NSSize(width: 32, height: 32))
+
+    private var iconLoadTask: Task<Void, Never>?
+
+    func setIconLoadTask(_ task: Task<Void, Never>?) {
+        iconLoadTask?.cancel()
+        iconLoadTask = task
+    }
+
+    deinit { iconLoadTask?.cancel() }
+
     func configureAsApp(record: ApplicationRecord, icon: NSImage, isSelected: Bool, iconSize: Double, visualScale: Double = 1, displayName: String? = nil, showsLabel: Bool = true) {
+        setIconLoadTask(nil)
         currentRequestKey = record.iconCacheKey
         applyIconSize(iconSize, visualScale: visualScale)
         folderHostingView?.isHidden = true
@@ -273,7 +286,8 @@ final class GridCellItem: NSCollectionViewItem {
         resetVisualTransforms()
     }
 
-    func configureAsFolder(name: String, isSelected: Bool, iconSize: Double, visualScale: Double = 1, icons: [NSImage], requestKey: String) {
+    func configureAsFolder(name: String, isSelected: Bool, iconSize: Double, visualScale: Double = 1, icons: [NSImage], requestKey: String, showsLabel: Bool = true) {
+        setIconLoadTask(nil)
         currentRequestKey = requestKey
         applyIconSize(iconSize, visualScale: visualScale)
         iconView.isHidden = true
@@ -281,8 +295,8 @@ final class GridCellItem: NSCollectionViewItem {
         hosting.isHidden = false
         hosting.rootView = FolderIconView(icons: icons, size: displayedIconSizeValue)
         hosting.layoutSubtreeIfNeeded()
-        label.isHidden = false
-        label.stringValue = name
+        label.isHidden = !showsLabel
+        label.stringValue = showsLabel ? name : ""
         applySelection(isSelected)
         view.setAccessibilityElement(true)
         view.setAccessibilityRole(.button)

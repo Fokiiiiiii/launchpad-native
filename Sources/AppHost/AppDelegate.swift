@@ -46,7 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             launcherWindowController.updateBackgroundSettings(
                 mode: model.backgroundMode,
                 materialIntensity: model.glassMaterialIntensity,
-                blursWallpaper: model.blursWallpaper
+                blursWallpaper: model.blursWallpaper,
+                wallpaperBlurRadius: model.wallpaperBlurRadius
             )
         },
         onCustomSourcesChanged: { [weak self] in
@@ -164,7 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             whatsNewWindowController.closeWithoutKeyReclaim()
         }
 
-        Task {
+        Task { [self] in
             await launcherWindowController.loadGridDocument()
 
             // `NSApp.applicationIconImage` resets to the bundle default on
@@ -251,7 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_DEBUG_SIMULATE_PAGE_DRAG"] {
                 if mode == "rapid" {
                     launcherWindowController.debugSimulatePageDrag(commit: true)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak launcherWindowController] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak launcherWindowController = self.launcherWindowController] in
                         launcherWindowController?.debugSimulatePageDrag(commit: true)
                     }
                 } else {

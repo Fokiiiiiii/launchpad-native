@@ -272,6 +272,30 @@ private func pair(spread: Float) -> [TouchSample] {
     #expect(reclaim)
 }
 
+@Test func magnificationIsBlockedOnlyDuringTheSelectedContactSequence() {
+    var state = GestureEventTapCoordinator.ContactState()
+    func blocked(_ event: UInt32, _ touches: Int = 0, _ now: Double = 10) -> Bool {
+        state.shouldSuppress(eventType: event, eventTouchCount: touches, selected: 5, now: now)
+    }
+    state.record(deviceID: 1, count: 4, valid: true, selected: 5, now: 10)
+    #expect(!blocked(30))
+    state.record(deviceID: 1, count: 5, valid: false, selected: 5, now: 10)
+    #expect(!blocked(30))
+    state.record(deviceID: 1, count: 5, valid: true, selected: 5, now: 10)
+    #expect(blocked(30))
+    #expect(!blocked(31))
+    #expect(!blocked(29, 2))
+    #expect(blocked(29, 5))
+    state.record(deviceID: 2, count: 0, valid: true, selected: 5, now: 10.1)
+    #expect(blocked(30, 0, 10.1))
+    state.record(deviceID: 1, count: 4, valid: true, selected: 5, now: 10.2)
+    #expect(blocked(30, 0, 10.2))
+    state.record(deviceID: 1, count: 0, valid: true, selected: 5, now: 10.3)
+    #expect(!blocked(30, 0, 10.3))
+    state.record(deviceID: 1, count: 5, valid: true, selected: 5, now: 11)
+    #expect(!blocked(30, 0, 12.1))
+}
+
 /// The multitouch framework can report a frame whose contacts share an
 /// identifier — a device hiccup, or two devices' frames interleaved. Four
 /// contacts that are really two fingers say nothing about how far apart four

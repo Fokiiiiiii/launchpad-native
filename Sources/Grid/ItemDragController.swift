@@ -40,6 +40,11 @@ private final class NonInteractiveImageView: NSImageView {
 @MainActor
 final class DockDragSource: NSObject, NSDraggingSource {
     static let shared = DockDragSource()
+    private var previousOptions: NSApplication.PresentationOptions?
+    private var temporaryOptions: NSApplication.PresentationOptions?
+    private weak var window: NSWindow?
+    private var previousLevel: NSWindow.Level?
+    private weak var sourceView: NSView?
 
     static func item(url: URL, image: NSImage, frame: NSRect) -> NSDraggingItem {
         let item = NSDraggingItem(pasteboardWriter: url as NSURL)
@@ -47,8 +52,50 @@ final class DockDragSource: NSObject, NSDraggingSource {
         return item
     }
 
+    static func optionsForDrag(_ options: NSApplication.PresentationOptions) -> NSApplication.PresentationOptions {
+        guard options.contains(.hideDock) else { return options }
+        var adjusted = options
+        adjusted.remove(.hideDock)
+        adjusted.insert(.autoHideDock)
+        return adjusted
+    }
+
+    func prepare(window: NSWindow, sourceView: NSView?) {
+        self.sourceView = sourceView
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        sourceView?.layer?.opacity = 0
+        CATransaction.commit()
+        previousOptions = NSApp.presentationOptions
+        temporaryOptions = Self.optionsForDrag(NSApp.presentationOptions)
+        previousLevel = window.level
+        self.window = window
+        if let temporaryOptions, temporaryOptions != NSApp.presentationOptions {
+            NSApp.presentationOptions = temporaryOptions
+        }
+        window.level = .floating
+    }
+
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         context == .outsideApplication ? [.copy, .link] : []
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        if let window, window.isVisible {
+            if let previousLevel { window.level = previousLevel }
+            if let previousOptions, let temporaryOptions, NSApp.presentationOptions == temporaryOptions {
+                NSApp.presentationOptions = previousOptions
+            }
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        sourceView?.layer?.opacity = 1
+        CATransaction.commit()
+        sourceView = nil
+        previousOptions = nil
+        temporaryOptions = nil
+        previousLevel = nil
+        window = nil
     }
 }
 
@@ -119,12 +166,42 @@ final class ItemDragController {
     private var cachedDockFrames: [CGRect] = []
     private var lastDockFrameCheck: CFTimeInterval = 0
 
+    private var itemDragMouseDownEvent: NSEvent?
+
+    private var selectedItems: Set<LayoutItem> = []
+    private var draggedGroup: Set<LayoutItem> = []
+    private var dragPagesSnapshot: [[LayoutItem]]?
+
+    func isGroupSelected(_ item: LayoutItem) -> Bool { selectedItems.contains(item) }
+
+    func isGroupItemBeingDragged(_ item: LayoutItem) -> Bool {
+        activeItemDrag != nil && draggedGroup.contains(item)
+    }
+
+    func clearGroupSelection() {
+        selectedItems.removeAll()
+        for cell in collectionView.visibleItems() {
+            (cell as? GridCellItem)?.applySelection(false)
+            cell.view.layer?.opacity = 1
+        }
+    }
+
     func handleItemMouseDown(indexPath: IndexPath, event: NSEvent) {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(indexPath.item) else { return }
         if let staleSession = activeItemDrag {
             DiagnosticsLog.grid.notice("handleItemMouseDown: new press on item \(indexPath.item, privacy: .public) arrived while item \(staleSession.sourceOriginalIndex, privacy: .public)'s drag was still active — committing the stale session first")
             endItemDrag(session: staleSession)
         }
+        let clicked = model.pages[currentPage][indexPath.item]
+        if event.modifierFlags.contains(.command) {
+            pendingItemPress = nil
+            callbacks.clearKeyboardSelection()
+            if !selectedItems.insert(clicked).inserted { selectedItems.remove(clicked) }
+            (collectionView.item(at: indexPath) as? GridCellItem)?.applySelection(selectedItems.contains(clicked))
+            return
+        }
+        if !selectedItems.contains(clicked) { clearGroupSelection() }
+        itemDragMouseDownEvent = event
         let previousSelection = collectionView.selectionIndexPaths
         callbacks.clearKeyboardSelection()
         collectionView.selectionIndexPaths = [indexPath]
@@ -134,12 +211,15 @@ final class ItemDragController {
         // No `applySelection(true)` here — a mouse click tracks selection
         // state without drawing the ring (see `keyboardSelectionActive`'s
         // doc comment).
-        (collectionView.item(at: indexPath) as? GridCellItem)?.applySelection(false)
+        for (index, item) in model.pages[currentPage].enumerated() where selectedItems.contains(item) {
+            (collectionView.item(at: IndexPath(item: index, section: 0)) as? GridCellItem)?.applySelection(true)
+        }
 
         let point = collectionView.convert(event.locationInWindow, from: nil)
         pendingItemPress = (indexPath, point)
         applyPressFeedback(at: indexPath, pressed: true)
     }
+
 
     func handleItemMouseDragged(event: NSEvent) {
         let point = collectionView.convert(event.locationInWindow, from: nil)
@@ -147,7 +227,7 @@ final class ItemDragController {
             if case .app(let identifier) = session.draggedItem,
                let record = model.record(for: identifier),
                let screen = collectionView.window?.screen {
-                let mouse = NSEvent.mouseLocation
+                let mouse = collectionView.window?.convertPoint(toScreen: event.locationInWindow) ?? NSEvent.mouseLocation
                 if mouse.y <= screen.frame.minY + screen.frame.height * 0.25 ||
                     mouse.x <= screen.frame.minX + screen.frame.width * 0.25 ||
                     mouse.x >= screen.frame.maxX - screen.frame.width * 0.25 {
@@ -157,22 +237,37 @@ final class ItemDragController {
                         lastDockFrameCheck = now
                     }
                 }
-                var hiddenBottomEdge = false
-                if mouse.y <= screen.frame.minY + 2 && !model.hideDockWhileLauncherOpen {
-                    let preferences = UserDefaults(suiteName: "com.apple.dock")
-                    let mayReveal = NSApp.presentationOptions.contains(.autoHideDock) || (preferences?.bool(forKey: "autohide") ?? false)
-                    hiddenBottomEdge = DockSafeArea.isHiddenBottomDockEdge(
-                        point: mouse, screenFrame: screen.frame,
-                        orientation: preferences?.string(forKey: "orientation") ?? "bottom", canReveal: mayReveal
-                    )
-                }
-                if hiddenBottomEdge || DockSafeArea.containsDock(point: mouse, screenFrame: screen.frame, dockFrames: cachedDockFrames) {
+                let preferences = UserDefaults(suiteName: "com.apple.dock")
+                let nearBottomDock = DockSafeArea.isHiddenBottomDockEdge(
+                    point: mouse, screenFrame: screen.frame,
+                    orientation: preferences?.string(forKey: "orientation") ?? "bottom", canReveal: true
+                )
+                if (nearBottomDock || DockSafeArea.containsDock(point: mouse, screenFrame: screen.frame, dockFrames: cachedDockFrames)),
+                   let downEvent = itemDragMouseDownEvent, let window = collectionView.window {
+                    let groupRecords = model.pages.flatMap { $0 }.filter { draggedGroup.contains($0) }.compactMap { item -> ApplicationRecord? in
+                        guard case .app(let id) = item else { return nil }
+                        return model.record(for: id)
+                    }
+                    guard draggedGroup.isEmpty || groupRecords.count == draggedGroup.count else { return }
                     let image = (session.floatingView as? NSImageView)?.image ?? NSWorkspace.shared.icon(forFile: record.bundleURL.path)
-                    let frame = NSRect(x: point.x - session.grabOffset.x, y: point.y - session.grabOffset.y, width: session.originalFrame.width, height: session.originalFrame.height)
-                    let item = DockDragSource.item(url: record.bundleURL, image: image, frame: frame)
+                    let frame = session.originalFrame
+                    let items = draggedGroup.isEmpty
+                        ? [DockDragSource.item(url: record.bundleURL, image: image, frame: frame)]
+                        : groupRecords.map { DockDragSource.item(url: $0.bundleURL, image: NSWorkspace.shared.icon(forFile: $0.bundleURL.path), frame: frame) }
+                    clearGroupSelection()
                     revertItemDrag(session: session)
                     session.floatingView?.removeFromSuperview()
-                    collectionView.beginDraggingSession(with: [item], event: event, source: DockDragSource.shared)
+                    session.floatingView = nil
+                    session.floatingViewHost = nil
+                    let sourceStillAtIndex = currentPage == session.sourcePage
+                        && model.pages.indices.contains(currentPage)
+                        && model.pages[currentPage].indices.contains(session.sourceOriginalIndex)
+                        && model.pages[currentPage][session.sourceOriginalIndex] == session.draggedItem
+                    let sourceView = sourceStillAtIndex
+                        ? collectionView.item(at: IndexPath(item: session.sourceOriginalIndex, section: 0))?.view
+                        : nil
+                    DockDragSource.shared.prepare(window: window, sourceView: sourceView)
+                    collectionView.beginDraggingSession(with: items, event: downEvent, source: DockDragSource.shared)
                     return
                 }
             }
@@ -183,9 +278,11 @@ final class ItemDragController {
         let distance = hypot(point.x - pending.startPoint.x, point.y - pending.startPoint.y)
         guard distance >= ItemDrag.itemDragThresholdDistance else { return }
         beginItemDrag(indexPath: pending.indexPath, pressPoint: pending.startPoint, currentPoint: point)
+        if activeItemDrag != nil { handleItemMouseDragged(event: event) }
     }
 
     func handleItemMouseUp(event: NSEvent) {
+        itemDragMouseDownEvent = nil
         if let session = activeItemDrag {
             endItemDrag(session: session)
             return
@@ -193,6 +290,7 @@ final class ItemDragController {
         guard let pending = pendingItemPress else { return }
         pendingItemPress = nil
         applyPressFeedback(at: pending.indexPath, pressed: false)
+        clearGroupSelection()
         callbacks.activateItem(pending.indexPath)
     }
 
@@ -219,6 +317,8 @@ final class ItemDragController {
         guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(indexPath.item),
               let attributes = layout.layoutAttributesForItem(at: indexPath) else { return }
         let item = model.pages[currentPage][indexPath.item]
+        draggedGroup = selectedItems.contains(item) && selectedItems.count > 1 ? selectedItems : []
+        dragPagesSnapshot = draggedGroup.isEmpty ? nil : model.pages
         itemDragGeneration += 1
         let grabOffset = NSPoint(x: pressPoint.x - attributes.frame.minX, y: pressPoint.y - attributes.frame.minY)
         let session = ItemDrag.ItemDragSession(
@@ -233,6 +333,11 @@ final class ItemDragController {
         DiagnosticsLog.grid.notice("beginItemDrag: item \(indexPath.item, privacy: .public) on page \(self.currentPage, privacy: .public)")
         startWobble()
         createFloatingDragView(session: session)
+        if !draggedGroup.isEmpty {
+            for (index, item) in model.pages[currentPage].enumerated() where draggedGroup.contains(item) {
+                collectionView.item(at: IndexPath(item: index, section: 0))?.view.layer?.opacity = 0
+            }
+        }
         updateItemDrag(session: session, point: currentPoint)
         armItemDragSafetyNets(generation: session.generation)
     }
@@ -258,7 +363,7 @@ final class ItemDragController {
                 self.revertItemDrag(session: session)
             }
         }
-        guard itemDragGlobalMouseUpMonitor == nil else { return }
+        guard collectionView.window != nil, itemDragGlobalMouseUpMonitor == nil else { return }
         guard let monitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseUp],
             handler: { [weak self] _ in
@@ -300,6 +405,18 @@ final class ItemDragController {
         imageView.layer?.shadowOpacity = 0.35
         imageView.layer?.shadowRadius = 12
         imageView.layer?.shadowOffset = CGSize(width: 0, height: -6)
+        if draggedGroup.count > 1 {
+            let badge = NSTextField(labelWithString: "\(draggedGroup.count)")
+            badge.font = .boldSystemFont(ofSize: 12)
+            badge.textColor = .white
+            badge.alignment = .center
+            badge.wantsLayer = true
+            badge.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+            badge.layer?.cornerRadius = 11
+            badge.frame = NSRect(x: imageView.bounds.width - 22, y: imageView.bounds.height - 22, width: 22, height: 22)
+            badge.autoresizingMask = [.minXMargin, .minYMargin]
+            imageView.addSubview(badge)
+        }
         host.addSubview(imageView, positioned: .above, relativeTo: nil)
         session.floatingView = imageView
         session.floatingViewHost = host
@@ -330,7 +447,13 @@ final class ItemDragController {
         layer.setValue(dy, forKeyPath: "transform.translation.y")
         CATransaction.commit()
 
-        let folderTarget = folderZoneTarget(session: session, point: point)
+        var folderTarget = folderZoneTarget(session: session, point: point)
+        if !draggedGroup.isEmpty {
+            let containsFolder = draggedGroup.contains { if case .folder = $0 { return true }; return false }
+            if containsFolder || folderTarget.map({ model.pages.indices.contains(currentPage) && model.pages[currentPage].indices.contains($0) && draggedGroup.contains(model.pages[currentPage][$0]) }) == true {
+                folderTarget = nil
+            }
+        }
         if folderTarget != nil {
             suppressReorderForFolderZone(session: session)
         } else {
@@ -389,11 +512,10 @@ final class ItemDragController {
         guard rawSlot != session.pendingRawSlot else { return }
         session.pendingRawSlot = rawSlot
         session.reorderTimer?.invalidate()
-        // itemDragReorderDebounce is now 0 — the hysteresis radius above is
-        // the sole anti-chatter gate; this Timer indirection (and
-        // `session.reorderTimer`'s existence) is kept as-is so a future
-        // tuning pass can reintroduce a nonzero debounce without touching
-        // the surrounding structure.
+        if ItemDrag.itemDragReorderDebounce <= 0 {
+            commitReorderCandidate(session: session, slot: rawSlot)
+            return
+        }
         session.reorderTimer = Timer.scheduledTimer(withTimeInterval: ItemDrag.itemDragReorderDebounce, repeats: false) { [weak self, weak session] _ in
             Task { @MainActor [weak self, weak session] in
                 // `activeItemDrag === session` matters as much as the
@@ -906,6 +1028,7 @@ final class ItemDragController {
     // MARK: Drop / settle / cancel
 
     private func endItemDrag(session: ItemDrag.ItemDragSession) {
+        itemDragMouseDownEvent = nil
         // The catalog can reconcile mid-drag and shift the pages under the indexes
         // taken at pick-up; dropping by index would then move whichever app now
         // sits there. Cancel instead of guessing.
@@ -913,6 +1036,13 @@ final class ItemDragController {
               model.pages[session.sourcePage].indices.contains(session.sourceOriginalIndex),
               model.pages[session.sourcePage][session.sourceOriginalIndex] == session.draggedItem else {
             DiagnosticsLog.grid.notice("endItemDrag: source moved during the drag, cancelling")
+            revertItemDrag(session: session)
+            return
+        }
+        if let snapshot = dragPagesSnapshot, snapshot != model.pages {
+            draggedGroup.removeAll()
+            dragPagesSnapshot = nil
+            clearGroupSelection()
             revertItemDrag(session: session)
             return
         }
@@ -930,7 +1060,20 @@ final class ItemDragController {
         for item in collectionView.visibleItems() { resetItemTransform(item.view) }
         stopWobble()
 
-        if let folderTargetIndex = session.folderCandidateOriginalIndex {
+        if draggedGroup.isEmpty { clearGroupSelection() }
+        if !draggedGroup.isEmpty {
+            let group = draggedGroup
+            let target = session.folderCandidateOriginalIndex.flatMap { index -> LayoutItem? in
+                guard model.pages.indices.contains(currentPage), model.pages[currentPage].indices.contains(index) else { return nil }
+                return model.pages[currentPage][index]
+            }
+            draggedGroup.removeAll()
+            dragPagesSnapshot = nil
+            clearGroupSelection()
+            if let page = model.moveItems(group, leader: session.draggedItem, toPage: currentPage, toIndex: session.candidateSlot, folderTarget: target), page != currentPage {
+                callbacks.commitPageChange(page)
+            }
+        } else if let folderTargetIndex = session.folderCandidateOriginalIndex {
             model.createOrJoinFolder(
                 sourcePage: session.sourcePage,
                 sourceIndex: session.sourceOriginalIndex,
@@ -993,6 +1136,12 @@ final class ItemDragController {
     /// cell (same transform-only approach as `settleFloatingView`), undo
     /// any reorder preview, no model mutation.
     private func revertItemDrag(session: ItemDrag.ItemDragSession) {
+        itemDragMouseDownEvent = nil
+        for (index, item) in (model.pages.indices.contains(currentPage) ? model.pages[currentPage] : []).enumerated() where draggedGroup.contains(item) {
+            collectionView.item(at: IndexPath(item: index, section: 0))?.view.layer?.opacity = 1
+        }
+        draggedGroup.removeAll()
+        dragPagesSnapshot = nil
         disarmItemDragSafetyNet()
         session.invalidateTimers()
         activeItemDrag = nil

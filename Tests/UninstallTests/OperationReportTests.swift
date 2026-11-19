@@ -75,6 +75,25 @@ struct OperationReportTests {
         #expect(FileManager.default.fileExists(atPath: second.path))
     }
 
+    @Test("Rust report encoding keeps the ISO 8601 format and optional values")
+    func rustReportEncodingMatchesLegacyFormat() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let entry = OperationReport.Entry(path: "/tmp/日本", classification: "cache", requiresPrivilegedHelper: false, executed: true, succeeded: false, errorDescription: "失敗")
+        let report = OperationReport(bundleIdentifier: "com.example.app", generatedAt: date, entries: [entry])
+        let url = try await OperationReportStore(directory: root).save(report)
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(OperationReport.self, from: data)
+        #expect(decoded.generatedAt == date)
+        #expect(decoded.entries.first?.path == entry.path)
+        #expect(decoded.entries.first?.errorDescription == entry.errorDescription)
+        #expect(String(decoding: data, as: UTF8.self).contains("\n"))
+    }
+
     @Test("a hostile identifier cannot place the report outside its directory")
     func hostileIdentifierStaysInsideTheReportDirectory() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

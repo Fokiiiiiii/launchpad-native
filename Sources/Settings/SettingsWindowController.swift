@@ -7,12 +7,15 @@ import Persistence
 import SwiftUI
 
 enum SettingsWindowMetrics {
-    // The design reference's card is 400pt wide. A 360pt card keeps the same
-    // hierarchy at a compact scale while leaving enough width for localized
-    // labels; rows grow vertically when a Dynamic Type size needs more room.
-    static let width: CGFloat = 360
-    static let height: CGFloat = 480
+    static let width: CGFloat = 440
+    static let height: CGFloat = 590
     static let size = NSSize(width: width, height: height)
+
+    static func size(fitting frame: NSRect?) -> NSSize {
+        guard let frame else { return size }
+        return NSSize(width: min(width, max(1, frame.width - 24)),
+                      height: min(height, max(1, frame.height - 24)))
+    }
 }
 
 @MainActor
@@ -74,7 +77,9 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     public func show(on screen: NSScreen?) {
+        let panelSize = SettingsWindowMetrics.size(fitting: screen?.visibleFrame)
         if let window {
+            window.setContentSize(panelSize)
             viewModel?.refresh()
             PanelPlacement.center(window, on: screen)
             dismissal.startMonitoring(panelWindow: window) { [weak window] in
@@ -106,7 +111,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
         hosting.view.appearance = NSAppearance(named: .darkAqua)
 
-        let root = NSView(frame: NSRect(origin: .zero, size: SettingsWindowMetrics.size))
+        let root = NSView(frame: NSRect(origin: .zero, size: panelSize))
         let background = GlassSurfaceFactory.makeCardBackground(
             cornerRadius: PanelCorner.radius(beforeMacOS27: 13),
             tint: NSColor(srgbRed: 28 / 255, green: 28 / 255, blue: 30 / 255, alpha: 0.86),
@@ -140,7 +145,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
-        window.setContentSize(SettingsWindowMetrics.size)
+        window.setContentSize(panelSize)
         window.isReleasedWhenClosed = false
         window.delegate = self
         PanelPlacement.center(window, on: screen)

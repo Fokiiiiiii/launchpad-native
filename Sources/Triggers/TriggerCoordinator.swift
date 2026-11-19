@@ -73,6 +73,29 @@ public final class TriggerCoordinator {
     /// Returns `nil` when the requested transition cannot have a complete
     /// restore point (for example, an unsupported finger count or a partial
     /// point that would need restoring).
+
+    private func prepareFiveFingerRestorePoint(_ backup: GestureConflictBackup) -> GestureConflictBackup {
+        guard backup.fingerCount == 5, let applied = backup.appliedKeys else { return backup }
+        var result = backup
+        var counts = backup.valuesByFingerCount ?? [:]
+        var planned = Set(applied)
+        for count in [4, 5] {
+            guard let key = ConflictingGestureManager.PinchKey(fingerCount: count) else { continue }
+            var values = counts[count] ?? [:]
+            for domain in ConflictingGestureManager.domains {
+                let id = ConflictingGestureManager.appliedKeyID(domain: domain, key: key.rawValue)
+                if !planned.contains(id) {
+                    values[domain] = .some(trackpadPreferenceStore.integerValue(forKey: key.rawValue, domain: domain))
+                    planned.insert(id)
+                }
+            }
+            counts[count] = values
+        }
+        result.valuesByFingerCount = counts
+        result.appliedKeys = planned.sorted()
+        return result
+    }
+
     public func prepareRestorePoint(for settings: TriggerSettings) -> TriggerSettings? {
         let existingBackup = activeGestureConflictBackup ?? settings.gestureConflictBackup
 
@@ -88,6 +111,9 @@ public final class TriggerCoordinator {
                 prepared.gestureConflictBackup = needsUpgrade
                     ? upgradedRestorePoint(existingBackup, fingerCount: settings.multitouchFingerCount)
                     : existingBackup
+                if let backup = prepared.gestureConflictBackup {
+                    prepared.gestureConflictBackup = prepareFiveFingerRestorePoint(backup)
+                }
                 return prepared
             }
 
@@ -98,7 +124,9 @@ public final class TriggerCoordinator {
                 return nil
             }
             var prepared = settings
-            prepared.gestureConflictBackup = captured
+            var backup = captured
+            if settings.multitouchFingerCount == 5 { backup.appliedKeys = [] }
+            prepared.gestureConflictBackup = prepareFiveFingerRestorePoint(backup)
             return prepared
         }
 
@@ -151,7 +179,7 @@ public final class TriggerCoordinator {
             fingerCount: backup.fingerCount,
             store: trackpadPreferenceStore,
             preserving: backup,
-            disableBothFingerCounts: false,
+            disableBothFingerCounts: backup.fingerCount == 5,
             disableRelatedNavigation: false
         ) {
         case .succeeded(let refreshed):
@@ -213,8 +241,8 @@ public final class TriggerCoordinator {
         // legacy Boolean can never leave the standard gesture owning input.
         let conflictPreventionEnabled = settings.multitouchGestureEnabled
 
-        if activeGestureConflictBackup == nil {
-            activeGestureConflictBackup = settings.gestureConflictBackup
+        if let preparedBackup = settings.gestureConflictBackup {
+            activeGestureConflictBackup = preparedBackup
         }
         let existingBackup = activeGestureConflictBackup ?? settings.gestureConflictBackup
         var gestureConflictUpdate: TriggerActivationReport.GestureConflictUpdate = .unchanged
@@ -234,7 +262,7 @@ public final class TriggerCoordinator {
                     fingerCount: settings.multitouchFingerCount,
                     store: trackpadPreferenceStore,
                     preserving: existingBackup,
-                    disableBothFingerCounts: false,
+                    disableBothFingerCounts: settings.multitouchFingerCount == 5,
                     disableRelatedNavigation: false
                 ) {
                 case .succeeded(let backup):
@@ -271,7 +299,7 @@ public final class TriggerCoordinator {
             switch ConflictingGestureManager.disableVerified(
                 fingerCount: fingerCount,
                 store: trackpadPreferenceStore,
-                disableBothFingerCounts: false,
+                disableBothFingerCounts: settings.multitouchFingerCount == 5,
                 disableRelatedNavigation: false
             ) {
             case .succeeded(let newBackup):

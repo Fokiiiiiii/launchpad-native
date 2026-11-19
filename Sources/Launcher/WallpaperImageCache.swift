@@ -8,6 +8,8 @@ import ImageIO
 import UniformTypeIdentifiers
 import Darwin
 
+import Catalog
+import CLaunchpadCore
 enum WallpaperSourceKind: String, Equatable, Hashable, Sendable {
     case windowCapture
     case staticImage
@@ -315,8 +317,8 @@ enum SystemWallpaperStore {
         defaultProviderResources.appendingPathComponent(prefersDark ? "TahoeDark.heic" : "TahoeLight.heic")
     }
 
-    static func load() -> [String: Any]? {
-        guard let data = try? Data(contentsOf: storeURL) else { return nil }
+    static func load(from url: URL = storeURL) -> [String: Any]? {
+        guard let data = RustFileIO.read(url) else { return nil }
         return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
     }
 
@@ -466,6 +468,10 @@ enum SystemWallpaperStore {
 /// choice is made, so the link whose file was read most recently is the one on
 /// the desktop. A choice made long ago on a volume that does not update access
 /// times can be wrong; that is the limit of what the system exposes.
+
+private final class PhotoLinkBuffer {
+    var links: [(name: String, target: String)] = []
+}
 enum UserAddedPhotos {
     static var directory: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -473,6 +479,36 @@ enum UserAddedPhotos {
     }
 
     static func currentPhotoURL(in directory: URL = UserAddedPhotos.directory) -> URL? {
+        let output = PhotoLinkBuffer()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt, UnsafePointer<UInt8>?, UInt) -> Void = { context, name, nameCount, target, targetCount in
+            guard let context, let name, let target, let n = Int(exactly: nameCount), let t = Int(exactly: targetCount) else { return }
+            let output = Unmanaged<PhotoLinkBuffer>.fromOpaque(context).takeUnretainedValue()
+            output.links.append((
+                String(decoding: UnsafeBufferPointer(start: name, count: n), as: UTF8.self),
+                String(decoding: UnsafeBufferPointer(start: target, count: t), as: UTF8.self)
+            ))
+        }
+        let status = directory.withUnsafeFileSystemRepresentation { path in
+            launchpad_photo_links(path, Unmanaged.passUnretained(output).toOpaque(), callback)
+        }
+        guard status == 1 else { return currentPhotoURLFallback(in: directory) }
+        var best: (url: URL, read: Date)?
+        for link in output.links.sorted(by: { $0.name < $1.name }) {
+            let target = URL(fileURLWithPath: link.target, relativeTo: directory).standardizedFileURL
+            guard SystemWallpaperStore.isWallpaperMedia(target) else { continue }
+            var seconds: Double = 0
+            let found = target.withUnsafeFileSystemRepresentation { path in launchpad_access_time(path, &seconds) }
+            let read: Date?
+            if found == 1 { read = Date(timeIntervalSince1970: seconds) }
+            else { read = try? target.resourceValues(forKeys: [.contentAccessDateKey]).contentAccessDate }
+            guard let read else { continue }
+            if let current = best, !(current.read < read) { continue }
+            best = (target, read)
+        }
+        return best?.url
+    }
+
+    private static func currentPhotoURLFallback(in directory: URL) -> URL? {
         let fileManager = FileManager.default
         guard let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else { return nil }
         return names.sorted()
@@ -506,12 +542,24 @@ enum AerialArtwork {
     }
 
     /// The `assets` of the manifest the wallpaper agent keeps next to the files.
-    static func loadAssets() -> [[String: Any]]? {
-        let url = directory.appendingPathComponent("manifest/entries.json")
-        guard let data = try? Data(contentsOf: url),
-              let manifest = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            return nil
+    static func loadAssets(from url: URL? = nil) -> [[String: Any]]? {
+        let url = url ?? directory.appendingPathComponent("manifest/entries.json")
+        var projection: Data?
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt) -> Void = { context, bytes, count in
+            guard let context, let bytes, let length = Int(exactly: count) else { return }
+            context.assumingMemoryBound(to: Optional<Data>.self).pointee = Data(bytes: bytes, count: length)
         }
+        let status = withUnsafeMutablePointer(to: &projection) { destination in
+            url.withUnsafeFileSystemRepresentation { path in
+                launchpad_aerial_assets(path, destination, callback)
+            }
+        }
+        if status == 1, let projection,
+           let assets = (try? JSONSerialization.jsonObject(with: projection)) as? [[String: Any]] {
+            return assets
+        }
+        guard let data = RustFileIO.read(url),
+              let manifest = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
         return manifest["assets"] as? [[String: Any]]
     }
 

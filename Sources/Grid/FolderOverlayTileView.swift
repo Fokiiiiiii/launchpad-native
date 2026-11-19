@@ -68,6 +68,7 @@ struct FolderOverlayTileView: View {
     /// rounded plate behind the icon and label, the same idea as the grid's
     /// own selection tile.
     let isSelected: Bool
+    let showsName: Bool
 
     @State private var hovering = false
 
@@ -77,13 +78,15 @@ struct FolderOverlayTileView: View {
         Button(action: tile.onLaunch) {
             VStack(spacing: 9) {
                 icon
-                Text(tile.name)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.white.opacity(0.94))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .shadow(color: .black.opacity(0.6), radius: 3, y: 1)
-                    .frame(maxWidth: iconSize + 56)
+                if showsName {
+                    Text(tile.name)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.white.opacity(0.94))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .shadow(color: .black.opacity(0.6), radius: 3, y: 1)
+                        .frame(maxWidth: iconSize + 56)
+                }
             }
             .padding(.top, 6)
             .background(
@@ -95,6 +98,7 @@ struct FolderOverlayTileView: View {
             .animation(tileSnappy, value: isSelected)
             .contentShape(Rectangle())
         }
+        .accessibilityLabel(Text(tile.name))
         .buttonStyle(TileButtonStyle(hovering: hovering))
         .onHover { hovering = $0 }
         .opacity(isDragging ? 0.35 : 1)
@@ -149,6 +153,7 @@ struct FolderOverlayTileView: View {
 /// side needing to know about the other's framework.
 final class FolderOverlayGridModel: ObservableObject {
     @Published var tiles: [FolderOverlayTile] = []
+    @Published var showsNames = true
     /// id of the tile currently mid-drag, or `nil` between drags. Set
     /// synchronously inside the source tile's own `.onDrag` closure —
     /// SwiftUI calls that closure on the main thread the instant a drag
@@ -183,7 +188,8 @@ struct FolderOverlayGridContent: View {
                     tile: tile,
                     iconSize: iconSize,
                     isDragging: tile.id == model.draggingID,
-                    isSelected: tile.id == model.selectedID
+                    isSelected: tile.id == model.selectedID,
+                    showsName: model.showsNames
                 )
             }
         }

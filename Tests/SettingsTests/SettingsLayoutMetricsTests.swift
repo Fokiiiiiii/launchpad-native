@@ -4,11 +4,17 @@ import Foundation
 import Testing
 @testable import Settings
 
-@Test("settings window stays close to the compact design reference")
+@Test("settings window has larger controls")
 func settingsWindowUsesCompactMetrics() {
-    #expect(SettingsWindowMetrics.width == 360)
-    #expect(SettingsWindowMetrics.height == 480)
-    #expect(SettingsWindowMetrics.size == CGSize(width: 360, height: 480))
+    #expect(SettingsWindowMetrics.width == 440)
+    #expect(SettingsWindowMetrics.height == 590)
+    #expect(SettingsWindowMetrics.size == CGSize(width: 440, height: 590))
+}
+
+@Test func settingsWindowFitsSmallDisplays() {
+    #expect(SettingsWindowMetrics.size(fitting: CGRect(x: 0, y: 0, width: 1280, height: 560)) == CGSize(width: 440, height: 536))
+    #expect(SettingsWindowMetrics.size(fitting: CGRect(x: 0, y: 0, width: 400, height: 1000)) == CGSize(width: 376, height: 590))
+    #expect(SettingsWindowMetrics.size(fitting: nil) == CGSize(width: 440, height: 590))
 }
 
 @Test @MainActor func commandWClosesBorderlessSettingsWindows() {

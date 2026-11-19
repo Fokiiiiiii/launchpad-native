@@ -9,6 +9,9 @@ import Foundation
 /// the catalog changes instead, which is orders of magnitude less often.
 struct SearchableApplication {
     let record: ApplicationRecord
+    let rustFields: Data
+    let rustSearchSafe: Bool
+    let rustGraphemes: [Data?]?
     /// Lowercased and diacritic-folded, so "Café" is reachable as "cafe".
     let name: String
     let originalName: String
@@ -52,6 +55,31 @@ struct SearchableApplication {
         let readingWords = Self.words(in: reading)
         self.latinReadingWords = readingWords
         self.latinReadingInitials = String(readingWords.compactMap(\.first))
+        let names = [self.name, self.originalName, self.latinReading, self.alias]
+        if names.allSatisfy({ $0.utf8.allSatisfy { $0 < 0x80 } }) {
+            rustGraphemes = nil
+        } else {
+            let primary = AppSearchMatcher.graphemeTokens(self.name)
+            let original = self.originalName == self.name ? primary : AppSearchMatcher.graphemeTokens(self.originalName)
+            rustGraphemes = [primary, original, self.latinReading.isEmpty ? nil : AppSearchMatcher.graphemeTokens(self.latinReading), self.alias.isEmpty ? nil : AppSearchMatcher.graphemeTokens(self.alias)]
+        }
+        let searchSafe = [self.name, self.originalName, self.alias, self.latinReading, self.latinReadingInitials, self.initials, self.bundleIdentifier, self.fileName, self.category].allSatisfy { $0.count == $0.unicodeScalars.count }
+        rustSearchSafe = searchSafe
+        if searchSafe {
+            var fields = Data()
+            for field in [self.name, self.originalName, self.alias, self.latinReading,
+                          self.latinReadingInitials, self.initials, self.bundleIdentifier,
+                          self.fileName, self.category, self.words.joined(separator: "\0"),
+                          self.latinReadingWords.joined(separator: "\0")] {
+                let bytes = field.utf8
+                var length = UInt32(clamping: bytes.count).littleEndian
+                withUnsafeBytes(of: &length) { fields.append(contentsOf: $0) }
+                fields.append(contentsOf: bytes)
+            }
+            self.rustFields = fields
+        } else {
+            self.rustFields = Data()
+        }
     }
 
     /// Case and diacritics are noise for matching: someone typing quickly will

@@ -76,6 +76,25 @@ public final class SettingsViewModel: ObservableObject {
     private var isEditingGlassMaterial = false
 
     @Published public var selectedTab: SettingsTab = .general
+
+    @Published public var labelVisible: Bool {
+        didSet {
+            guard labelVisible != oldValue, !isRefreshing else { return }
+            applyGridDimensions()
+            persistGrid()
+        }
+    }
+
+    @Published public var windowed: Bool {
+        didSet {
+            guard windowed != oldValue, !isRefreshing else { return }
+            var grid = model.gridSettings
+            grid.windowed = windowed
+            model.updateGridSettings(grid)
+            persistGrid()
+        }
+    }
+
     @Published public var columns: Int {
         didSet {
             guard columns != oldValue else { return }
@@ -150,6 +169,33 @@ public final class SettingsViewModel: ObservableObject {
             persist()
         }
     }
+
+
+
+    @Published public var screenTarget: LauncherScreenTarget {
+        didSet {
+            guard screenTarget != oldValue, !isRefreshing else { return }
+            model.setScreenTarget(screenTarget)
+            persist()
+        }
+    }
+
+    @Published public var closeOnBackgroundClick: Bool {
+        didSet {
+            guard closeOnBackgroundClick != oldValue, !isRefreshing else { return }
+            model.setCloseOnBackgroundClick(closeOnBackgroundClick)
+            persist()
+        }
+    }
+
+    @Published public var returnToFirstPage: Bool {
+        didSet {
+            guard returnToFirstPage != oldValue, !isRefreshing else { return }
+            model.setReturnToFirstPage(returnToFirstPage)
+            persist()
+        }
+    }
+
     @Published public var hideDockWhileLauncherOpen: Bool {
         didSet {
             guard hideDockWhileLauncherOpen != oldValue else { return }
@@ -248,6 +294,18 @@ public final class SettingsViewModel: ObservableObject {
             }
         }
     }
+
+    private var isEditingWallpaperBlur = false
+
+    @Published public var wallpaperBlurRadius: Double {
+        didSet {
+            guard wallpaperBlurRadius != oldValue, !isRefreshing else { return }
+            model.setWallpaperBlurRadius(wallpaperBlurRadius)
+            onBackgroundSettingsChanged()
+            if !isEditingWallpaperBlur { persistBackgroundSettings() }
+        }
+    }
+
     @Published public var blursWallpaper: Bool {
         didSet {
             guard blursWallpaper != oldValue else { return }
@@ -383,6 +441,8 @@ public final class SettingsViewModel: ObservableObject {
 
         let grid = model.gridSettings
         columns = grid.columns
+        labelVisible = grid.labelVisible
+        windowed = grid.windowed
         rows = grid.rows
         horizontalSpacing = grid.horizontalSpacing
         verticalSpacing = grid.verticalSpacing
@@ -395,6 +455,9 @@ public final class SettingsViewModel: ObservableObject {
         }
         sortMode = grid.sortMode
         hideDockWhileLauncherOpen = model.hideDockWhileLauncherOpen
+        returnToFirstPage = model.returnToFirstPage
+        closeOnBackgroundClick = model.closeOnBackgroundClick
+        screenTarget = model.screenTarget
         appIconStyle = model.appIconStyle
         menuIconVisibility = model.menuIconVisibility
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
@@ -404,6 +467,7 @@ public final class SettingsViewModel: ObservableObject {
         backgroundMode = model.backgroundMode
         glassMaterialIntensity = model.glassMaterialIntensity
         blursWallpaper = model.blursWallpaper
+        wallpaperBlurRadius = model.wallpaperBlurRadius
 
         let triggers = model.triggerSettings
         f4Enabled = triggers.f4Enabled
@@ -429,6 +493,7 @@ public final class SettingsViewModel: ObservableObject {
     private func applyGridDimensions() {
         var grid = model.gridSettings
         grid.columns = columns
+        grid.labelVisible = labelVisible
         grid.rows = rows
         grid.horizontalSpacing = horizontalSpacing
         grid.verticalSpacing = verticalSpacing
@@ -478,6 +543,8 @@ public final class SettingsViewModel: ObservableObject {
     public func resetGridLayout() {
         var grid = GridSettings.default
         grid.sortMode = model.gridSettings.sortMode
+        grid.labelVisible = model.gridSettings.labelVisible
+        grid.windowed = model.gridSettings.windowed
         model.updateGridSettings(grid)
 
         isRefreshing = true
@@ -661,12 +728,40 @@ public final class SettingsViewModel: ObservableObject {
         persist()
     }
 
+
+    func exportLayoutBackup(to url: URL) async throws {
+        try await model.exportLayoutBackup(to: url)
+    }
+
+    func restoreLayoutBackup(from url: URL) async throws {
+        try await model.restoreLayoutBackup(from: url)
+        isRefreshing = true
+        defer { isRefreshing = false }
+        let grid = model.gridSettings
+        columns = grid.columns
+        labelVisible = grid.labelVisible
+        windowed = grid.windowed
+        rows = grid.rows
+        horizontalSpacing = grid.horizontalSpacing
+        verticalSpacing = grid.verticalSpacing
+        pageMargins = grid.pageMargins
+        iconScale = grid.iconScale
+        iconScalePreset = GridIconScalePreset.matching(grid)
+        sortMode = grid.sortMode
+        hiddenApps = model.hiddenApplicationIdentifiers.compactMap { identifier in
+            guard let record = model.record(for: identifier) else { return nil }
+            return (identifier, model.displayName(for: record))
+        }
+    }
+
     public func refresh() {
         isRefreshing = true
         defer { isRefreshing = false }
 
         let grid = model.gridSettings
         columns = grid.columns
+        labelVisible = grid.labelVisible
+        windowed = grid.windowed
         rows = grid.rows
         horizontalSpacing = grid.horizontalSpacing
         verticalSpacing = grid.verticalSpacing
@@ -677,6 +772,9 @@ public final class SettingsViewModel: ObservableObject {
         layoutMode = model.layoutMode == .verticalScroll ? .paged : model.layoutMode
         sortMode = grid.sortMode
         hideDockWhileLauncherOpen = model.hideDockWhileLauncherOpen
+        returnToFirstPage = model.returnToFirstPage
+        closeOnBackgroundClick = model.closeOnBackgroundClick
+        screenTarget = model.screenTarget
         appIconStyle = model.appIconStyle
         menuIconVisibility = model.menuIconVisibility
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
@@ -686,6 +784,7 @@ public final class SettingsViewModel: ObservableObject {
         backgroundMode = model.backgroundMode
         glassMaterialIntensity = model.glassMaterialIntensity
         blursWallpaper = model.blursWallpaper
+        wallpaperBlurRadius = model.wallpaperBlurRadius
 
         // An edit still waiting to be applied, or being applied, is newer than the
         // model: reading the model back over the controls would drop it, and
@@ -745,6 +844,11 @@ public final class SettingsViewModel: ObservableObject {
         if !editing {
             persistBackgroundSettings()
         }
+    }
+
+    func setWallpaperBlurEditing(_ editing: Bool) {
+        isEditingWallpaperBlur = editing
+        if !editing { persistBackgroundSettings() }
     }
 
     private func persist() {

@@ -6,6 +6,9 @@ import Testing
 import UniformTypeIdentifiers
 @testable import Launcher
 
+import Catalog
+import Darwin
+
 @Test
 func resolverPrefersUsableStaticDesktopImage() {
     let desktopURL = URL(fileURLWithPath: "/tmp/current-wallpaper.jpg")
@@ -303,6 +306,101 @@ func storeFallsBackToItsStoreWideEntriesOnlyWhenNothingIsRecordedForTheDisplay()
 func defaultProviderArtworkFollowsTheAppearance() {
     #expect(SystemWallpaperStore.defaultProviderArtwork(prefersDark: true).lastPathComponent == "TahoeDark.heic")
     #expect(SystemWallpaperStore.defaultProviderArtwork(prefersDark: false).lastPathComponent == "TahoeLight.heic")
+}
+
+@Test func wallpaperMetadataLoadsThroughRustFileReader() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let plistURL = root.appendingPathComponent("Index.plist")
+    let manifestURL = root.appendingPathComponent("entries.json")
+    let plist = try PropertyListSerialization.data(fromPropertyList: ["version": 7, "name": "日本"], format: .binary, options: 0)
+    try plist.write(to: plistURL)
+    try Data("{\"assets\":[{\"id\":\"sample\"}]}".utf8).write(to: manifestURL)
+    #expect(SystemWallpaperStore.load(from: plistURL)?["name"] as? String == "日本")
+    #expect(AerialArtwork.loadAssets(from: manifestURL)?.first?["id"] as? String == "sample")
+    try Data("broken".utf8).write(to: manifestURL)
+    #expect(AerialArtwork.loadAssets(from: manifestURL) == nil)
+    #expect(SystemWallpaperStore.load(from: root.appendingPathComponent("missing")) == nil)
+}
+
+@Test func aerialProjectionPreservesArtworkSelection() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = root.appendingPathComponent("entries.json")
+    let json = """
+    {"ignored":{"large":[1,2,3]},"assets":[
+      {"id":"first","subcategories":["group"],"variant":{"appearance":"dark","orientation":"portrait","other":"ignored"},"unused":[1,2,3]},
+      {"id":"second","subcategories":["group"],"variant":{"appearance":"light","orientation":"landscape"}},
+      {"id":"group","subcategories":[1],"variant":false}
+    ]}
+    """
+    let data = Data(json.utf8)
+    try data.write(to: url)
+    let legacy = try #require((JSONSerialization.jsonObject(with: data) as? [String: Any])?["assets"] as? [[String: Any]])
+    let projected = try #require(AerialArtwork.loadAssets(from: url))
+    #expect(projected.first?["unused"] == nil)
+    for dark in [false, true] {
+        for landscape in [false, true] {
+            for available in [["videos/first.mov"], ["thumbnails/second.png"], ["videos/group.mov"], []] {
+                let find: (URL) -> Bool = { candidate in available.contains { candidate.path.hasSuffix($0) } }
+                let original = AerialArtwork.artworkURL(assetID: "group", assets: legacy, prefersDark: dark, isLandscape: landscape, in: root, fileExists: find)
+                let actual = AerialArtwork.artworkURL(assetID: "group", assets: projected, prefersDark: dark, isLandscape: landscape, in: root, fileExists: find)
+                #expect(actual == original)
+            }
+        }
+    }
+    let utf16 = try #require(json.data(using: .utf16))
+    try utf16.write(to: url)
+    #expect(AerialArtwork.loadAssets(from: url)?.count == legacy.count)
+    try Data("{\"assets\":[] ,\"assets\":[{\"id\":\"duplicate\"}]}".utf8).write(to: url)
+    let duplicateLegacy = (try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])?["assets"] as? [[String: Any]]
+    #expect(AerialArtwork.loadAssets(from: url)?.count == duplicateLegacy?.count)
+    try Data("{\"assets\":[1]}".utf8).write(to: url)
+    #expect(AerialArtwork.loadAssets(from: url) == nil)
+    try Data(#"{"assets":[{"id":"a","unused":"\uD800"}]}"#.utf8).write(to: url)
+    #expect(AerialArtwork.loadAssets(from: url) == nil)
+}
+
+
+
+
+
+@Test func benchmarkAerialManifestMemory() throws {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1" else { return }
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = root.appendingPathComponent("manifest.json")
+    #expect(FileManager.default.createFile(atPath: url.path, contents: nil))
+    let file = try FileHandle(forWritingTo: url)
+    try file.write(contentsOf: Data("{\"assets\":[".utf8))
+    let payload = String(repeating: "x", count: 2048)
+    for index in 0..<4096 {
+        let json = "\(index == 0 ? "" : ","){\"id\":\"item\(index)\",\"variant\":{\"appearance\":\"dark\"},\"unused\":\"\(payload)\"}"
+        try file.write(contentsOf: Data(json.utf8))
+    }
+    try file.write(contentsOf: Data("]}".utf8))
+    try file.close()
+    let useRust = ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_MODE"] == "aerial-rust"
+    func peak() -> Int {
+        var usage = rusage()
+        _ = getrusage(RUSAGE_SELF, &usage)
+        return usage.ru_maxrss
+    }
+    let baseline = peak()
+    let start = DispatchTime.now().uptimeNanoseconds
+    for _ in 0..<3 {
+        let count: Int = try autoreleasepool {
+            if useRust { return try #require(AerialArtwork.loadAssets(from: url)).count }
+            let data = try #require(RustFileIO.read(url))
+            let manifest = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            return try #require(manifest["assets"] as? [[String: Any]]).count
+        }
+        #expect(count == 4096)
+    }
+    print("MEMORY_BENCH scenario=aerial-\(useRust ? "rust" : "swift") items=4096 baseline_bytes=\(baseline) peak_bytes=\(peak()) elapsed_ns=\(DispatchTime.now().uptimeNanoseconds - start)")
 }
 
 /// The configured Aerial is the last file resort because it can outlive the
@@ -687,6 +785,73 @@ func addedPhotosWhoseFileIsGoneOrIsNotAPictureAreIgnored() throws {
     defer { try? FileManager.default.removeItem(at: root) }
 
     #expect(UserAddedPhotos.currentPhotoURL(in: links)?.lastPathComponent == "only.png")
+}
+
+@Test func addedPhotosRustMatchesFoundationForTiesAndRelativeLinks() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let links = root.appendingPathComponent("links", isDirectory: true)
+    try FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
+    for name in ["a.png", "b.jpg", "notes.txt"] {
+        let file = root.appendingPathComponent(name)
+        try Data([0]).write(to: file)
+        var times = [timeval(tv_sec: 1_000_000, tv_usec: 123_456), timeval(tv_sec: 1_000_000, tv_usec: 123_456)]
+        #expect(utimes(file.path, &times) == 0)
+        try FileManager.default.createSymbolicLink(atPath: links.appendingPathComponent(name).path, withDestinationPath: "../\(name)")
+    }
+    try FileManager.default.createSymbolicLink(atPath: links.appendingPathComponent("broken.jpg").path, withDestinationPath: "../missing.jpg")
+    try Data().write(to: links.appendingPathComponent("plain.png"))
+    let fm = FileManager.default
+    let reference = try fm.contentsOfDirectory(atPath: links.path).sorted().compactMap { name -> (URL, Date)? in
+        guard let destination = try? fm.destinationOfSymbolicLink(atPath: links.appendingPathComponent(name).path) else { return nil }
+        let target = URL(fileURLWithPath: destination, relativeTo: links).standardizedFileURL
+        guard SystemWallpaperStore.isWallpaperMedia(target),
+              let date = try? target.resourceValues(forKeys: [.contentAccessDateKey]).contentAccessDate else { return nil }
+        return (target, date)
+    }.max { $0.1 < $1.1 }?.0
+    #expect(UserAddedPhotos.currentPhotoURL(in: links) == reference)
+}
+
+@Test func addedPhotosKeepsUnicodeNamesAndPreEpochAccessDates() throws {
+    let (links, root) = try addedPhotos([("古い.png", -2_000_000), ("新しい.png", -1_000_000)])
+    defer { try? FileManager.default.removeItem(at: root) }
+    #expect(UserAddedPhotos.currentPhotoURL(in: links)?.lastPathComponent == "新しい.png")
+}
+
+@Test func benchmarkAddedPhotosMemory() throws {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1",
+          let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_MODE"] else { return }
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let links = root.appendingPathComponent("links", isDirectory: true)
+    try FileManager.default.createDirectory(at: links, withIntermediateDirectories: true)
+    let photo = root.appendingPathComponent("photo.png")
+    try Data([0]).write(to: photo)
+    for index in 0..<1024 {
+        try FileManager.default.createSymbolicLink(atPath: links.appendingPathComponent("link\(index)").path, withDestinationPath: "../photo.png")
+    }
+    func peak() -> Int { var usage = rusage(); _ = getrusage(RUSAGE_SELF, &usage); return usage.ru_maxrss }
+    let baseline = peak()
+    let start = DispatchTime.now().uptimeNanoseconds
+    var chosen: URL?
+    for _ in 0..<3 {
+        if mode == "photos-rust" {
+            chosen = UserAddedPhotos.currentPhotoURL(in: links)
+        } else if mode == "photos-swift" {
+            let fm = FileManager.default
+            chosen = try fm.contentsOfDirectory(atPath: links.path).sorted().compactMap { name -> (URL, Date)? in
+                guard let destination = try? fm.destinationOfSymbolicLink(atPath: links.appendingPathComponent(name).path) else { return nil }
+                let target = URL(fileURLWithPath: destination, relativeTo: links).standardizedFileURL
+                guard SystemWallpaperStore.isWallpaperMedia(target),
+                      let date = try? target.resourceValues(forKeys: [.contentAccessDateKey]).contentAccessDate else { return nil }
+                return (target, date)
+            }.max { $0.1 < $1.1 }?.0
+        } else { return }
+    }
+    let elapsed = DispatchTime.now().uptimeNanoseconds - start
+    let measuredPeak = peak()
+    #expect(chosen?.lastPathComponent == "photo.png")
+    print("MEMORY_BENCH scenario=photos mode=\(mode) items=1024 baseline_bytes=\(baseline) peak_bytes=\(measuredPeak) elapsed_ns=\(elapsed)")
 }
 
 @Test

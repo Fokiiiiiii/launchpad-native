@@ -156,9 +156,18 @@ private final class NeighborPageDataSource: NSObject, NSCollectionViewDataSource
         switch items[indexPath.item] {
         case .app(let id):
             guard let record = model.record(for: id) else { return cell }
-            let icon = iconCache.cachedIconIfAvailable(for: record) ?? NSImage()
+            let cached = iconCache.cachedIconIfAvailable(for: record)
             let displayName = model.displayName(for: record)
-            cell.configureAsApp(record: record, icon: icon, isSelected: false, iconSize: iconSize, visualScale: visualScale, displayName: displayName)
+            cell.configureAsApp(record: record, icon: cached ?? GridCellItem.loadingIcon, isSelected: false, iconSize: iconSize, visualScale: visualScale, displayName: displayName, showsLabel: model.gridSettings.labelVisible)
+            if cached == nil {
+                let cache = iconCache
+                let expectedKey = record.iconCacheKey
+                cell.setIconLoadTask(Task { @MainActor [weak cell] in
+                    let icon = await cache.icon(for: record)
+                    guard !Task.isCancelled, let cell, cell.currentRequestKey == expectedKey else { return }
+                    cell.setIcon(icon)
+                })
+            }
         case .folder(let folderID):
             let folder = model.folders[folderID]
             let name = folder?.name ?? L10n.defaultFolderName
@@ -167,8 +176,22 @@ private final class NeighborPageDataSource: NSObject, NSCollectionViewDataSource
                 guard case .app(let id) = item else { return nil }
                 return model.record(for: id)
             } ?? []
-            let icons = Array(records.prefix(9)).compactMap { iconCache.cachedIconIfAvailable(for: $0) }
-            cell.configureAsFolder(name: name, isSelected: false, iconSize: iconSize, visualScale: visualScale, icons: icons, requestKey: "folder:\(folderID.value)")
+            let previews = Array(records.prefix(9))
+            let icons = previews.compactMap { iconCache.cachedIconIfAvailable(for: $0) }
+            let key = "folder:\(folderID.value)"
+            cell.configureAsFolder(name: name, isSelected: false, iconSize: iconSize, visualScale: visualScale, icons: icons, requestKey: key, showsLabel: model.gridSettings.labelVisible)
+            if icons.count < previews.count {
+                let cache = iconCache
+                cell.setIconLoadTask(Task { @MainActor [weak cell] in
+                    var loaded: [NSImage] = []
+                    for record in previews {
+                        guard !Task.isCancelled, cell != nil else { return }
+                        loaded.append(await cache.icon(for: record))
+                    }
+                    guard !Task.isCancelled, let cell, cell.currentRequestKey == key else { return }
+                    cell.setFolderIcons(loaded)
+                })
+            }
         }
         // Layer opacity, the way the live grid hides the dragged item's cell.
         cell.view.wantsLayer = true

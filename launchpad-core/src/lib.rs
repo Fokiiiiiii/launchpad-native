@@ -1,112 +1,71 @@
-use std::ffi::CStr;
-use std::fs;
-use std::os::raw::c_char;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::MetadataExt;
-use std::path::Path;
+#[cfg(test)] use std::ffi::CStr;
+#[cfg(test)] use std::fs;
+#[cfg(test)] use std::os::raw::c_char;
+#[cfg(test)] use std::os::unix::ffi::OsStrExt;
+#[cfg(test)] use std::os::unix::fs::MetadataExt;
 
-fn disk_usage(path: &Path) -> i64 {
-    let Ok(root) = fs::metadata(path) else { return 0 };
-    if !root.is_dir() {
-        return fs::symlink_metadata(path)
-            .map(|metadata| metadata.len().min(i64::MAX as u64) as i64)
-            .unwrap_or(0);
-    }
-    let mut directories = vec![path.to_path_buf()];
-    let mut total = 0_i64;
-    while let Some(directory) = directories.pop() {
-        let Ok(entries) = fs::read_dir(directory) else { continue };
-        for entry in entries.flatten() {
-            let Ok(metadata) = fs::symlink_metadata(entry.path()) else { continue };
-            if metadata.is_dir() {
-                directories.push(entry.path());
-            } else {
-                total = total.saturating_add(metadata.blocks().saturating_mul(512).min(i64::MAX as u64) as i64);
-            }
-        }
-    }
-    total
-}
+#[path = "fs.rs"]
+mod fs_ops;
 
-/// The caller supplies a valid, NUL-terminated filesystem path for this call.
-#[no_mangle]
-pub unsafe extern "C" fn launchpad_disk_usage(path: *const c_char) -> i64 {
-    if path.is_null() { return 0; }
-    let path = Path::new(std::ffi::OsStr::from_bytes(CStr::from_ptr(path).to_bytes()));
-    disk_usage(path)
-}
+mod layout;
 
-/// The caller supplies a valid, NUL-terminated cache directory path.
-#[no_mangle]
-pub unsafe extern "C" fn launchpad_trim_icon_cache(path: *const c_char, budget: i64) {
-    use std::os::macos::fs::MetadataExt as MacMetadataExt;
-    if path.is_null() { return; }
-    let directory = Path::new(std::ffi::OsStr::from_bytes(CStr::from_ptr(path).to_bytes()));
-    let Ok(entries) = fs::read_dir(directory) else { return };
-    let mut files = Vec::new();
-    let mut total = 0_u64;
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name = name.as_bytes();
-        if name.starts_with(b".") || !name.ends_with(b".png") { continue; }
-        let Ok(metadata) = fs::symlink_metadata(entry.path()) else { continue };
-        if metadata.st_flags() & 0x8000 != 0 || (!metadata.is_file() && !metadata.file_type().is_symlink()) { continue; }
-        total = total.saturating_add(metadata.len());
-        files.push((metadata.modified().ok(), entry.path(), metadata.len()));
-    }
-    files.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
-    for (_, file, size) in files {
-        if budget >= 0 && total <= budget as u64 { break; }
-        if fs::remove_file(file).is_ok() { total = total.saturating_sub(size); }
-    }
-}
+mod json;
 
-/// Reports app paths (kind 0) and unreadable directories (kind 1) synchronously.
-#[no_mangle]
-pub unsafe extern "C" fn launchpad_scan_apps(
-    path: *const c_char,
-    recursive: i32,
-    context: *mut std::ffi::c_void,
-    callback: Option<unsafe extern "C" fn(*mut std::ffi::c_void, *const c_char, i32)>,
-) -> i32 {
-    use std::ffi::CString;
-    use std::os::macos::fs::MetadataExt as MacMetadataExt;
-    if path.is_null() { return 0; }
-    let Some(callback) = callback else { return 0 };
-    let root = Path::new(std::ffi::OsStr::from_bytes(CStr::from_ptr(path).to_bytes()));
-    let Ok(entries) = fs::read_dir(root) else { return 0 };
-    let mut stack = vec![(root.to_path_buf(), entries)];
-    while let Some((directory, entries)) = stack.last_mut() {
-        let entry = match entries.next() {
-            None => { stack.pop(); continue; }
-            Some(Ok(entry)) => entry,
-            Some(Err(_)) => {
-                if let Ok(path) = CString::new(directory.as_os_str().as_bytes()) { callback(context, path.as_ptr(), 1); }
-                continue;
-            }
-        };
-        let name = entry.file_name();
-        if name.as_bytes().starts_with(b".") { continue; }
-        let entry_path = entry.path();
-        let metadata = match fs::symlink_metadata(&entry_path) {
-            Ok(metadata) => metadata,
-            Err(_) => {
-                if let Ok(path) = CString::new(directory.as_os_str().as_bytes()) { callback(context, path.as_ptr(), 1); }
-                continue;
-            }
-        };
-        if metadata.st_flags() & 0x8000 != 0 { continue; }
-        if entry_path.extension().is_some_and(|ext| ext.as_bytes() == b"app") {
-            if let Ok(path) = CString::new(entry_path.as_os_str().as_bytes()) { callback(context, path.as_ptr(), 0); }
-        } else if recursive != 0 && metadata.is_dir() {
-            match fs::read_dir(&entry_path) {
-                Ok(children) => stack.push((entry_path, children)),
-                Err(_) => if let Ok(path) = CString::new(entry_path.as_os_str().as_bytes()) { callback(context, path.as_ptr(), 1); },
-            }
-        }
-    }
-    1
-}
+mod json_compact;
+pub use json_compact::*;
+
+mod json_parse;
+
+mod json_builder;
+pub use json_builder::*;
+pub use json::*;
+
+pub use layout::launchpad_layout_repack;
+
+pub use layout::launchpad_layout_move_one;
+pub use layout::launchpad_layout_reorder;
+
+pub use fs_ops::{launchpad_read_owned, launchpad_read_owned_free};
+
+pub use fs_ops::launchpad_write_cache_atomic;
+
+pub use fs_ops::watcher::{launchpad_watch_start, launchpad_watch_stop};
+mod disk_usage;
+mod search;
+
+pub use search::launchpad_match_graphemes;
+mod catalog;
+
+pub use catalog::reconcile::launchpad_merge_catalog;
+
+pub use catalog::reconcile::launchpad_order_records;
+
+pub use catalog::reconcile::launchpad_match_moved_apps;
+
+pub use catalog::snapshot::{launchpad_catalog_encode, launchpad_catalog_decode};
+
+pub use catalog::launchpad_catalog_fresh;
+mod cache_housekeeping;
+
+#[cfg(test)] pub(crate) use disk_usage::disk_usage;
+
+pub use disk_usage::launchpad_disk_usage;
+
+pub use catalog::launchpad_safe_identifier;
+
+pub use catalog::launchpad_classify_special_key;
+
+pub use fs_ops::launchpad_read_file;
+
+pub use fs_ops::launchpad_read_file_limited;
+
+pub use fs_ops::launchpad_write_file_atomic;
+
+pub use search::launchpad_search_tier;
+
+pub use cache_housekeeping::launchpad_trim_icon_cache;
+
+pub use catalog::launchpad_scan_apps;
 
 #[cfg(test)]
 mod tests {
@@ -175,5 +134,85 @@ mod tests {
         let missing = CString::new(base.join("missing").as_os_str().as_bytes()).unwrap();
         assert_eq!(unsafe { launchpad_scan_apps(missing.as_ptr(), 1, &mut results as *mut _ as *mut _, Some(collect)) }, 0);
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn identifiers_reject_unsafe_and_non_ascii_bytes() {
+        for value in [b"".as_slice(), b"..", b".hidden", b"a/b", b"x\0y", "日本".as_bytes()] {
+            assert_eq!(unsafe { launchpad_safe_identifier(value.as_ptr(), value.len()) }, 0);
+        }
+        let valid = b"com.example-App_1";
+        assert_eq!(unsafe { launchpad_safe_identifier(valid.as_ptr(), valid.len()) }, 1);
+        assert_eq!(unsafe { launchpad_safe_identifier(std::ptr::null(), 0) }, 0);
+        let too_long = [b'a'; 256];
+        assert_eq!(unsafe { launchpad_safe_identifier(too_long.as_ptr(), too_long.len()) }, 0);
+    }
+
+    #[test]
+    fn special_key_decoding_keeps_release_and_repeat_distinct() {
+        assert_eq!(launchpad_classify_special_key(7, 0), -1);
+        assert_eq!(launchpad_classify_special_key(8, (13 << 16) | 0x100), 13 | (1 << 16));
+        assert_eq!(launchpad_classify_special_key(8, (13 << 16) | 0x101), 13 | (1 << 16) | (1 << 17));
+        assert_eq!(launchpad_classify_special_key(8, (13 << 16) | 0x0a00), 13);
+    }
+
+    #[test]
+    fn file_reader_preserves_bytes_and_reports_missing_files() {
+        use std::ffi::CString;
+        unsafe extern "C" fn collect(context: *mut std::ffi::c_void, data: *const u8, len: usize) {
+            let result = &mut *(context as *mut Vec<u8>);
+            result.extend_from_slice(std::slice::from_raw_parts(data, len));
+        }
+        let base = std::env::temp_dir().join(format!("launchpad-read-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::write(&base, [0, 0xff, 1]).unwrap();
+        let path = CString::new(base.as_os_str().as_bytes()).unwrap();
+        let mut result: Vec<u8> = Vec::new();
+        assert_eq!(unsafe { launchpad_read_file(path.as_ptr(), &mut result as *mut _ as *mut _, Some(collect)) }, 0);
+        assert_eq!(result, [0, 0xff, 1]);
+        fs::remove_file(&base).unwrap();
+        assert_ne!(unsafe { launchpad_read_file(path.as_ptr(), &mut result as *mut _ as *mut _, Some(collect)) }, 0);
+    }
+
+    #[test]
+    fn bounded_reader_rejects_oversized_input() {
+        use std::ffi::CString;
+        unsafe extern "C" fn collect(context: *mut std::ffi::c_void, data: *const u8, len: usize) {
+            let result = &mut *(context as *mut Vec<u8>);
+            result.extend_from_slice(std::slice::from_raw_parts(data, len));
+        }
+        let base = std::env::temp_dir().join(format!("launchpad-limit-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::write(&base, b"abcd").unwrap();
+        let path = CString::new(base.as_os_str().as_bytes()).unwrap();
+        let mut result: Vec<u8> = Vec::new();
+        let context = &mut result as *mut _ as *mut _;
+        assert_eq!(unsafe { launchpad_read_file_limited(path.as_ptr(), 3, context, Some(collect)) }, 27);
+        assert!(result.is_empty());
+        assert_eq!(unsafe { launchpad_read_file_limited(path.as_ptr(), 4, context, Some(collect)) }, 0);
+        assert_eq!(result, b"abcd");
+        fs::remove_file(base).unwrap();
+    }
+
+    #[test]
+    fn atomic_write_replaces_content_and_reports_failure() {
+        use std::ffi::CString;
+        let base = std::env::temp_dir().join(format!("launchpad-write-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir(&base).unwrap();
+        let target = base.join("layout.json");
+        fs::write(&target, b"old").unwrap();
+        let path = CString::new(target.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { launchpad_write_file_atomic(path.as_ptr(), b"new".as_ptr(), 3) }, 0);
+        assert_eq!(fs::read(&target).unwrap(), b"new");
+        assert_eq!(unsafe { launchpad_write_cache_atomic(path.as_ptr(), b"cache".as_ptr(), 5) }, 0);
+        assert_eq!(fs::read(&target).unwrap(), b"cache");
+        let missing = CString::new(base.join("missing/layout.json").as_os_str().as_bytes()).unwrap();
+        assert_ne!(unsafe { launchpad_write_file_atomic(missing.as_ptr(), b"bad".as_ptr(), 3) }, 0);
+        assert_eq!(fs::read(&target).unwrap(), b"cache");
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn search_rejects_incomplete_input() {
+        let malformed = [7u8, 0, 0, 0, b'a'];
+        assert_eq!(unsafe { launchpad_search_tier(malformed.as_ptr(), malformed.len()) }, -1);
     }
 }

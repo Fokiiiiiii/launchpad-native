@@ -3,6 +3,8 @@ import Foundation
 import Testing
 @testable import Launcher
 
+import Darwin
+
 private func record(
     _ name: String,
     id: String,
@@ -290,4 +292,116 @@ private func record(
     let plain = SearchableApplication(record: record("Numbers", id: "com.apple.Numbers"))
     #expect(plain.alias.isEmpty)
     #expect(AppSearchMatcher.tier(for: SearchableApplication.fold("作業"), in: plain) == nil)
+}
+
+@Test func rustSearchMatchesExistingRanking() {
+    let apps = [
+        SearchableApplication(record: record("Visual Studio Code", id: "com.example.editor"), alias: "Work Notes"),
+        SearchableApplication(record: record("メモ", id: "com.example.notes"), originalName: "Notes"),
+        SearchableApplication(record: record("Café", id: "org.example.cafe")),
+        SearchableApplication(record: record("日本語 メモ", id: "org.example.japanese")),
+        SearchableApplication(record: record("가나다", id: "org.example.korean")),
+        SearchableApplication(record: record("👨‍👩‍👧 家族", id: "org.example.family"))
+    ]
+    for app in apps {
+        for query in ["visual studio code", "visual", "studio", "vsc", "studio code", "example",
+                      "work", "notes", "memo", "mem", "cafe", "cf", "zzz", "メモ", "日本", "本語", "가", "나다", "👨", "👨‍👩‍👧", "家族", "📌a", ""] {
+            #expect(AppSearchMatcher.tier(for: query, in: app) == AppSearchMatcher.fallbackTier(for: query, in: app))
+        }
+    }
+}
+
+@Test func rustGraphemeSubsequenceMatchesSwiftReference() {
+    let samples = ["日本語メモ", "がぎぐげご", "école", "e\u{301}cole", "👨‍👩‍👧 家族 １２３", "한글과 한국어", "a-b c", ""]
+    let queries = ["日語", "がご", "éco", "e\u{301}c", "家３", "한어", "abc", "---", ""]
+    for sample in samples {
+        for query in queries {
+            #expect(AppSearchMatcher.rustSubsequence(query, of: sample) == AppSearchMatcher.isSubsequence(query, of: sample))
+        }
+    }
+}
+
+@Test func searchIndexOnlyRetainsGraphemesWhenNeeded() {
+    let ascii = SearchableApplication(record: record("Calculator", id: "org.example.calculator"))
+    let japanese = SearchableApplication(record: record("日本語", id: "org.example.japanese"))
+    let complex = SearchableApplication(record: record("👨‍👩‍👧 Project", id: "org.example.complex"))
+    #expect(!complex.rustSearchSafe)
+    #expect(complex.rustFields.isEmpty)
+    #expect(!ascii.rustFields.isEmpty)
+    #expect(AppSearchMatcher.tier(for: "👨‍👩‍👧", in: complex) == AppSearchMatcher.fallbackTier(for: "👨‍👩‍👧", in: complex))
+    #expect(ascii.rustGraphemes == nil)
+    #expect(japanese.rustGraphemes != nil)
+    #expect(japanese.rustGraphemes?[0] == japanese.rustGraphemes?[1])
+    #expect(AppSearchMatcher.tier(for: "📌c", in: ascii) == AppSearchMatcher.fallbackTier(for: "📌c", in: ascii))
+}
+
+@Test func benchmarkSearchTiers() {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1" else { return }
+    let apps = (0..<1000).map { SearchableApplication(record: record("Example App \($0)", id: "org.example.app\($0)")) }
+    let queries = ["example", "app", "500", "missing"]
+    func measure(_ matcher: (String, SearchableApplication) -> MatchTier?) -> (UInt64, Int) {
+        var checksum = 0
+        let start = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<5 {
+            for query in queries {
+                for app in apps { checksum += matcher(query, app)?.rawValue ?? -1 }
+            }
+        }
+        return (DispatchTime.now().uptimeNanoseconds - start, checksum)
+    }
+    _ = measure { AppSearchMatcher.tier(for: $0, in: $1) }
+    let swift = measure { AppSearchMatcher.fallbackTier(for: $0, in: $1) }
+    let rust = measure { AppSearchMatcher.tier(for: $0, in: $1) }
+    #expect(swift.1 == rust.1)
+    print("SEARCH_BENCH operations=20000 swift_ns=\(swift.0) rust_ns=\(rust.0)")
+}
+
+@Test func benchmarkUnicodeSubsequence() {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1" else { return }
+    let samples = (0..<1000).map { "日本語アプリ\($0)" }
+    func measure(_ matcher: (String, String) -> Bool) -> (UInt64, Int) {
+        var matches = 0
+        let start = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<3 {
+            for sample in samples { if matcher("日語", sample) { matches += 1 } }
+        }
+        return (DispatchTime.now().uptimeNanoseconds - start, matches)
+    }
+    let swift = measure { AppSearchMatcher.isSubsequence($0, of: $1) }
+    let rust = measure { AppSearchMatcher.rustSubsequence($0, of: $1) }
+    #expect(swift.1 == rust.1)
+    let apps = samples.enumerated().map { SearchableApplication(record: record($0.element, id: "org.example.\($0.offset)")) }
+    let swiftTierStart = DispatchTime.now().uptimeNanoseconds
+    var swiftTierMatches = 0
+    for _ in 0..<3 { for app in apps { if AppSearchMatcher.fallbackTier(for: "日語", in: app) == .subsequence { swiftTierMatches += 1 } } }
+    let swiftTier = DispatchTime.now().uptimeNanoseconds - swiftTierStart
+    let tokens = AppSearchMatcher.graphemeTokens("日語")
+    let start = DispatchTime.now().uptimeNanoseconds
+    var cachedMatches = 0
+    for _ in 0..<3 { for app in apps { if AppSearchMatcher.tier(for: "日語", in: app, queryTokens: tokens) == .subsequence { cachedMatches += 1 } } }
+    let cached = DispatchTime.now().uptimeNanoseconds - start
+    #expect(cachedMatches == swift.1)
+    #expect(cachedMatches == swiftTierMatches)
+    print("UNICODE_BENCH operations=3000 swift_ns=\(swift.0) rust_ns=\(rust.0) swift_tier_ns=\(swiftTier) cached_tier_ns=\(cached)")
+}
+
+@Test func benchmarkSearchIndexMemory() {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1" else { return }
+    let count = Int(ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_ITEMS"] ?? "1000") ?? 1000
+    guard (1...10_000).contains(count) else { return }
+    let complex = ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_MODE"] == "search-complex"
+    let records = (0..<count).map { index in
+        let name = complex ? "👨‍👩‍👧 Project \(index)" : (index.isMultiple(of: 5) ? "日本語アプリ \(index)" : "Application \(index)")
+        return record(name, id: "org.example.\(index)")
+    }
+    func peak() -> Int {
+        var usage = rusage()
+        _ = getrusage(RUSAGE_SELF, &usage)
+        return usage.ru_maxrss
+    }
+    let baseline = peak()
+    let index = records.map { SearchableApplication(record: $0) }
+    #expect(index.count == count)
+    print("MEMORY_BENCH scenario=search-index items=\(count) baseline_bytes=\(baseline) peak_bytes=\(peak())")
+    withExtendedLifetime(index) {}
 }

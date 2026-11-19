@@ -39,30 +39,32 @@ let package = Package(
             name: "Catalog",
             dependencies: ["Diagnostics", "CLaunchpadCore"],
             path: "Sources/Catalog",
-            linkerSettings: [.unsafeFlags(["-L", String(#filePath.dropLast("Package.swift".count)) + ".build/rust/release", "-llaunchpad_core"])]
+            linkerSettings: [.unsafeFlags(["-L", String(#filePath.dropLast("Package.swift".count)) + ".build/rust/release", "-llaunchpad_core"]), .linkedLibrary("sqlite3")]
         ),
         .target(
             name: "Persistence",
-            dependencies: ["Diagnostics"],
-            path: "Sources/Persistence"
+            dependencies: ["Diagnostics", "CLaunchpadCore"],
+            path: "Sources/Persistence",
+            linkerSettings: [.unsafeFlags(["-L", String(#filePath.dropLast("Package.swift".count)) + ".build/rust/release", "-llaunchpad_core"]), .linkedLibrary("sqlite3")]
         ),
         .target(
             name: "Launcher",
-            dependencies: ["Diagnostics", "Catalog", "Grid", "Localization", "DesignSystem"],
+            dependencies: ["Diagnostics", "Catalog", "Grid", "Localization", "DesignSystem", "CLaunchpadCore"],
             path: "Sources/Launcher",
             swiftSettings: [debugHooks]
         ),
         .target(
             name: "Grid",
-            dependencies: ["Diagnostics", "Catalog", "Persistence", "WindowBrowser", "Localization", "DesignSystem"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "WindowBrowser", "Localization", "DesignSystem", "CLaunchpadCore"],
             path: "Sources/Grid",
             swiftSettings: [debugHooks],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .target(
             name: "Triggers",
-            dependencies: ["Diagnostics", "Persistence"],
-            path: "Sources/Triggers"
+            dependencies: ["Diagnostics", "Persistence", "CLaunchpadCore"],
+            path: "Sources/Triggers",
+            linkerSettings: [.unsafeFlags(["-L", String(#filePath.dropLast("Package.swift".count)) + ".build/rust/release", "-llaunchpad_core"]), .linkedLibrary("sqlite3")]
         ),
         .target(
             name: "Settings",
@@ -77,7 +79,7 @@ let package = Package(
         ),
         .target(
             name: "Uninstall",
-            dependencies: ["Diagnostics", "Catalog"],
+            dependencies: ["Diagnostics", "Catalog", "Persistence", "CLaunchpadCore"],
             path: "Sources/Uninstall"
         ),
         .target(

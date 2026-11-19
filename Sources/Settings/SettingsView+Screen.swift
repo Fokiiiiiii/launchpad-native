@@ -108,6 +108,22 @@ extension SettingsView {
                     SettingsSectionHeader(L10n.displaySectionHeader, systemImage: "macwindow.badge.plus", tint: .blue)
                 SettingsCard {
                     SettingsCardRow(minHeight: 34) {
+                        Picker(L10n.screenTargetLabel, selection: $viewModel.screenTarget) {
+                            Text(L10n.cursorScreenLabel).tag(LauncherScreenTarget.cursor)
+                            Text(L10n.mainScreenLabel).tag(LauncherScreenTarget.main)
+                            Text(L10n.activeScreenLabel).tag(LauncherScreenTarget.active)
+                            Text(L10n.dockScreenLabel).tag(LauncherScreenTarget.dock)
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow(minHeight: 34) {
+                        Toggle(isOn: $viewModel.windowed) {
+                            Text(L10n.windowedLabel)
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow(minHeight: 34) {
                         Picker(selection: $viewModel.sortMode) {
                             Text(L10n.sortModeCustom).tag(SortMode.custom)
                             Text(L10n.sortModeName).tag(SortMode.name)
@@ -128,6 +144,24 @@ extension SettingsView {
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow(minHeight: 34) {
+                        Toggle(isOn: $viewModel.labelVisible) {
+                            Text(L10n.showIconNamesLabel)
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow(minHeight: 34) {
+                        Toggle(isOn: $viewModel.closeOnBackgroundClick) {
+                            Text(L10n.closeOnBackgroundClickLabel)
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow(minHeight: 34) {
+                        Toggle(isOn: $viewModel.returnToFirstPage) {
+                            Text(L10n.returnToFirstPageLabel)
                         }
                     }
                     SettingsCardDivider()
@@ -169,6 +203,24 @@ extension SettingsView {
                     if viewModel.backgroundMode == .glass {
                         SettingsCardDivider()
                         SettingsCardRow(minHeight: 34) {
+                            Picker(L10n.glassMaterialLabel, selection: Binding(
+                                get: {
+                                    let preset = Int((viewModel.glassMaterialIntensity * 4).rounded())
+                                    return abs(viewModel.glassMaterialIntensity - Double(preset) / 4) < 0.001 ? preset : -1
+                                },
+                                set: { if (0...4).contains($0) { viewModel.glassMaterialIntensity = Double($0) / 4 } }
+                            )) {
+                                Text(L10n.iconScalePresetCustom).tag(-1)
+                                Text(L10n.glassUltraThin).tag(0)
+                                Text(L10n.glassThin).tag(1)
+                                Text(L10n.glassRegular).tag(2)
+                                Text(L10n.glassThick).tag(3)
+                                Text(L10n.glassUltraThick).tag(4)
+                            }
+                            .pickerStyle(.menu)
+                        }
+                        SettingsCardDivider()
+                        SettingsCardRow(minHeight: 34) {
                             HStack(spacing: 10) {
                                 Text(L10n.glassMaterialLabel)
                                 Slider(
@@ -188,6 +240,22 @@ extension SettingsView {
                         SettingsCardRow(minHeight: 34) {
                             Toggle(isOn: $viewModel.blursWallpaper) {
                                 Text(L10n.blurWallpaperToggleLabel)
+                            }
+                        }
+                        if viewModel.blursWallpaper {
+                            SettingsCardDivider()
+                            SettingsCardRow(minHeight: 44) {
+                                HStack(spacing: 10) {
+                                    Text(L10n.blurWallpaperToggleLabel)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                    Slider(value: $viewModel.wallpaperBlurRadius, in: 0...40, step: 1,
+                                           onEditingChanged: viewModel.setWallpaperBlurEditing)
+                                        .accessibilityLabel(Text(L10n.blurWallpaperToggleLabel))
+                                    Text("\(Int(viewModel.wallpaperBlurRadius))")
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                }
                             }
                         }
                     }

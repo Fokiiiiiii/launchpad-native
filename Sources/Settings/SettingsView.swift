@@ -10,10 +10,11 @@ public struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
     let onClose: () -> Void
 
-    @ScaledMetric(relativeTo: .body) private var tabIconSize: CGFloat = 15
-    @ScaledMetric(relativeTo: .caption) private var tabItemHeight: CGFloat = 34
+    @ScaledMetric(relativeTo: .body) private var tabIconSize: CGFloat = 20
+    @ScaledMetric(relativeTo: .caption) private var tabItemHeight: CGFloat = 52
     @State var showResetGridConfirmation = false
     @State var isExportingDiagnostics = false
+    @State var isHandlingLayoutBackup = false
 
     enum Metrics {
         static let sectionSpacing: CGFloat = 13
@@ -36,7 +37,7 @@ public struct SettingsView: View {
             // The enclosing window is borderless, so this band starts at the
             // actual glass-card edge without an invisible native titlebar.
             Color.clear
-                .frame(height: 24)
+                .frame(height: 44)
 
             settingsTabBar
 
@@ -48,11 +49,13 @@ public struct SettingsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .overlay(alignment: .topLeading) {
-            PanelCloseButton(accessibilityLabel: L10n.closePanelAccessibilityLabel, action: onClose)
+            PanelCloseButton(accessibilityLabel: L10n.closePanelAccessibilityLabel, hitTargetSize: 32, action: onClose)
                 .padding(.leading, 8)
                 .padding(.top, 8)
         }
-        .frame(width: SettingsWindowMetrics.width, height: SettingsWindowMetrics.height)
+        .font(.system(size: 15))
+        .controlSize(.large)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var settingsTabDefinitions: [(SettingsTab, String, String)] {
@@ -87,6 +90,7 @@ public struct SettingsView: View {
                     }
                     .foregroundStyle(selected ? accent : Color.white.opacity(0.72))
                     .frame(maxWidth: .infinity, minHeight: tabItemHeight)
+                    .contentShape(Rectangle())
                     .background(
                         selected ? Color.white.opacity(0.10) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous)

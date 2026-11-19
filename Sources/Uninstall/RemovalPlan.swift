@@ -34,6 +34,8 @@ public struct RemovalItem: Sendable, Equatable {
     }
 }
 
+import CLaunchpadCore
+
 /// Turns `OwnershipEvidence` into a list of classified removal candidates.
 /// Pure function, no I/O of its own beyond what `siblingRecords`/`evidence`
 /// already observed — never deletes, moves, or executes anything.
@@ -57,16 +59,27 @@ public enum RemovalPlanner {
             return [RemovalItem(path: record.bundleURL, classification: .unknown, requiresPrivilegedHelper: false)]
         }
 
+        let hasOtherCopy = hasOtherInstalledCopy(of: record, in: siblingRecords)
+        let needsNestedCheck = !hasOtherCopy && evidence.relatedPaths.contains { related in
+            guard related.exists else { return false }
+            if case .groupContainers = related.category { return false }
+            return true
+        }
+        let siblings = (needsNestedCheck ? record.teamIdentifier : nil).map { team in
+            siblingRecords.compactMap { sibling in
+                sibling.bundleIdentifier != record.bundleIdentifier && sibling.teamIdentifier == team ? sibling.bundleIdentifier : nil
+            }
+        } ?? []
+        let encoded = encodeSiblingNames(siblings)
         var items: [RemovalItem] = []
 
         for related in evidence.relatedPaths where related.exists {
-            let classification = classify(related, record: record, siblingRecords: siblingRecords)
+            let classification = classify(related, hasOtherCopy: hasOtherCopy, siblings: siblings, encoded: encoded)
             items.append(RemovalItem(path: related.url, classification: classification, requiresPrivilegedHelper: false))
         }
 
         // Another copy of the same app keeps using the same data and the same
         // agents, so removing this copy must leave them alone.
-        let hasOtherCopy = hasOtherInstalledCopy(of: record, in: siblingRecords)
         for agent in evidence.userLaunchAgents {
             items.append(RemovalItem(
                 path: agent,
@@ -102,6 +115,32 @@ public enum RemovalPlanner {
         }
     }
 
+    private static func encodeSiblingNames(_ siblings: [String]) -> Data? {
+        var data = Data()
+        for name in siblings {
+            let bytes = name.utf8
+            guard let length = UInt32(exactly: bytes.count) else { return nil }
+            var little = length.littleEndian
+            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+            data.append(contentsOf: bytes)
+        }
+        return data
+    }
+
+    private static func nestedDataExists(in root: URL, siblings: [String], encoded: Data?) -> Bool {
+        guard !siblings.isEmpty else { return false }
+        if let encoded {
+            let status = root.withUnsafeFileSystemRepresentation { path in
+                encoded.withUnsafeBytes { bytes in
+                    launchpad_nested_exists(path, bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count))
+                }
+            }
+            if status == 1 { return true }
+            if status == 0 { return false }
+        }
+        return siblings.contains { FileManager.default.fileExists(atPath: root.appendingPathComponent($0).path) }
+    }
+
     /// A path is `.sharedRisk` if any of:
     /// - another copy of the same app is installed (see `hasOtherInstalledCopy`),
     /// - it's a Group Container — shared *by design* across every app in
@@ -114,27 +153,12 @@ public enum RemovalPlanner {
     /// this app's own bundle identifier, anything that exists is `.owned`.
     private static func classify(
         _ related: RelatedPath,
-        record: ApplicationRecord,
-        siblingRecords: [ApplicationRecord]
+        hasOtherCopy: Bool,
+        siblings: [String],
+        encoded: Data?
     ) -> OwnershipClassification {
         if case .groupContainers = related.category { return .sharedRisk }
-        if hasOtherInstalledCopy(of: record, in: siblingRecords) { return .sharedRisk }
-        let path = related.url
-
-        guard let teamIdentifier = record.teamIdentifier else { return .owned }
-
-        let siblingsSharingTeam = siblingRecords.filter {
-            $0.bundleIdentifier != record.bundleIdentifier && $0.teamIdentifier == teamIdentifier
-        }
-        guard !siblingsSharingTeam.isEmpty else { return .owned }
-
-        let fm = FileManager.default
-        for sibling in siblingsSharingTeam {
-            let nestedCandidate = path.appendingPathComponent(sibling.bundleIdentifier)
-            if fm.fileExists(atPath: nestedCandidate.path) {
-                return .sharedRisk
-            }
-        }
-        return .owned
+        if hasOtherCopy { return .sharedRisk }
+        return nestedDataExists(in: related.url, siblings: siblings, encoded: encoded) ? .sharedRisk : .owned
     }
 }

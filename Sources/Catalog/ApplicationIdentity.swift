@@ -19,6 +19,8 @@ public struct StableAppID: Hashable, Codable, Sendable {
         let digest = SHA256.hash(data: Data(raw.utf8))
         self.value = digest.map { String(format: "%02x", $0) }.joined()
     }
+
+    init(snapshotValue: String) { self.value = snapshotValue }
 }
 
 /// Reads code-signing team identifier via the public Security framework

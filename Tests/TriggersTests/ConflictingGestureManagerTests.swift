@@ -880,6 +880,52 @@ private func storeWithEveryGestureOn() -> FakeTrackpadPreferenceStore {
     #expect(store.synchronizeCallCount == 0)
 }
 
+@Test @MainActor func fiveFingerRestorePointCapturesTheCurrentFourFingerSetting() throws {
+    let domains = ConflictingGestureManager.domains
+    let store = FakeTrackpadPreferenceStore(initialValues: [
+        domains[0]: [fourFingerKey: 2, fiveFingerKey: 0],
+        domains[1]: [fourFingerKey: 2, fiveFingerKey: 0]
+    ])
+    var prior = try #require(ConflictingGestureManager.captureBackup(fingerCount: 5, store: store))
+    prior.appliedKeys = domains.map { "\($0)|\(fiveFingerKey)" }
+    for domain in domains { store.setIntegerValue(1, forKey: fourFingerKey, domain: domain) }
+    let coordinator = TriggerCoordinator(onActivate: {}, onPinchClose: {}, onSpreadOpen: {}, trackpadPreferenceStore: store)
+    let settings = TriggerSettings(hotkeyEnabled: false, hotkeyKeyCode: nil, hotkeyModifierFlags: 0, hotCornersEnabled: [:], f4Enabled: false, multitouchGestureEnabled: true, multitouchSensitivity: 0.5, multitouchFingerCount: 5, gestureConflictPreventionEnabled: true, gestureConflictBackup: prior)
+    let prepared = try #require(coordinator.prepareRestorePoint(for: settings)?.gestureConflictBackup)
+    for domain in domains {
+        #expect(prepared.valuesByFingerCount?[4]?[domain] == 1)
+        #expect(prepared.appliedKeys?.contains("\(domain)|\(fourFingerKey)") == true)
+    }
+    guard case .succeeded(let applied) = ConflictingGestureManager.disableVerified(fingerCount: 5, store: store, preserving: prepared, disableBothFingerCounts: true, disableRelatedNavigation: false) else {
+        Issue.record("disabling both pinch preferences failed"); return
+    }
+    #expect(ConflictingGestureManager.restore(applied, store: store))
+    for domain in domains { #expect(store.integerValue(forKey: fourFingerKey, domain: domain) == 1) }
+}
+
+@Test @MainActor func fiveFingerActivationRestoresBothOriginalPinchSettings() throws {
+    let domains = ConflictingGestureManager.domains
+    let original: [String: [String: Int]] = [
+        domains[0]: [fourFingerKey: 2, fiveFingerKey: 1],
+        domains[1]: [fourFingerKey: 1, fiveFingerKey: 2]
+    ]
+    let store = FakeTrackpadPreferenceStore(initialValues: original)
+    let coordinator = TriggerCoordinator(onActivate: {}, onPinchClose: {}, onSpreadOpen: {}, trackpadPreferenceStore: store)
+    let settings = TriggerSettings(hotkeyEnabled: false, hotkeyKeyCode: nil, hotkeyModifierFlags: 0, hotCornersEnabled: [:], f4Enabled: false, multitouchGestureEnabled: true, multitouchSensitivity: 0.5, multitouchFingerCount: 5, gestureConflictPreventionEnabled: true, gestureConflictBackup: nil)
+    let prepared = try #require(coordinator.prepareRestorePoint(for: settings))
+    let report = coordinator.apply(prepared)
+    #expect(store.touchedKeys.contains(fourFingerKey))
+    #expect(store.touchedKeys.contains(fiveFingerKey))
+    if report.multitouchActive {
+        for domain in domains {
+            #expect(store.integerValue(forKey: fourFingerKey, domain: domain) == 0)
+            #expect(store.integerValue(forKey: fiveFingerKey, domain: domain) == 0)
+        }
+    }
+    coordinator.stopAll()
+    #expect(store.values == original)
+}
+
 @Test @MainActor func coordinatorUpgradesLegacyBackupBeforeApplyingBothKeys() {
     let store = FakeTrackpadPreferenceStore(initialValues: [
         "com.apple.AppleMultitouchTrackpad": [fourFingerKey: 0, fiveFingerKey: 1],

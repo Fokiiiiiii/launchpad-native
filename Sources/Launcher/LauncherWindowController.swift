@@ -63,6 +63,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     }
 
     private func setLauncherPresentation(active: Bool) {
+        let active = active && !gridModel.gridSettings.windowed
         NSApp.presentationOptions = active
             ? Self.launcherPresentationOptions(
                 hideDock: gridModel.hideDockWhileLauncherOpen,
@@ -139,8 +140,9 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     }
 
     private func refreshOverlayLayout(reason: String) {
-        if let screen = window?.screen {
-            backgroundView?.update(screen: screen, viewportOrigin: .zero)
+        if let window, let screen = window.screen {
+            let origin = CGPoint(x: window.frame.minX - screen.frame.minX, y: window.frame.minY - screen.frame.minY)
+            backgroundView?.update(screen: screen, viewportOrigin: origin)
         }
         viewController?.refreshDockLayout()
         logOverlayState(reason)
@@ -259,9 +261,9 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
             setLauncherPresentation(active: true)
         }
         window?.applyDockVisibilityPreference(
-            hideDock: hideDock,
+            hideDock: hideDock && !gridModel.gridSettings.windowed,
             reason: "settings update",
-            screenFrame: window?.screen?.frame
+            screenFrame: window?.screen.map { Self.launcherFrame(screenFrame: $0.frame, visibleFrame: $0.visibleFrame, windowed: gridModel.gridSettings.windowed) }
         )
         viewController?.refreshDockLayout()
     }
@@ -271,14 +273,16 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         config.mode = gridModel.backgroundMode
         config.materialIntensity = gridModel.glassMaterialIntensity
         config.blursWallpaper = gridModel.blursWallpaper
+        config.wallpaperBlurRadius = gridModel.wallpaperBlurRadius
         return config
     }
 
-    public func updateBackgroundSettings(mode: LauncherBackgroundMode, materialIntensity: Double, blursWallpaper: Bool) {
+    public func updateBackgroundSettings(mode: LauncherBackgroundMode, materialIntensity: Double, blursWallpaper: Bool, wallpaperBlurRadius: Double = 8) {
         var config = LauncherBackgroundView.Configuration()
         config.mode = mode
         config.materialIntensity = materialIntensity
         config.blursWallpaper = blursWallpaper
+        config.wallpaperBlurRadius = wallpaperBlurRadius
         backgroundView?.update(configuration: config)
     }
 
@@ -393,12 +397,19 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         }
     }
 
+    static func launcherFrame(screenFrame: NSRect, visibleFrame: NSRect, windowed: Bool) -> NSRect {
+        guard windowed else { return screenFrame }
+        let width = min(1100, visibleFrame.width * 0.85)
+        let height = min(760, visibleFrame.height * 0.85)
+        return NSRect(x: visibleFrame.midX - width / 2, y: visibleFrame.midY - height / 2, width: width, height: height).integral
+    }
+
     public func show() {
         // Phase 9 measurement: "warm trigger to first frame" — the window
         // already exists on every call after the first, so this number
         // reflects steady-state (warm) open latency, not cold construction.
         let start = DispatchTime.now()
-        guard let screen = Self.targetScreen() else {
+        guard let screen = Self.targetScreen(preference: gridModel.screenTarget) else {
             DiagnosticsLog.launcher.error("show(): aborted because no NSScreen is available")
             return
         }
@@ -410,13 +421,18 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         iconEvictionTask = nil
         // Apply the valid menu-bar/Dock pair before ordering the overlay front.
         setLauncherPresentation(active: true)
-        window.setFrame(screen.frame, display: true)
+        let frame = Self.launcherFrame(screenFrame: screen.frame, visibleFrame: screen.visibleFrame, windowed: gridModel.gridSettings.windowed)
+        window.hasShadow = gridModel.gridSettings.windowed
+        window.setFrame(frame, display: true)
         window.applyDockVisibilityPreference(
-            hideDock: gridModel.hideDockWhileLauncherOpen,
+            hideDock: gridModel.hideDockWhileLauncherOpen && !gridModel.gridSettings.windowed,
             reason: "show before frame",
-            screenFrame: screen.frame
+            screenFrame: frame
         )
         viewController?.resetSearch()
+        if !wasVisible && gridModel.returnToFirstPage {
+            viewController?.resetToFirstPage()
+        }
         viewModel.setLastLaunchDates(gridModel.lastLaunchDatesByRecordID)
         startDismissalMonitors()
 
@@ -721,22 +737,49 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
     /// "ポインタまたはアクティブウインドウが存在するディスプレイ" — the
     /// pointer's screen is checked first; if that lookup fails for any
     /// reason, fall back to the key window's screen, then the main screen.
-    private static func targetScreen() -> NSScreen? {
-        let mouseLocation = NSEvent.mouseLocation
-        if let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) {
-            return screen
-        }
-        if let keyScreen = NSApp.keyWindow?.screen {
-            return keyScreen
-        }
-        if let mainScreen = NSScreen.main {
-            return mainScreen
-        }
-        guard let fallbackScreen = NSScreen.screens.first else {
-            DiagnosticsLog.launcher.error("targetScreen(): no NSScreen is available")
+    private static func targetScreen(preference: LauncherScreenTarget) -> NSScreen? {
+        let screens = NSScreen.screens
+        let cursorScreen = screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+        let mainScreen = screens.first
+        let activeScreen: NSScreen? = {
+            guard preference == .active,
+                  let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                  let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
+                  let primaryTop = mainScreen?.frame.maxY else { return nil }
+            for info in list {
+                guard (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
+                      (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                      let dictionary = info[kCGWindowBounds as String] as? [String: Any],
+                      let rect = CGRect(dictionaryRepresentation: dictionary as CFDictionary),
+                      rect.width >= 50, rect.height >= 50 else { continue }
+                let appKitRect = CGRect(x: rect.minX, y: primaryTop - rect.maxY, width: rect.width, height: rect.height)
+                if let index = screenIndex(intersecting: appKitRect, frames: screens.map(\.frame)) {
+                    return screens[index]
+                }
+            }
             return nil
+        }()
+        let dockScreen = preference == .dock ? screens.first { screen in
+            let frame = screen.frame
+            let visible = screen.visibleFrame
+            return visible.minY > frame.minY + 2 || visible.minX > frame.minX + 2 || visible.maxX < frame.maxX - 2
+        } : nil
+        // shortcut: an auto-hidden Dock may not reserve space; use the cursor screen until its display can be identified.
+        switch preference {
+        case .cursor: return cursorScreen ?? NSApp.keyWindow?.screen ?? NSScreen.main ?? mainScreen
+        case .main: return mainScreen ?? cursorScreen
+        case .active: return activeScreen ?? cursorScreen ?? mainScreen
+        case .dock: return dockScreen ?? cursorScreen ?? mainScreen
         }
-        return fallbackScreen
+    }
+
+    static func screenIndex(intersecting window: CGRect, frames: [CGRect]) -> Int? {
+        let areas = frames.map { frame -> CGFloat in
+            let intersection = frame.intersection(window)
+            return intersection.isNull ? 0 : max(0, intersection.width) * max(0, intersection.height)
+        }
+        guard let index = areas.indices.max(by: { areas[$0] < areas[$1] }), areas[index] > 0 else { return nil }
+        return index
     }
 
     // MARK: NSWindowDelegate
@@ -766,9 +809,9 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         guard window.isVisible else { return }
         setLauncherPresentation(active: true)
         window.applyDockVisibilityPreference(
-            hideDock: gridModel.hideDockWhileLauncherOpen,
+            hideDock: gridModel.hideDockWhileLauncherOpen && !gridModel.gridSettings.windowed,
             reason: "windowDidChangeScreen",
-            screenFrame: window.screen?.frame
+            screenFrame: window.screen.map { Self.launcherFrame(screenFrame: $0.frame, visibleFrame: $0.visibleFrame, windowed: gridModel.gridSettings.windowed) }
         )
         refreshOverlayLayout(reason: "did change screen")
     }

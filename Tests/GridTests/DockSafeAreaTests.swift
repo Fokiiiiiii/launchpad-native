@@ -98,7 +98,8 @@ import AppKit
 @Test func detectsHiddenBottomDockEdgeWithoutCapturingOtherEdges() {
     let screen = CGRect(x: 0, y: 0, width: 1600, height: 1000)
     #expect(DockSafeArea.isHiddenBottomDockEdge(point: CGPoint(x: 800, y: 1), screenFrame: screen, orientation: "bottom", canReveal: true))
-    #expect(!DockSafeArea.isHiddenBottomDockEdge(point: CGPoint(x: 800, y: 3), screenFrame: screen, orientation: "bottom", canReveal: true))
+    #expect(DockSafeArea.isHiddenBottomDockEdge(point: CGPoint(x: 800, y: 30), screenFrame: screen, orientation: "bottom", canReveal: true))
+    #expect(!DockSafeArea.isHiddenBottomDockEdge(point: CGPoint(x: 800, y: 49), screenFrame: screen, orientation: "bottom", canReveal: true))
     #expect(!DockSafeArea.isHiddenBottomDockEdge(point: CGPoint(x: 800, y: 1), screenFrame: screen, orientation: "left", canReveal: true))
     #expect(!DockSafeArea.isHiddenBottomDockEdge(point: CGPoint(x: 800, y: 1), screenFrame: screen, orientation: "bottom", canReveal: false))
 }
@@ -111,4 +112,13 @@ import AppKit
     #expect(writer as URL == url)
     #expect(writer.writableTypes(for: .general).contains(.fileURL))
     #expect(item.draggingFrame == frame)
+}
+
+@Test @MainActor func hiddenDockCanBeRevealedDuringDrag() {
+    let original: NSApplication.PresentationOptions = [.hideDock, .autoHideMenuBar]
+    let adjusted = DockDragSource.optionsForDrag(original)
+    #expect(!adjusted.contains(.hideDock))
+    #expect(adjusted.contains(.autoHideDock))
+    #expect(adjusted.contains(.autoHideMenuBar))
+    #expect(DockDragSource.optionsForDrag([]).isEmpty)
 }

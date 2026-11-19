@@ -39,6 +39,7 @@ import Testing
     custom.pageMargins = 72
     custom.iconScale = 1.18
     custom.sortMode = .lastUsed
+    custom.labelVisible = false
     model.updateGridSettings(custom)
 
     let viewModel = SettingsViewModel(
@@ -55,6 +56,8 @@ import Testing
     #expect(model.gridSettings.pageMargins == GridSettings.default.pageMargins)
     #expect(model.gridSettings.iconScale == GridSettings.default.iconScale)
     #expect(model.gridSettings.sortMode == .lastUsed)
+    #expect(!model.gridSettings.labelVisible)
+    #expect(!viewModel.labelVisible)
 }
 
 @Test @MainActor func failedTriggerTransactionRestoresEveryControl() async {

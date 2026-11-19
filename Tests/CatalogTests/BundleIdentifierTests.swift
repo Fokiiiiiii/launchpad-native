@@ -20,6 +20,14 @@ import Testing
     }
 }
 
+@Test func identifierLengthAndUnicodeBoundariesStaySafe() {
+    #expect(BundleIdentifier.isSafeFileName(String(repeating: "a", count: 255)))
+    #expect(!BundleIdentifier.isSafeFileName(String(repeating: "a", count: 256)))
+    #expect(!BundleIdentifier.isSafeFileName("com.example.日本"))
+    #expect(!BundleIdentifier.isSafeFileName("com.example..app"))
+    #expect(!BundleIdentifier.isSafeFileName("valid\u{0}suffix"))
+}
+
 @Test func aSafeIdentifierKeepsItsNameAndAnUnsafeOneGetsAHarmlessDistinctOne() {
     #expect(BundleIdentifier.fileName(for: "com.example.app") == "com.example.app")
 

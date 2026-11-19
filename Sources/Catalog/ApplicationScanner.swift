@@ -5,6 +5,18 @@ import Foundation
 /// when explicitly requested; day-to-day updates come from `FSEventsWatcher`
 /// rescanning just the affected source, not the whole catalog — satisfying
 /// "no full scan on every launcher open."
+import CLaunchpadCore
+
+private final class CatalogMergeBuffer {
+    var indices: [UInt32] = []
+    var received = false
+}
+
+private enum CatalogMergeCandidate {
+    case previous(StableAppID)
+    case scanned(Int, Int)
+}
+
 public actor ApplicationScanner {
     public struct Snapshot: Sendable {
         public var recordsByID: [StableAppID: ApplicationRecord]
@@ -69,17 +81,30 @@ public actor ApplicationScanner {
     /// priority sources win when a duplicate stable ID is somehow produced
     /// by two sources (should be rare since identity includes the resolved
     /// path, but overlapping source roots make it possible).
+    private var sourceScansInFlight = 0
+
+    private var hasCompletedFullScan = false
+
     @discardableResult
     public func performFullScan() async -> Snapshot {
+        sourceScansInFlight += 1
+        defer {
+            sourceScansInFlight -= 1
+            schedulePendingChangesIfNeeded()
+        }
         let start = DispatchTime.now()
+        let scannedSources = sources
         nextScanToken += 1
         let token = nextScanToken
         let known = knownSignatures()
         var reports: [(source: ApplicationSource, report: ApplicationBundleReader.ScanReport)] = []
-        for source in sources.sorted(by: { $0.priority < $1.priority }) {
+        for source in scannedSources.sorted(by: { $0.priority < $1.priority }) {
             reports.append((source, await scanReport(source, known)))
         }
         let changed = integrate(reports, token: token)
+        if Set(sources) == Set(scannedSources) {
+            hasCompletedFullScan = true
+        }
         let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
         DiagnosticsLog.catalog.info(
             "Full scan complete: \(self.snapshot.recordsByID.count, privacy: .public) applications across \(self.sources.count, privacy: .public) sources in \(ms, privacy: .public)ms"
@@ -102,13 +127,101 @@ public actor ApplicationScanner {
     /// accepted for it; everything else keeps what the snapshot has now.
     ///
     /// Returns whether the snapshot changed.
-    private func integrate(
+    func integrate(
         _ reports: [(source: ApplicationSource, report: ApplicationBundleReader.ScanReport)],
         token: Int
     ) -> Bool {
         let configured = Set(sources.map(\.id))
         let fresh = reports
-            .filter { configured.contains($0.source.id) && token > (lastAcceptedToken[$0.source.id] ?? 0) }
+            .filter { sources.contains($0.source) && token > (lastAcceptedToken[$0.source.id] ?? 0) }
+            .sorted { $0.source.priority < $1.source.priority }
+        let freshIDs = Set(fresh.map { $0.source.id })
+        var wire = Data(repeating: 0, count: 4)
+        var candidates: [CatalogMergeCandidate] = []
+        var carryReports: [(String, Range<Int>)] = []
+
+        func append(_ id: StableAppID, mode: UInt8, candidate: CatalogMergeCandidate) -> Bool {
+            guard candidates.count < Int(UInt32.max) else { return false }
+            let value = id.value.utf8.allSatisfy { $0 < 0x80 } ? id.value : id.value.precomposedStringWithCanonicalMapping
+            let bytes = value.utf8
+            guard let length = UInt32(exactly: bytes.count), length != UInt32.max else { return false }
+            wire.append(mode)
+            var little = length.littleEndian
+            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
+            wire.append(contentsOf: bytes)
+            candidates.append(candidate)
+            return true
+        }
+
+        for (id, record) in snapshot.recordsByID where configured.contains(record.sourceID) && !freshIDs.contains(record.sourceID) {
+            guard append(id, mode: 0, candidate: .previous(id)) else { return integrateFallback(reports, token: token) }
+        }
+        for (reportIndex, entry) in fresh.enumerated() {
+            let directories: [URL]?
+            switch entry.report.outcome {
+            case .scanned(let records):
+                for (index, record) in records.enumerated() {
+                    guard append(record.id, mode: 0, candidate: .scanned(reportIndex, index)) else { return integrateFallback(reports, token: token) }
+                }
+                guard !entry.report.failedDirectories.isEmpty else { continue }
+                directories = entry.report.failedDirectories
+            case .unreadable:
+                directories = nil
+            }
+            let start = candidates.count
+            for (id, record) in snapshot.recordsByID where record.sourceID == entry.source.id {
+                if let directories, !directories.contains(where: { isPath(record.bundleURL.path, inside: $0) }) { continue }
+                guard append(id, mode: 1, candidate: .previous(id)) else { return integrateFallback(reports, token: token) }
+            }
+            carryReports.append((entry.source.id, start..<candidates.count))
+        }
+        guard let candidateCount = UInt32(exactly: candidates.count) else { return integrateFallback(reports, token: token) }
+        var countLE = candidateCount.littleEndian
+        withUnsafeBytes(of: &countLE) { wire.replaceSubrange(0..<4, with: $0) }
+        let output = CatalogMergeBuffer()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
+            guard let context, let count = Int(exactly: count), count == 0 || indices != nil else { return }
+            let output = Unmanaged<CatalogMergeBuffer>.fromOpaque(context).takeUnretainedValue()
+            output.indices = Array(UnsafeBufferPointer(start: indices, count: count))
+            output.received = true
+        }
+        let status = wire.withUnsafeBytes { bytes in
+            launchpad_merge_catalog(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
+        }
+        guard status == 1, output.received, candidates.isEmpty || !output.indices.isEmpty else { return integrateFallback(reports, token: token) }
+        var merged: [StableAppID: ApplicationRecord] = [:]
+        merged.reserveCapacity(output.indices.count)
+        for rawIndex in output.indices {
+            let index = Int(rawIndex)
+            guard candidates.indices.contains(index) else { return integrateFallback(reports, token: token) }
+            let record: ApplicationRecord
+            switch candidates[index] {
+            case .previous(let id):
+                guard let previous = snapshot.recordsByID[id] else { return integrateFallback(reports, token: token) }
+                record = previous
+            case .scanned(let reportIndex, let recordIndex):
+                guard fresh.indices.contains(reportIndex), case .scanned(let records) = fresh[reportIndex].report.outcome, records.indices.contains(recordIndex) else { return integrateFallback(reports, token: token) }
+                record = records[recordIndex]
+            }
+            guard merged.updateValue(record, forKey: record.id) == nil else { return integrateFallback(reports, token: token) }
+        }
+        for entry in fresh { lastAcceptedToken[entry.source.id] = token }
+        for (sourceID, range) in carryReports {
+            let kept = output.indices.reduce(into: 0) { count, value in if range.contains(Int(value)) { count += 1 } }
+            DiagnosticsLog.catalog.error("Source \(sourceID, privacy: .public) could not be read; kept \(kept, privacy: .public) previously known records rather than reporting them uninstalled")
+        }
+        guard merged != snapshot.recordsByID else { return false }
+        snapshot = Snapshot(recordsByID: merged)
+        return true
+    }
+
+    func integrateFallback(
+        _ reports: [(source: ApplicationSource, report: ApplicationBundleReader.ScanReport)],
+        token: Int
+    ) -> Bool {
+        let configured = Set(sources.map(\.id))
+        let fresh = reports
+            .filter { sources.contains($0.source) && token > (lastAcceptedToken[$0.source.id] ?? 0) }
             .sorted { $0.source.priority < $1.source.priority }
         let freshIDs = Set(fresh.map { $0.source.id })
 
@@ -215,6 +328,7 @@ public actor ApplicationScanner {
     public func replaceSources(_ newSources: [ApplicationSource]) async {
         let wasWatching = watcher != nil
         stopWatching()
+        hasCompletedFullScan = false
         sources = newSources
         _ = await performFullScan()
         if wasWatching {
@@ -249,8 +363,11 @@ public actor ApplicationScanner {
 
     private func handleChanges(_ changedPaths: [String]) {
         pendingChangedPaths.formUnion(changedPaths)
-        guard debounceTask == nil else { return }
+        schedulePendingChangesIfNeeded()
+    }
 
+    private func schedulePendingChangesIfNeeded() {
+        guard !pendingChangedPaths.isEmpty, debounceTask == nil, sourceScansInFlight == 0 else { return }
         let delay = changeDebounceNanoseconds
         debounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: delay)
@@ -261,22 +378,52 @@ public actor ApplicationScanner {
 
     private func flushPendingChanges() async {
         debounceTask = nil
+        guard sourceScansInFlight == 0 else { return }
         let changedPaths = Array(pendingChangedPaths)
         pendingChangedPaths.removeAll()
         guard !changedPaths.isEmpty else { return }
 
         let affectedSources = sources.filter { source in
-            changedPaths.contains { path in
-                isPath(path, inside: source.rootURL)
-            }
+            changedPaths.contains { path in isPath(path, inside: source.rootURL) }
         }
         guard !affectedSources.isEmpty else { return }
+        guard hasCompletedFullScan else {
+            _ = await performFullScan()
+            return
+        }
 
+        if sourceScansInFlight == 0, affectedSources.count == 1,
+           let source = affectedSources.first,
+           let candidate = directNewApp(in: source, changedPaths: changedPaths) {
+            nextScanToken += 1
+            let token = nextScanToken
+            sourceScansInFlight += 1
+            let record = await Task.detached(priority: .utility) {
+                ApplicationBundleReader.record(for: candidate, sourceID: source.id)
+            }.value
+            sourceScansInFlight -= 1
+            schedulePendingChangesIfNeeded()
+            if let record, sources.contains(source), token > (lastAcceptedToken[source.id] ?? 0),
+               snapshot.recordsByID[record.id] == nil {
+                lastAcceptedToken[source.id] = token
+                snapshot.recordsByID[record.id] = record
+                broadcast()
+                return
+            }
+        }
+
+        let currentSources = affectedSources.filter { sources.contains($0) }
+        guard !currentSources.isEmpty else { return }
+        sourceScansInFlight += 1
+        defer {
+            sourceScansInFlight -= 1
+            schedulePendingChangesIfNeeded()
+        }
         nextScanToken += 1
         let token = nextScanToken
         let known = knownSignatures()
         var reports: [(source: ApplicationSource, report: ApplicationBundleReader.ScanReport)] = []
-        for source in affectedSources {
+        for source in currentSources {
             reports.append((source, await scanReport(source, known)))
         }
         guard integrate(reports, token: token) else { return }
@@ -286,16 +433,58 @@ public actor ApplicationScanner {
         broadcast()
     }
 
+    private func directNewApp(in source: ApplicationSource, changedPaths: [String]) -> URL? {
+        let root = source.rootURL.standardizedFileURL.resolvingSymlinksInPath()
+        let rootComponents = root.pathComponents
+        var candidateComponents: [String]?
+        for path in changedPaths {
+            let parts = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().pathComponents
+            guard parts.count > rootComponents.count,
+                  Array(parts.prefix(rootComponents.count)) == rootComponents else { return nil }
+            let relative = Array(parts.dropFirst(rootComponents.count))
+            guard let appIndex = relative.firstIndex(where: { $0.hasSuffix(".app") }),
+                  !relative[appIndex].hasPrefix("."),
+                  source.matches(bundleFilename: relative[appIndex]),
+                  source.recursive || appIndex == 0,
+                  relative[..<appIndex].allSatisfy({ !$0.hasPrefix(".") }) else { return nil }
+            let components = Array(relative[...appIndex])
+            if let candidateComponents, candidateComponents != components { return nil }
+            candidateComponents = components
+        }
+        guard let components = candidateComponents else { return nil }
+        var candidate = source.rootURL.standardizedFileURL
+        for component in components.dropLast() {
+            candidate.appendPathComponent(component, isDirectory: true)
+            guard let values = try? candidate.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey, .isSymbolicLinkKey]),
+                  values.isDirectory == true, values.isHidden == false, values.isSymbolicLink == false else { return nil }
+        }
+        candidate.appendPathComponent(components[components.count - 1], isDirectory: true)
+        candidate = candidate.standardizedFileURL
+        guard let values = try? candidate.resourceValues(forKeys: [.isDirectoryKey, .isHiddenKey]),
+              values.isDirectory == true, values.isHidden == false,
+              !snapshot.recordsByID.values.contains(where: { $0.bundleURL.standardizedFileURL.path == candidate.path })
+        else { return nil }
+        return candidate
+    }
+
+    private func resolvedPathPreservingMissingComponents(_ url: URL) -> URL {
+        var ancestor = url.standardizedFileURL
+        var suffix: [String] = []
+        while ancestor.path != "/" && !FileManager.default.fileExists(atPath: ancestor.path) {
+            suffix.append(ancestor.lastPathComponent)
+            ancestor.deleteLastPathComponent()
+        }
+        var resolved = ancestor.resolvingSymlinksInPath()
+        for component in suffix.reversed() {
+            resolved.appendPathComponent(component)
+        }
+        return resolved.standardizedFileURL
+    }
+
     private func isPath(_ changedPath: String, inside rootURL: URL) -> Bool {
-        let root = rootURL.standardizedFileURL.resolvingSymlinksInPath().path
-        let changed = URL(fileURLWithPath: changedPath)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-            .path
+        let root = resolvedPathPreservingMissingComponents(rootURL).path
+        let changed = resolvedPathPreservingMissingComponents(URL(fileURLWithPath: changedPath)).path
         if changed == root { return true }
-        // A separator boundary avoids treating /ApplicationsOther as a
-        // descendant of /Applications. The filesystem root is the one case
-        // where every absolute path is a valid descendant.
         return root == "/" ? changed.hasPrefix("/") : changed.hasPrefix(root + "/")
     }
 }

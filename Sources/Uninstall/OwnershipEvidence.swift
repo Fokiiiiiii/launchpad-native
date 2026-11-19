@@ -67,6 +67,26 @@ public struct OwnershipEvidence: Sendable {
     }
 }
 
+import CLaunchpadCore
+
+private final class DirectorySelection {
+    let directory: URL
+    let matches: (String) -> Bool
+    var entries: [URL] = []
+
+    init(directory: URL, matches: @escaping (String) -> Bool) {
+        self.directory = directory
+        self.matches = matches
+    }
+}
+
+private final class ReceiptSelection {
+    let bundleID: String
+    var entries: [String] = []
+
+    init(bundleID: String) { self.bundleID = bundleID }
+}
+
 /// Gathers ownership evidence for one `ApplicationRecord`. Every step here is
 /// read-only: existence checks, directory listings, and `pkgutil` queries
 /// (a public CLI tool, not a private API) — nothing is ever deleted, moved,
@@ -150,6 +170,34 @@ public enum OwnershipEvidenceCollector {
         RelatedPath(url: url, category: category, exists: FileManager.default.fileExists(atPath: url.path))
     }
 
+    static func directoryEntries(in directory: URL, matching: (String) -> Bool) -> [URL] {
+        withoutActuallyEscaping(matching) { matches in
+            guard (try? directory.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == false else {
+                return (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).filter { matches($0.lastPathComponent) }) ?? []
+            }
+            let resolved = directory.withUnsafeFileSystemRepresentation { path -> URL? in
+                guard let path, let canonical = realpath(path, nil) else { return nil }
+                defer { free(canonical) }
+                return URL(fileURLWithFileSystemRepresentation: canonical, isDirectory: true, relativeTo: nil)
+            }
+            guard let resolved else {
+                return (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).filter { matches($0.lastPathComponent) }) ?? []
+            }
+            let selection = DirectorySelection(directory: resolved, matches: matches)
+            let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt) -> Void = { context, bytes, count in
+                guard let context, let bytes, let length = Int(exactly: count) else { return }
+                let selection = Unmanaged<DirectorySelection>.fromOpaque(context).takeUnretainedValue()
+                let name = String(decoding: UnsafeBufferPointer(start: bytes, count: length), as: UTF8.self)
+                if selection.matches(name) { selection.entries.append(selection.directory.appendingPathComponent(name)) }
+            }
+            let status = resolved.withUnsafeFileSystemRepresentation { path in
+                launchpad_directory_entries(path, Unmanaged.passUnretained(selection).toOpaque(), callback)
+            }
+            if status == 1 { return selection.entries }
+            return (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).filter { matches($0.lastPathComponent) }) ?? []
+        }
+    }
+
     /// Scans a directory (ByHost prefs, Group Containers) for entries whose
     /// filename satisfies `matching`, returning one `RelatedPath` per match
     /// — unlike the fixed single-path locations above, these don't have a
@@ -159,11 +207,7 @@ public enum OwnershipEvidenceCollector {
         matching: (String) -> Bool,
         category: RelatedPath.Category
     ) -> [RelatedPath] {
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil
-        ) else { return [] }
-        return entries
-            .filter { matching($0.lastPathComponent) }
+        directoryEntries(in: directory, matching: matching)
             .map { RelatedPath(url: $0, category: category, exists: true) }
     }
 
@@ -184,10 +228,7 @@ public enum OwnershipEvidenceCollector {
     /// trashed, so a file whose name matches but whose Label names another
     /// product's job must not be taken.
     static func launchItems(in directory: URL, matchingBundleID bundleID: String, verifyingLabel: Bool) -> [URL] {
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil
-        ) else { return [] }
-        return entries.filter { entry in
+        return directoryEntries(in: directory, matching: { $0.hasSuffix(".plist") }).filter { entry in
             guard entry.pathExtension == "plist",
                   isOwnName(entry.deletingPathExtension().lastPathComponent, bundleID: bundleID) else {
                 return false
@@ -205,12 +246,20 @@ public enum OwnershipEvidenceCollector {
     /// `pkgutil --pkgs` lists installed package receipt identifiers; this is
     /// the public CLI tool, not a private framework — a plain `Process`
     /// invocation, read-only.
-    private static func receipts(matchingBundleID bundleID: String) -> [String] {
-        guard let output = runProcess("/usr/sbin/pkgutil", ["--pkgs"]) else { return [] }
-        return output
-            .split(separator: "\n")
-            .map(String.init)
-            .filter { $0.contains(bundleID) }
+    static func receipts(matchingBundleID bundleID: String, program: String = "/usr/sbin/pkgutil") -> [String] {
+        let selection = ReceiptSelection(bundleID: bundleID)
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt) -> Void = { context, bytes, count in
+            guard let context, let bytes, let length = Int(exactly: count) else { return }
+            let selection = Unmanaged<ReceiptSelection>.fromOpaque(context).takeUnretainedValue()
+            let line = String(decoding: UnsafeBufferPointer(start: bytes, count: length), as: UTF8.self)
+            if line.contains(selection.bundleID) { selection.entries.append(line) }
+        }
+        let status = program.withCString { launchpad_receipt_lines($0, Unmanaged.passUnretained(selection).toOpaque(), callback) }
+        guard status == 1 else {
+            DiagnosticsLog.uninstall.error("Failed to read package receipt identifiers")
+            return []
+        }
+        return selection.entries
     }
 
     /// Extensions are declared in a bundle's own Info.plist under the
@@ -228,21 +277,4 @@ public enum OwnershipEvidenceCollector {
         return identifiers
     }
 
-    private static func runProcess(_ path: String, _ arguments: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-        } catch {
-            DiagnosticsLog.uninstall.error("Failed to run \(path, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(data: data, encoding: .utf8)
-    }
 }

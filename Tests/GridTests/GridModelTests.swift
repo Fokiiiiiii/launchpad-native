@@ -4,6 +4,8 @@ import Persistence
 import Testing
 @testable import Grid
 
+import Darwin
+
 private func record(
     _ name: String,
     id: String,
@@ -114,6 +116,153 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(ordered.map(\.bundleIdentifier) == ["c", "a", "b"])
 }
 
+@Test func rustRecordOrderingHandlesMissingRepeatedAndCanonicalIDs() {
+    let records = ["alpha", "é", "gamma", "delta"]
+    let placed = ["gamma", "missing", "e\u{301}", "gamma"]
+    #expect(GridModel.rustRecordOrder(recordIDs: records, placedIDs: placed) == [2, 1, 0, 3])
+    #expect(GridModel.rustRecordOrder(recordIDs: [], placedIDs: ["missing"]) == [])
+    #expect(GridModel.rustRecordOrder(recordIDs: ["same", "same"], placedIDs: []) == nil)
+}
+
+@Test func rustUnplacedRecordsMatchSwiftEligibilityAndUnicode() throws {
+    let records = (0..<16).map { index in
+        record(index == 3 ? "café" : "App\(index)", id: "app\(index)",
+               backgroundOnly: index.isMultiple(of: 5), menuBarApp: index.isMultiple(of: 3))
+    }
+    let canonical = records[3].id.value.decomposedStringWithCanonicalMapping
+    for showMenuBar in [false, true] {
+        for hidden in [Set<String>(), [canonical, records[7].id.value]] {
+            for placed in [Set<String>(), [records[4].id.value, records[11].id.value]] {
+                let expected = records.filter {
+                    !$0.isBackgroundOnly && (showMenuBar || !$0.isMenuBarApp)
+                        && !hidden.contains($0.id.value) && !placed.contains($0.id.value)
+                }
+                let actual = try #require(GridModel.rustUnplacedRecords(records: records, showMenuBar: showMenuBar, hidden: hidden, placed: placed))
+                #expect(actual.map(\.id.value) == expected.map(\.id.value))
+            }
+        }
+    }
+    #expect(GridModel.rustUnplacedRecords(records: [], showMenuBar: false, hidden: [], placed: [])?.isEmpty == true)
+}
+
+@Test func rustInvalidIdentifiersMatchSwiftWithDuplicatesAndUnicode() throws {
+    let candidates = ["café", "cafe\u{301}", "gone", "gone", "kept", "other"]
+    for valid in [Set<String>(), ["café", "kept"], ["gone", "other"]] {
+        let expected = Set(candidates.filter { !valid.contains($0) })
+        let actual = try #require(GridModel.rustInvalidIdentifiers(valid: valid, candidates: candidates))
+        #expect(actual == expected)
+    }
+    #expect(GridModel.rustInvalidIdentifiers(valid: [], candidates: [])?.isEmpty == true)
+}
+
+@Test func rustMissingDatesKeepFirstOccurrenceAndExistingValues() throws {
+    let ordered = ["a", "café", "cafe\u{301}", "b", "a", "c"].map(StableAppIdentifier.init(value:))
+    for existing in [[:], [StableAppIdentifier(value: "b"): Date(timeIntervalSince1970: 42)]] {
+        var seen = Set(existing.keys)
+        let expected = ordered.enumerated().compactMap { index, id in seen.insert(id).inserted ? index : nil }
+        let actual = try #require(GridModel.rustMissingDateIndices(ordered: ordered, existing: existing))
+        #expect(actual == expected)
+    }
+    #expect(GridModel.rustMissingDateIndices(ordered: [], existing: [:])?.isEmpty == true)
+}
+
+@Test func benchmarkMissingDatesMemory() throws {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1",
+          let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_MODE"] else { return }
+    let count = Int(ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_ITEMS"] ?? "4096") ?? 4096
+    guard (1...10_000).contains(count) else { return }
+    let ordered = (0..<count).map { StableAppIdentifier(value: "org.example.app\($0)-" + String(repeating: "x", count: 32)) }
+    let existing = Dictionary(uniqueKeysWithValues: ordered.enumerated().filter { $0.offset.isMultiple(of: 2) }.map { ($0.element, Date(timeIntervalSince1970: 42)) })
+    func peak() -> Int { var usage = rusage(); _ = getrusage(RUSAGE_SELF, &usage); return usage.ru_maxrss }
+    let baseline = peak()
+    let start = DispatchTime.now().uptimeNanoseconds
+    var result: [StableAppIdentifier: Date] = [:]
+    for _ in 0..<5 {
+        result = existing
+        if mode == "dates-rust" {
+            let indices = try #require(GridModel.rustMissingDateIndices(ordered: ordered, existing: result))
+            for (position, index) in indices.enumerated() {
+                result[ordered[index]] = Date(timeIntervalSince1970: TimeInterval(position))
+            }
+        } else if mode == "dates-swift" {
+            var position = 0
+            for id in ordered where result[id] == nil {
+                result[id] = Date(timeIntervalSince1970: TimeInterval(position))
+                position += 1
+            }
+        } else { return }
+    }
+    let elapsed = DispatchTime.now().uptimeNanoseconds - start
+    let measuredPeak = peak()
+    #expect(result.count == count)
+    print("MEMORY_BENCH scenario=dates mode=\(mode) items=\(count) baseline_bytes=\(baseline) peak_bytes=\(measuredPeak) elapsed_ns=\(elapsed)")
+}
+
+@Test func benchmarkUnplacedSelectionMemory() throws {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1",
+          let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_MODE"] else { return }
+    let count = Int(ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_ITEMS"] ?? "4096") ?? 4096
+    guard (1...10_000).contains(count) else { return }
+    let records = (0..<count).map { index in
+        record("App\(index)", id: "org.example.app\(index)", backgroundOnly: index.isMultiple(of: 13), menuBarApp: index.isMultiple(of: 11))
+    }
+    let hidden = Set(records.enumerated().filter { $0.offset.isMultiple(of: 7) }.map { $0.element.id.value })
+    let placed = Set(records.enumerated().filter { $0.offset.isMultiple(of: 2) }.map { $0.element.id.value })
+    func peak() -> Int {
+        var usage = rusage()
+        _ = getrusage(RUSAGE_SELF, &usage)
+        return usage.ru_maxrss
+    }
+    let baseline = peak()
+    let start = DispatchTime.now().uptimeNanoseconds
+    var result: [ApplicationRecord] = []
+    for _ in 0..<5 {
+        if mode == "unplaced-rust" {
+            result = try #require(GridModel.rustUnplacedRecords(records: records, showMenuBar: false, hidden: hidden, placed: placed))
+        } else if mode == "unplaced-swift" {
+            result = records.filter { !$0.isBackgroundOnly && !$0.isMenuBarApp }
+                .filter { !hidden.contains($0.id.value) }
+                .filter { !placed.contains($0.id.value) }
+        } else { return }
+    }
+    let elapsed = DispatchTime.now().uptimeNanoseconds - start
+    let measuredPeak = peak()
+    let expected = records.filter { !$0.isBackgroundOnly && !$0.isMenuBarApp && !hidden.contains($0.id.value) && !placed.contains($0.id.value) }
+    #expect(result.map(\.id.value) == expected.map(\.id.value))
+    print("MEMORY_BENCH scenario=unplaced mode=\(mode) items=\(count) baseline_bytes=\(baseline) peak_bytes=\(measuredPeak) elapsed_ns=\(elapsed)")
+}
+
+@Test func benchmarkRecordOrderingMemory() throws {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1",
+          let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_MODE"] else { return }
+    let count = Int(ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_ITEMS"] ?? "1000") ?? 1000
+    guard (1...10_000).contains(count) else { return }
+    let records = (0..<count).map { "id-\($0)-" + String(repeating: "a", count: 50) }
+    let placed = stride(from: count - 1, through: 0, by: -2).map { records[$0] }
+    func peak() -> Int {
+        var usage = rusage()
+        _ = getrusage(RUSAGE_SELF, &usage)
+        return usage.ru_maxrss
+    }
+    let baseline = peak()
+    let start = DispatchTime.now().uptimeNanoseconds
+    var result: [Int] = []
+    for _ in 0..<5 {
+        if mode == "order-rust" {
+            result = try #require(GridModel.rustRecordOrder(recordIDs: records, placedIDs: placed))
+        } else if mode == "order-swift" {
+            let byID = Dictionary(uniqueKeysWithValues: records.enumerated().map { ($0.element, $0.offset) })
+            var seen = Set<String>()
+            let ordered = placed.compactMap { id -> Int? in guard seen.insert(id).inserted else { return nil }; return byID[id] }
+            result = ordered + records.enumerated().compactMap { index, id in seen.insert(id).inserted ? index : nil }
+        } else { return }
+    }
+    let elapsed = DispatchTime.now().uptimeNanoseconds - start
+    #expect(result.count == count)
+    #expect(Set(result).count == count)
+    print("MEMORY_BENCH scenario=record-order mode=\(mode) items=\(count) baseline_bytes=\(baseline) peak_bytes=\(peak()) elapsed_ns=\(elapsed)")
+}
+
 @Test @MainActor func menuBarAndBackgroundAppsFollowGridPlacementPolicy() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
@@ -173,6 +322,19 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(imported.pages.flatMap { $0 }.count == apps.count, "nothing was dropped by the split")
 }
 
+@Test @MainActor func failedLegacyImportDoesNotModifyTheGrid() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    var changed = false
+    model.onChange = { changed = true }
+    let result = LegacyImportResult(folders: [], unplacedAppOrder: [], unresolvedBundleIDs: [], succeeded: false)
+    #expect(!model.applyLegacyImportIfFirstRun(result))
+    #expect(model.hasNoArrangement)
+    #expect(!changed)
+}
+
 @Test @MainActor func legacyAndPersistedItemsPruneBackgroundOnlyRecords() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
@@ -218,6 +380,26 @@ private func makeModel(directory: URL) -> GridModel {
 
     model.reconcile(with: [record("Apple", id: "a")]) // Banana "uninstalled"
     #expect(model.pages[0].count == 1)
+}
+
+@Test @MainActor func removingAppsEliminatesEmptyPages() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let records = (0..<71).map { record(String(format: "App%03d", $0), id: "id\($0)") }
+    model.reconcile(with: records)
+    #expect(model.pages.map(\.count) == [35, 35, 1])
+
+    let remaining = Array(records.prefix(35)) + [records[70]]
+    model.reconcile(with: remaining, prunesMissingItems: false)
+    #expect(model.pages.count == 3)
+    model.reconcile(with: remaining)
+    #expect(model.pages.map(\.count) == [35, 1])
+
+    model.reconcile(with: [])
+    #expect(model.pages.count == 1)
+    #expect(model.pages[0].isEmpty)
 }
 
 /// Regression: the startup cache path restores a snapshot that can lag the
@@ -273,6 +455,119 @@ private func makeModel(directory: URL) -> GridModel {
     }
     #expect(bundleIDs == ["c", "a", "b"])
 }
+
+@Test @MainActor func benchmarkSingleItemMoves() async {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1" else { return }
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<1000).map { record("App \($0)", id: "org.example.\($0)") })
+    var reference = model.pages
+    let startSwift = DispatchTime.now().uptimeNanoseconds
+    for _ in 0..<500 {
+        let item = reference[0].remove(at: 0)
+        reference[0].insert(item, at: 10)
+    }
+    let swift = DispatchTime.now().uptimeNanoseconds - startSwift
+    let startRust = DispatchTime.now().uptimeNanoseconds
+    for _ in 0..<500 { model.moveItem(fromPage: 0, fromIndex: 0, toPage: 0, toIndex: 10) }
+    let rust = DispatchTime.now().uptimeNanoseconds - startRust
+    #expect(model.pages == reference)
+    print("LAYOUT_BENCH apps=1000 moves=500 swift_ns=\(swift) rust_ns=\(rust)")
+}
+
+@Test @MainActor func benchmarkGridModelMemory() async {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1" else { return }
+    let count = Int(ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_ITEMS"] ?? "1000") ?? 1000
+    guard (1...10_000).contains(count) else { return }
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let records = (0..<count).map { record("App \($0)", id: "org.example.\($0)") }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    func peak() -> Int {
+        var usage = rusage()
+        _ = getrusage(RUSAGE_SELF, &usage)
+        return usage.ru_maxrss
+    }
+    let baseline = peak()
+    #expect(model.reconcile(with: records))
+    #expect(model.pages.flatMap { $0 }.count == count)
+    print("MEMORY_BENCH scenario=grid-model items=\(count) baseline_bytes=\(baseline) peak_bytes=\(peak())")
+    withExtendedLifetime(model) {}
+}
+
+@Test @MainActor func benchmarkStableGridReconcile() async {
+    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1" else { return }
+    let count = Int(ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_ITEMS"] ?? "4096") ?? 4096
+    guard (1...10_000).contains(count) else { return }
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let records = (0..<count).map { record("App \($0)", id: "org.example.\($0)") }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    #expect(model.reconcile(with: records))
+    func peak() -> Int { var usage = rusage(); _ = getrusage(RUSAGE_SELF, &usage); return usage.ru_maxrss }
+    let baseline = peak()
+    let start = DispatchTime.now().uptimeNanoseconds
+    for _ in 0..<5 { #expect(!model.reconcile(with: records)) }
+    let elapsed = DispatchTime.now().uptimeNanoseconds - start
+    print("MEMORY_BENCH scenario=stable-grid items=\(count) baseline_bytes=\(baseline) peak_bytes=\(peak()) elapsed_ns=\(elapsed)")
+    withExtendedLifetime(model) {}
+}
+
+@Test @MainActor func movingAGroupPreservesOrderAndRejectsStaleItems() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c"), record("D", id: "d")])
+    let original = model.pages[0]
+    let selected: Set<LayoutItem> = [original[0], original[2]]
+    let leader = model.pages[0][0]
+    #expect(model.moveItems(selected, leader: leader, toPage: 0, toIndex: 3) == 0)
+    #expect(model.pages == [[original[1], original[3], original[0], original[2]]])
+    let missing = LayoutItem.app(StableAppIdentifier(value: "missing"))
+    #expect(model.moveItems([leader, missing], leader: leader, toPage: 0, toIndex: 0) == nil)
+    #expect(model.pages == [[original[1], original[3], original[0], original[2]]])
+}
+
+@Test @MainActor func groupDropCreatesFolderAndPreservesItsApps() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")])
+    let a = model.pages[0][0]
+    let b = model.pages[0][1]
+    let target = model.pages[0][2]
+    #expect(model.moveItems([a, b], leader: a, toPage: 0, toIndex: 0, folderTarget: target) == 0)
+    guard case .folder(let id) = model.pages[0][0], let folder = model.folders[id] else {
+        Issue.record("expected folder")
+        return
+    }
+    #expect(folder.pages == [[target, a, b]])
+}
+
+@Test @MainActor func groupMoveRemovesAnEmptyPageAndPreservesCapacity() async {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    var settings = model.gridSettings
+    settings.columns = 2
+    settings.rows = 1
+    model.updateGridSettings(settings)
+    model.reconcile(with: (0..<4).map { record("App \($0)", id: "app\($0)") })
+    let original = model.pages
+    let group = Set(original[0])
+    #expect(model.moveItems(group, leader: original[0][0], toPage: 1, toIndex: 0) == 0)
+    #expect(model.pages == [original[0], original[1]])
+    #expect(model.pages.allSatisfy { !$0.isEmpty && $0.count <= 2 })
+}
+
+
 
 @Test @MainActor func draggingOneAppOntoAnotherCreatesFolder() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -446,6 +741,76 @@ private func makeModel(directory: URL) -> GridModel {
     await model2.loadDocument()
     #expect(model2.folders.values.first?.name == "MyFolder")
     #expect(model2.pages[0].count == 1)
+}
+
+@Test @MainActor func layoutBackupRestoresTheGridWithoutChangingPreferences() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = makeModel(directory: root.appendingPathComponent("source"))
+    let target = makeModel(directory: root.appendingPathComponent("target"))
+    await source.loadDocument()
+    await target.loadDocument()
+    let apps = [record("Alpha", id: "a"), record("Beta", id: "b")]
+    source.reconcile(with: apps)
+    source.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+    var settings = source.gridSettings
+    settings.columns = 5
+    source.updateGridSettings(settings)
+    let url = root.appendingPathComponent("backup.json")
+    try await source.exportLayoutBackup(to: url)
+
+    target.reconcile(with: apps)
+    target.setShowsMenuBarIcon(false)
+    target.setReturnToFirstPage(true)
+    target.setCloseOnBackgroundClick(false)
+    target.setScreenTarget(.main)
+    let previousPages = target.pages
+    try await target.restoreLayoutBackup(from: url)
+    #expect(target.pages == source.pages)
+    #expect(target.folders == source.folders)
+    #expect(target.gridSettings.columns == 5)
+    #expect(!target.showsMenuBarIcon)
+    #expect(target.returnToFirstPage)
+    #expect(!target.closeOnBackgroundClick)
+    #expect(target.screenTarget == .main)
+    let backupURL = root.appendingPathComponent("target/layout.lastknowngood.json")
+    let previous = try JSONDecoder().decode(LayoutDocument.self, from: Data(contentsOf: backupURL))
+    #expect(previous.pages == previousPages)
+
+    let persisted = makeModel(directory: root.appendingPathComponent("target"))
+    await persisted.loadDocument()
+    #expect(persisted.pages == source.pages)
+    #expect(persisted.folders == source.folders)
+    #expect(!persisted.showsMenuBarIcon)
+    #expect(persisted.returnToFirstPage)
+    #expect(!persisted.closeOnBackgroundClick)
+    #expect(persisted.screenTarget == .main)
+}
+
+@Test @MainActor func invalidLayoutBackupDoesNotReplaceTheExistingLayout() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = makeModel(directory: root)
+    await model.loadDocument()
+    let app = record("Alpha", id: "a")
+    model.reconcile(with: [app])
+    _ = await model.save()
+    let original = model.pages
+    var invalid = LayoutDocument.empty
+    invalid.pages = [[.app(app.id.asPersistenceIdentifier), .app(app.id.asPersistenceIdentifier)]]
+    let url = root.appendingPathComponent("invalid.json")
+    try JSONEncoder().encode(invalid).write(to: url)
+    do {
+        try await model.restoreLayoutBackup(from: url)
+        Issue.record("invalid backup was accepted")
+    } catch LayoutBackupError.invalidFormat {
+    } catch {
+        Issue.record("unexpected error: \(error)")
+    }
+    #expect(model.pages == original)
+    let reloaded = makeModel(directory: root)
+    await reloaded.loadDocument()
+    #expect(reloaded.pages == original)
 }
 
 /// Real-world bug, confirmed on an actual corrupted document: a page
@@ -629,6 +994,30 @@ private func makeModel(directory: URL) -> GridModel {
         return nil
     }
     #expect(order == ["Cherry", "Banana", "Apple"])
+}
+
+@Test @MainActor func backfillFindsMissingDatesInsideFoldersAndKeepsExistingValues() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = LayoutStore(directory: dir)
+    let apps = [record("Alpha", id: "a"), record("Beta", id: "b"), record("Gamma", id: "c")]
+    let ids = apps.map { $0.id.asPersistenceIdentifier }
+    let folder = Folder(name: "Folder", pages: [[.app(ids[1]), .app(ids[2])]])
+    var document = LayoutDocument.empty
+    document.pages = [[.app(ids[0]), .folder(folder.id)]]
+    document.folders = [folder.id: folder]
+    document.dateAddedByID[ids[0]] = Date(timeIntervalSince1970: 111)
+    document.dateAddedByID[ids[2]] = Date(timeIntervalSince1970: 222)
+    try await store.save(document)
+    let model = GridModel(layoutStore: store)
+    await model.loadDocument()
+    _ = model.reconcile(with: apps)
+    #expect(await model.save())
+    let result = await store.load()
+    #expect(result.dateAddedByID[ids[0]] == Date(timeIntervalSince1970: 111))
+    #expect(result.dateAddedByID[ids[1]] == Date(timeIntervalSince1970: 0))
+    #expect(result.dateAddedByID[ids[2]] == Date(timeIntervalSince1970: 222))
+    #expect(!model.reconcile(with: apps))
 }
 
 @Test @MainActor func applySortModeLastUsedOrdersMostRecentlyLaunchedFirstAndNeverUsedLast() async throws {

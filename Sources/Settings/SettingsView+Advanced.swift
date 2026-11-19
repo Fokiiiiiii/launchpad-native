@@ -59,6 +59,20 @@ extension SettingsView {
                 }
 
                 VStack(alignment: .leading, spacing: Metrics.sectionHeaderSpacing) {
+                    SettingsSectionHeader(L10n.layoutBackupHeader, systemImage: "externaldrive", tint: .blue)
+                    SettingsCard {
+                        SettingsCardRow(minHeight: 44) {
+                            HStack {
+                                Button(L10n.layoutBackupExport) { exportLayoutBackup() }
+                                Spacer()
+                                Button(L10n.layoutBackupImport) { importLayoutBackup() }
+                            }
+                            .disabled(isHandlingLayoutBackup)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: Metrics.sectionHeaderSpacing) {
                     SettingsSectionHeader(L10n.diagnosticsHeader, systemImage: "stethoscope", tint: .purple)
                     SettingsCard {
                         SettingsCardRow(minHeight: 34) {
@@ -85,6 +99,62 @@ extension SettingsView {
     /// Writes the log archive wherever the user chooses. Deliberately a save
     /// panel rather than a fixed location: the file is meant to be attached to
     /// something, so it should land where the user will look for it.
+
+    private func exportLayoutBackup() {
+        guard !isHandlingLayoutBackup, let window = NSApp.keyWindow else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "LaunchpadNative-layout.json"
+        panel.allowedContentTypes = [.json]
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            isHandlingLayoutBackup = true
+            Task { @MainActor in
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer {
+                    if scoped { url.stopAccessingSecurityScopedResource() }
+                    isHandlingLayoutBackup = false
+                }
+                do { try await viewModel.exportLayoutBackup(to: url) }
+                catch { showLayoutBackupError(error, on: window) }
+            }
+        }
+    }
+
+    private func importLayoutBackup() {
+        guard !isHandlingLayoutBackup, let window = NSApp.keyWindow else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = L10n.layoutBackupConfirm
+            alert.informativeText = L10n.layoutBackupConfirmMessage
+            alert.addButton(withTitle: L10n.layoutBackupImport)
+            alert.addButton(withTitle: L10n.cancelButton)
+            alert.beginSheetModal(for: window) { response in
+                guard response == .alertFirstButtonReturn else { return }
+                isHandlingLayoutBackup = true
+                Task { @MainActor in
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if scoped { url.stopAccessingSecurityScopedResource() }
+                        isHandlingLayoutBackup = false
+                    }
+                    do { try await viewModel.restoreLayoutBackup(from: url) }
+                    catch { showLayoutBackupError(error, on: window) }
+                }
+            }
+        }
+    }
+
+    private func showLayoutBackupError(_ error: Error, on window: NSWindow) {
+        let alert = NSAlert(error: error)
+        alert.messageText = L10n.layoutBackupFailed
+        alert.beginSheetModal(for: window)
+    }
+
     private func saveDiagnosticsReport() {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

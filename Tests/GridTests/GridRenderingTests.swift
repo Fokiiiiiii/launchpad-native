@@ -42,7 +42,7 @@ private final class GridHarness {
     private(set) var launched: [String] = []
     private(set) var backgroundClicks = 0
 
-    init(appCount: Int, directory: URL, size: NSSize = NSSize(width: 1_680, height: 1_050)) async {
+    init(appCount: Int, directory: URL, size: NSSize = NSSize(width: 1_680, height: 1_050), iconCache: IconCache = IconCache()) async {
         model = GridModel(layoutStore: LayoutStore(directory: directory))
         await model.loadDocument()
         model.reconcile(with: (1...appCount).map { gridRecord("app\($0)") })
@@ -51,7 +51,7 @@ private final class GridHarness {
         var clicks = 0
         controller = GridViewController(
             model: model,
-            iconCache: IconCache(),
+            iconCache: iconCache,
             onLaunch: { launchedNames.append($0.bundleIdentifier) },
             onBackgroundClick: { clicks += 1 }
         )
@@ -127,6 +127,32 @@ private final class GridHarness {
     #expect(!harness.visibleCells().isEmpty, "the grid produced no cells at all")
     try await harness.waitForIcons(harness.visibleCells().count)
     #expect(harness.drawnIconCount() == harness.visibleCells().count, "some cells never drew an icon")
+}
+
+@Test @MainActor func hidingIconNamesKeepsAccessibleNames() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 1, directory: dir)
+    defer { harness.teardown() }
+    var settings = harness.model.gridSettings
+    settings.labelVisible = false
+    harness.model.updateGridSettings(settings)
+    harness.controller.reload()
+    harness.controller.view.layoutSubtreeIfNeeded()
+    let cell = try #require(harness.cell(at: 0))
+    let label = try #require(cell.view.subviews.compactMap { $0 as? NSTextField }.first)
+    #expect(label.isHidden)
+    #expect(cell.view.accessibilityLabel() == "app1")
+    settings.labelVisible = true
+    harness.model.updateGridSettings(settings)
+    harness.controller.reload()
+    harness.controller.view.layoutSubtreeIfNeeded()
+    let shown = try #require(harness.cell(at: 0))
+    let shownLabel = try #require(shown.view.subviews.compactMap { $0 as? NSTextField }.first)
+    #expect(!shownLabel.isHidden)
+    shown.configureAsFolder(name: "Work", isSelected: false, iconSize: 96, icons: [], requestKey: "folder:test", showsLabel: false)
+    #expect(shownLabel.isHidden)
+    #expect(shown.view.accessibilityLabel() == "Work folder")
 }
 
 /// Icon size is decided per cell when it is built, and nothing revisits it — so
@@ -227,6 +253,53 @@ private func appKeys(onPage page: Int, of model: GridModel) -> [String] {
     }
 }
 
+@Test @MainActor func aColdNeighbourLoadsItsIconsWhileVisible() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 60, directory: dir.appendingPathComponent("layout"))
+    defer { harness.teardown() }
+    let cache = IconCache(cacheDirectory: dir.appendingPathComponent("cold-icons"))
+    let item = try #require(harness.model.pages[1].first)
+    guard case .app(let id) = item else { Issue.record("expected app"); return }
+    let record = try #require(harness.model.record(for: id))
+    let scroll = try #require(harness.controller.view.subviews.compactMap { $0 as? NSScrollView }.first)
+    let neighbour = NeighborPage.makeView(
+        items: [item], model: harness.model, iconCache: cache,
+        itemIdentifier: NSUserInterfaceItemIdentifier("ColdNeighbourCell"),
+        iconSize: 96, visualScale: 1, size: scroll.bounds.size, scrollViewFrame: scroll.frame
+    )
+    harness.controller.view.addSubview(neighbour)
+    defer { neighbour.removeFromSuperview() }
+    neighbour.layoutSubtreeIfNeeded()
+    let grids = neighbour.subviews.compactMap { ($0 as? NSScrollView)?.documentView as? NSCollectionView }
+    let grid = try #require(grids.first)
+    var loaded = false
+    for _ in 0..<80 {
+        neighbour.layoutSubtreeIfNeeded()
+        if let cell = grid.item(at: IndexPath(item: 0, section: 0)) as? GridCellItem,
+           let view = cell.view.subviews.compactMap({ $0 as? NSImageView }).first,
+           let icon = cache.cachedIconIfAvailable(for: record), view.image === icon {
+            loaded = true
+            break
+        }
+        try await Task.sleep(for: .milliseconds(25))
+    }
+    #expect(loaded)
+}
+
+@Test @MainActor func reusingAGridCellCancelsItsPreviousIconLoad() {
+    let cell = GridCellItem()
+    _ = cell.view
+    let old = Task { _ = try? await Task.sleep(for: .seconds(30)) }
+    cell.setIconLoadTask(old)
+    cell.configureAsApp(record: gridRecord("first"), icon: NSImage(), isSelected: false, iconSize: 96)
+    #expect(old.isCancelled)
+    let next = Task { _ = try? await Task.sleep(for: .seconds(30)) }
+    cell.setIconLoadTask(next)
+    cell.prepareForReuse()
+    #expect(next.isCancelled)
+}
+
 /// Mid-swipe, the next page sits a page to the right of the grid and moves
 /// with it, and it is the next page's apps that it shows.
 @Test @MainActor func aSwipeBringsTheNextPageInBesideTheGrid() async throws {
@@ -250,6 +323,57 @@ private func appKeys(onPage page: Int, of model: GridModel) -> [String] {
     harness.controller.resetDragStateIfNeeded()
     #expect(neighbour.superview == nil)
 }
+
+@Test @MainActor func warmDiskIconsSurviveTheSwipeHandoff() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let iconDir = dir.appendingPathComponent("icons")
+    let cache = IconCache(cacheDirectory: iconDir)
+    let bitmap = try #require(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 256, pixelsHigh: 256, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+    let bytes = try #require(bitmap.bitmapData)
+    memset(bytes, 0xa5, bitmap.bytesPerRow * bitmap.pixelsHigh)
+    let png = try #require(bitmap.representation(using: .png, properties: [:]))
+    for n in 1...100 {
+        let item = gridRecord("app\(n)")
+        let name = BundleIdentifier.fileName(for: "\(item.iconCacheKey)-s128") + ".png"
+        try png.write(to: iconDir.appendingPathComponent(name))
+        _ = await cache.icon(for: item)
+    }
+    let harness = await GridHarness(appCount: 100, directory: dir.appendingPathComponent("layout"), iconCache: cache)
+    defer { harness.teardown() }
+    let target = try #require(harness.model.pages.dropFirst().first)
+    let expected = target.compactMap { item -> ApplicationRecord? in
+        guard case .app(let id) = item else { return nil }
+        return harness.model.record(for: id)
+    }
+    #expect(!expected.isEmpty)
+    #expect(expected.allSatisfy { cache.cachedIconIfAvailable(for: $0) != nil })
+    harness.controller.debugSimulatePageDrag(commit: true)
+    let neighbour = try #require(harness.controller.view.subviews.first { shownApps(in: $0) != nil })
+    let grids = neighbour.subviews.compactMap { ($0 as? NSScrollView)?.documentView as? NSCollectionView }
+    let neighbourGrid = try #require(grids.first)
+    for (index, item) in expected.enumerated() {
+        let cell = try #require(neighbourGrid.item(at: IndexPath(item: index, section: 0)) as? GridCellItem)
+        let iconView = try #require(cell.view.subviews.compactMap { $0 as? NSImageView }.first)
+        #expect(iconView.image === cache.cachedIconIfAvailable(for: item))
+        if index == 0 {
+            let rendered = try #require(RenderProbe.render(iconView))
+            #expect(RenderProbe.coverage(rendered, in: iconView.bounds) > 0.5)
+        }
+    }
+    try await Task.sleep(for: .milliseconds(700))
+    for (index, item) in expected.enumerated() {
+        let cell = try #require(harness.cell(at: index))
+        let iconView = try #require(cell.view.subviews.compactMap { $0 as? NSImageView }.first)
+        #expect(iconView.image === cache.cachedIconIfAvailable(for: item))
+        if index == 0 {
+            let rendered = try #require(RenderProbe.render(iconView))
+            #expect(RenderProbe.coverage(rendered, in: iconView.bounds) > 0.5)
+        }
+    }
+}
+
+
 
 /// Clicks and scrolls belong to the live grid; the neighbouring page is only a
 /// view of where the drag is heading.
@@ -390,6 +514,68 @@ private func accessibilityDescendants(of root: Any) -> [Any] {
     )
 }
 
+@Test @MainActor func commandClickSelectsMultipleItemsWithoutLaunching() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 3, directory: dir)
+    defer { harness.teardown() }
+    guard let collection = harness.controller.view.subviews.compactMap({ $0 as? NSScrollView }).first?.documentView as? GridCollectionView else {
+        Issue.record("missing collection")
+        return
+    }
+    for index in [0, 1] {
+        guard let attributes = collection.layoutAttributesForItem(at: IndexPath(item: index, section: 0)) else {
+            Issue.record("missing item")
+            return
+        }
+        let point = collection.convert(NSPoint(x: attributes.frame.midX, y: attributes.frame.midY), to: nil)
+        guard let event = NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: .command, timestamp: 0, windowNumber: harness.window.windowNumber, context: nil, eventNumber: index, clickCount: 1, pressure: 1) else { return }
+        collection.mouseDown(with: event)
+        collection.mouseUp(with: event)
+    }
+    #expect(harness.cell(at: 0)?.view.isAccessibilitySelected() == true)
+    #expect(harness.cell(at: 1)?.view.isAccessibilitySelected() == true)
+    #expect(harness.launchedApps.isEmpty)
+    harness.controller.reload()
+    #expect(harness.cell(at: 0)?.view.isAccessibilitySelected() == true)
+    #expect(harness.cell(at: 1)?.view.isAccessibilitySelected() == true)
+}
+
+@Test @MainActor func selectedItemsMoveTogetherThroughDragEvents() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = GridModel(layoutStore: LayoutStore(directory: dir))
+    await model.loadDocument()
+    model.reconcile(with: (1...4).map { gridRecord("app\($0)") })
+    let original = model.pages[0]
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1680, height: 1050)
+    controller.reload()
+    controller.view.layoutSubtreeIfNeeded()
+    guard let collection = controller.view.subviews.compactMap({ $0 as? NSScrollView }).first?.documentView as? GridCollectionView,
+          let first = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+          let second = collection.layoutAttributesForItem(at: IndexPath(item: 1, section: 0))?.frame,
+          let last = collection.layoutAttributesForItem(at: IndexPath(item: 3, section: 0))?.frame else {
+        Issue.record("missing grid layout")
+        return
+    }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: collection.convert(point, to: nil), modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    for frame in [first, second] {
+        let point = NSPoint(x: frame.midX, y: frame.midY)
+        collection.mouseDown(with: event(.leftMouseDown, point, .command))
+        collection.mouseUp(with: event(.leftMouseUp, point, .command))
+    }
+    let start = NSPoint(x: first.midX, y: first.midY)
+    let end = NSPoint(x: last.maxX - 2, y: last.midY)
+    collection.mouseDown(with: event(.leftMouseDown, start))
+    collection.mouseDragged(with: event(.leftMouseDragged, end))
+    try await Task.sleep(for: .milliseconds(250))
+    collection.mouseUp(with: event(.leftMouseUp, end))
+    #expect(model.pages == [[original[2], original[3], original[0], original[1]]])
+}
+
 /// The next page arrives a third of a second after the arrow key, so the
 /// selection has to wait for it: set at the key press it was painted on the page
 /// that was leaving and lost by the reload, and a Return in between launched an
@@ -424,6 +610,26 @@ private func accessibilityDescendants(of root: Any) -> [Any] {
         harness.controller.launchSelection()
     }
     #expect(harness.launchedApps == [expected], "the selection did not land on the new page's first app")
+}
+
+@Test @MainActor func resetToFirstPageCancelsAnInFlightPageTurn() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let harness = await GridHarness(appCount: 80, directory: dir)
+    defer { harness.teardown() }
+    try await harness.waitForIcons(1)
+    let columns = harness.model.gridSettings.columns
+    harness.controller.moveSelection(deltaColumns: 0, deltaRows: 0)
+    harness.controller.moveSelection(deltaColumns: columns - 1, deltaRows: 0)
+    harness.controller.moveSelection(deltaColumns: 1, deltaRows: 0)
+    harness.controller.resetToFirstPage()
+    try await Task.sleep(for: .milliseconds(500))
+    let scroll = try #require(harness.controller.view.subviews.compactMap { $0 as? NSScrollView }.first)
+    let grid = try #require(scroll.documentView as? NSCollectionView)
+    let visible = (0..<grid.numberOfItems(inSection: 0)).compactMap {
+        (grid.item(at: IndexPath(item: $0, section: 0)) as? GridCellItem)?.currentRequestKey
+    }
+    #expect(visible == appKeys(onPage: 0, of: harness.model))
 }
 
 private enum GridTestError: Error { case unexpectedLayout }

@@ -84,6 +84,17 @@ private func reloaded(_ directory: URL, until isSettled: (GridModel) -> Bool) as
     #expect(fresh.gridSettings.pageMargins == 55)
 }
 
+@Test @MainActor func windowedSettingSurvivesARelaunch() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = await makeModel(dir)
+    let viewModel = makeViewModel(model)
+    #expect(!viewModel.windowed)
+    viewModel.windowed = true
+    let fresh = try await reloaded(dir) { $0.gridSettings.windowed }
+    #expect(fresh.gridSettings.windowed)
+}
+
 @Test @MainActor func iconScaleSurvivesARelaunchAndMarksItselfCustom() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
@@ -119,9 +130,17 @@ private func reloaded(_ directory: URL, until isSettled: (GridModel) -> Bool) as
     let viewModel = makeViewModel(model)
 
     viewModel.sortMode = .name
+    viewModel.returnToFirstPage = true
+    viewModel.closeOnBackgroundClick = false
+    viewModel.screenTarget = .main
+    viewModel.labelVisible = false
 
-    let fresh = try await reloaded(dir) { $0.gridSettings.sortMode == .name }
+    let fresh = try await reloaded(dir) { $0.gridSettings.sortMode == .name && $0.returnToFirstPage && $0.screenTarget == .main && !$0.closeOnBackgroundClick && !$0.gridSettings.labelVisible }
     #expect(fresh.gridSettings.sortMode == .name)
+    #expect(fresh.returnToFirstPage)
+    #expect(!fresh.closeOnBackgroundClick)
+    #expect(fresh.screenTarget == .main)
+    #expect(!fresh.gridSettings.labelVisible)
 }
 
 // MARK: appearance
@@ -149,11 +168,13 @@ private func reloaded(_ directory: URL, until isSettled: (GridModel) -> Bool) as
     viewModel.backgroundMode = .wallpaper
     viewModel.glassMaterialIntensity = 0.62
     viewModel.blursWallpaper = false
+    viewModel.wallpaperBlurRadius = 23
 
-    let fresh = try await reloaded(dir) { $0.blursWallpaper == false && $0.backgroundMode == .wallpaper }
+    let fresh = try await reloaded(dir) { $0.blursWallpaper == false && $0.backgroundMode == .wallpaper && $0.wallpaperBlurRadius == 23 }
     #expect(fresh.backgroundMode == .wallpaper)
     #expect(abs(fresh.glassMaterialIntensity - 0.62) < 0.0001)
     #expect(fresh.blursWallpaper == false)
+    #expect(fresh.wallpaperBlurRadius == 23)
 }
 
 @Test @MainActor func appIconStyleSurvivesARelaunchAndNotifies() async throws {

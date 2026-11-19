@@ -534,6 +534,7 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
                 }
             }
         }
+        gridModel.showsNames = model.gridSettings.labelVisible
         gridModel.tiles = tiles
         // A page change rebuilds the tiles asynchronously, after its animation
         // — so a selection meant for the page being entered has to wait for

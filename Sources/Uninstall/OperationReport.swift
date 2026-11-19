@@ -5,6 +5,21 @@ import Foundation
 /// A snapshot of one removal plan or execution.
 /// Dry-run entries have `executed == false` and no result yet; execution
 /// entries carry the outcome and any failure reason returned by the executor.
+import CLaunchpadCore
+import Persistence
+
+private struct OperationReportJSON: Encodable {
+    let bundleIdentifier: String
+    let generatedAt: String
+    let entries: [OperationReport.Entry]
+
+    init(_ report: OperationReport) {
+        bundleIdentifier = report.bundleIdentifier
+        generatedAt = ISO8601DateFormatter().string(from: report.generatedAt)
+        entries = report.entries
+    }
+}
+
 public struct OperationReport: Codable, Sendable {
     public struct Entry: Codable, Sendable {
         public let path: String
@@ -117,13 +132,9 @@ public actor OperationReportStore {
             throw OperationReportStoreError.directoryCreationFailed(directoryCreationError)
         }
 
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-
         let data: Data
         do {
-            data = try encoder.encode(report)
+            data = try RustJSONCodec.encode(OperationReportJSON(report), prettyPrinted: true)
         } catch {
             throw OperationReportStoreError.encodingFailed(error)
         }
@@ -138,9 +149,14 @@ public actor OperationReportStore {
         let unique = UUID().uuidString.prefix(8)
         let name = "\(BundleIdentifier.fileName(for: report.bundleIdentifier))-\(timestamp)-\(unique).json"
         let url = directory.appendingPathComponent(name)
-        do {
-            try data.write(to: url, options: .atomic)
-        } catch {
+        let status = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else { return 22 }
+            return data.withUnsafeBytes { bytes in
+                launchpad_write_file_atomic(path, bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count))
+            }
+        }
+        guard status == 0 else {
+            let error = NSError(domain: NSPOSIXErrorDomain, code: Int(status))
             DiagnosticsLog.uninstall.error("Failed to write operation report: \(error.localizedDescription, privacy: .public)")
             throw OperationReportStoreError.writeFailed(error)
         }

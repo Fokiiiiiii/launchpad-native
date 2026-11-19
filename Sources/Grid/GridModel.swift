@@ -8,6 +8,54 @@ import Persistence
 /// reconciles them against catalog changes (new apps get appended, removed
 /// apps get pruned), and is the single place mutation operations (reorder,
 /// folder create/rename/dissolve) happen before being persisted.
+
+import CLaunchpadCore
+
+private final class RustIndexBuffer { var indices: [UInt32] = []; var received = false }
+
+private final class LayoutMovePlan {
+    var insertion: UInt?
+    var actions: [UInt] = []
+}
+
+private final class LayoutReorderResult {
+    var order: [UInt] = []
+    var lengths: [UInt] = []
+    var page: UInt = 0
+
+    static func receive(_ context: UnsafeMutableRawPointer?, _ order: UnsafePointer<UInt>?, _ count: UInt, _ lengths: UnsafePointer<UInt>?, _ pageCount: UInt, _ page: UInt) {
+        guard let context, let order, let lengths, let count = Int(exactly: count), let pageCount = Int(exactly: pageCount) else { return }
+        let result = Unmanaged<LayoutReorderResult>.fromOpaque(context).takeUnretainedValue()
+        result.order = Array(UnsafeBufferPointer(start: order, count: count))
+        result.lengths = Array(UnsafeBufferPointer(start: lengths, count: pageCount))
+        result.page = page
+    }
+
+    func rebuild(from flat: [LayoutItem], allowsEmpty: Bool) -> [[LayoutItem]]? {
+        guard order.count == flat.count, let target = Int(exactly: page), target < lengths.count else { return nil }
+        var seen = [UInt8](repeating: 0, count: flat.count)
+        for value in order {
+            guard value < UInt(flat.count) else { return nil }
+            let index = Int(value)
+            guard seen[index] == 0 else { return nil }
+            seen[index] = 1
+        }
+        var rebuilt: [[LayoutItem]] = []
+        var offset = 0
+        for length in lengths {
+            guard let length = Int(exactly: length), (allowsEmpty || length > 0), length <= flat.count - offset else { return nil }
+            rebuilt.append(order[offset..<(offset + length)].map { flat[Int($0)] })
+            offset += length
+        }
+        return offset == flat.count ? rebuilt : nil
+    }
+}
+public enum LayoutBackupError: Error {
+    case invalidFormat
+    case changedDuringRestore
+    case saveFailed
+}
+
 @MainActor
 public final class GridModel {
     public private(set) var pages: [[LayoutItem]] = [[]]
@@ -112,18 +160,18 @@ public final class GridModel {
         onSearchableRecordsChange?()
     }
 
+    nonisolated private static func repackWithRust(_ pages: [[LayoutItem]], capacity: Int) -> [[LayoutItem]]? {
+        let flat = pages.flatMap { $0 }
+        let result = LayoutReorderResult()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt>?, UInt, UnsafePointer<UInt>?, UInt, UInt) -> Void = { LayoutReorderResult.receive($0, $1, $2, $3, $4, $5) }
+        let status = launchpad_layout_repack(UInt(flat.count), UInt(max(capacity, 1)), Unmanaged.passUnretained(result).toOpaque(), callback)
+        guard status == 1 else { return nil }
+        return result.rebuild(from: flat, allowsEmpty: true)
+    }
+
     private func reflowPagesToCurrentCapacity() {
-        let capacity = capacityPerPage
-        let flattened = pages.flatMap { $0 }
-        guard !flattened.isEmpty else { return }
-        var newPages: [[LayoutItem]] = []
-        var index = flattened.startIndex
-        while index < flattened.endIndex {
-            let end = min(index + capacity, flattened.endIndex)
-            newPages.append(Array(flattened[index..<end]))
-            index = end
-        }
-        pages = newPages
+        guard pages.contains(where: { !$0.isEmpty }), let repacked = Self.repackWithRust(pages, capacity: capacityPerPage) else { return }
+        pages = repacked
     }
 
     public var layoutMode: LayoutMode {
@@ -213,6 +261,31 @@ public final class GridModel {
 
     public func setBlursWallpaper(_ value: Bool) {
         document.blursWallpaper = value
+    }
+
+    public var wallpaperBlurRadius: Double { document.wallpaperBlurRadius }
+
+    public func setWallpaperBlurRadius(_ value: Double) {
+        guard value.isFinite else { return }
+        document.wallpaperBlurRadius = min(max(value, 0), 40)
+    }
+
+    public var returnToFirstPage: Bool { document.returnToFirstPage }
+
+    public func setReturnToFirstPage(_ value: Bool) {
+        document.returnToFirstPage = value
+    }
+
+    public var closeOnBackgroundClick: Bool { document.closeOnBackgroundClick }
+
+    public func setCloseOnBackgroundClick(_ value: Bool) {
+        document.closeOnBackgroundClick = value
+    }
+
+    public var screenTarget: LauncherScreenTarget { document.screenTarget }
+
+    public func setScreenTarget(_ value: LauncherScreenTarget) {
+        document.screenTarget = value
     }
 
     public var menuIconVisibility: MenuIconVisibility {
@@ -338,7 +411,201 @@ public final class GridModel {
     /// Returns catalog records in the same order the user sees them in the
     /// grid: page order, then folder position, then any not-yet-placed records.
     /// Search uses this instead of inventing a second alphabetical order.
+    nonisolated static func rustRecordOrder(recordIDs: [String], placedIDs: [String]) -> [Int]? {
+        guard let recordCount = UInt32(exactly: recordIDs.count), let placedCount = UInt32(exactly: placedIDs.count) else { return nil }
+        var wire = Data()
+        for count in [recordCount, placedCount] {
+            var little = count.littleEndian
+            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
+        }
+        for group in [recordIDs, placedIDs] {
+            for id in group {
+                let normalized = id.utf8.allSatisfy { $0 < 0x80 } ? id : id.precomposedStringWithCanonicalMapping
+                let bytes = normalized.utf8
+                guard let count = UInt32(exactly: bytes.count), count != UInt32.max else { return nil }
+                var little = count.littleEndian
+                withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
+                wire.append(contentsOf: bytes)
+            }
+        }
+        let output = RustIndexBuffer()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
+            guard let context, let indices, let count = Int(exactly: count) else { return }
+            Unmanaged<RustIndexBuffer>.fromOpaque(context).takeUnretainedValue().indices = Array(UnsafeBufferPointer(start: indices, count: count))
+        }
+        let status = wire.withUnsafeBytes { bytes in
+            launchpad_order_records(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
+        }
+        guard status == 1, output.indices.count == recordIDs.count else { return nil }
+        // Validate the returned permutation without retaining a second hash table.
+        var seen = [UInt8](repeating: 0, count: recordIDs.count)
+        var result: [Int] = []
+        result.reserveCapacity(recordIDs.count)
+        for value in output.indices {
+            let index = Int(value)
+            guard recordIDs.indices.contains(index), seen[index] == 0 else { return nil }
+            seen[index] = 1
+            result.append(index)
+        }
+        return result
+    }
+
+
+    nonisolated private static func appendWireIdentifier(_ id: String, to wire: inout Data) -> Bool {
+        var normalized = id.utf8.allSatisfy { $0 < 0x80 } ? id : id.precomposedStringWithCanonicalMapping
+        return normalized.withUTF8 { bytes in
+            guard let length = UInt32(exactly: bytes.count), length != UInt32.max else { return false }
+            var little = length.littleEndian
+            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
+            wire.append(contentsOf: bytes)
+            return true
+        }
+    }
+
+    nonisolated static func rustUnplacedRecords(
+        records: [ApplicationRecord], showMenuBar: Bool, hidden: Set<String>, placed: Set<String>
+    ) -> [ApplicationRecord]? {
+        guard let recordCount = UInt32(exactly: records.count),
+              let hiddenCount = UInt32(exactly: hidden.count),
+              let placedCount = UInt32(exactly: placed.count) else { return nil }
+        var wire = Data()
+        let itemCount = records.count.addingReportingOverflow(hidden.count)
+        let totalCount = itemCount.partialValue.addingReportingOverflow(placed.count)
+        if !itemCount.overflow, !totalCount.overflow {
+            wire.reserveCapacity(12 + min(totalCount.partialValue, 10_000) * 64)
+        }
+        for count in [recordCount, hiddenCount, placedCount] {
+            var little = count.littleEndian
+            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
+        }
+        for id in hidden { guard appendWireIdentifier(id, to: &wire) else { return nil } }
+        for id in placed { guard appendWireIdentifier(id, to: &wire) else { return nil } }
+        for record in records {
+            wire.append(!record.isBackgroundOnly && (showMenuBar || !record.isMenuBarApp) ? 1 : 0)
+            guard appendWireIdentifier(record.id.value, to: &wire) else { return nil }
+        }
+        let output = RustIndexBuffer()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
+            guard let context, let indices, let count = Int(exactly: count) else { return }
+            let output = Unmanaged<RustIndexBuffer>.fromOpaque(context).takeUnretainedValue()
+            output.indices = Array(UnsafeBufferPointer(start: indices, count: count))
+            output.received = true
+        }
+        let status = wire.withUnsafeBytes { bytes in
+            launchpad_unplaced_records(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
+        }
+        guard status == 1, output.received else { return nil }
+        var selected: [ApplicationRecord] = []
+        selected.reserveCapacity(output.indices.count)
+        var previous = -1
+        for raw in output.indices {
+            let index = Int(raw)
+            guard records.indices.contains(index), index > previous else { return nil }
+            let record = records[index]
+            guard !record.isBackgroundOnly, showMenuBar || !record.isMenuBarApp,
+                  !hidden.contains(record.id.value), !placed.contains(record.id.value) else { return nil }
+            selected.append(record)
+            previous = index
+        }
+        return selected
+    }
+
+    nonisolated static func rustMissingDateIndices(
+        ordered: [StableAppIdentifier], existing: [StableAppIdentifier: Date]
+    ) -> [Int]? {
+        guard let existingCount = UInt32(exactly: existing.count),
+              let candidateCount = UInt32(exactly: ordered.count) else { return nil }
+        var wire = Data()
+        let total = existing.count.addingReportingOverflow(ordered.count)
+        if !total.overflow { wire.reserveCapacity(8 + min(total.partialValue, 10_000) * 64) }
+        for count in [existingCount, candidateCount] {
+            var little = count.littleEndian
+            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
+        }
+        for id in existing.keys { guard appendWireIdentifier(id.value, to: &wire) else { return nil } }
+        for id in ordered { guard appendWireIdentifier(id.value, to: &wire) else { return nil } }
+        let output = RustIndexBuffer()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
+            guard let context, let indices, let count = Int(exactly: count) else { return }
+            let output = Unmanaged<RustIndexBuffer>.fromOpaque(context).takeUnretainedValue()
+            output.indices = Array(UnsafeBufferPointer(start: indices, count: count))
+            output.received = true
+        }
+        let status = wire.withUnsafeBytes { bytes in
+            launchpad_missing_dates(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
+        }
+        guard status == 1, output.received else { return nil }
+        var result: [Int] = []
+        result.reserveCapacity(output.indices.count)
+        var previous = -1
+        for raw in output.indices {
+            let index = Int(raw)
+            guard ordered.indices.contains(index), index > previous, existing[ordered[index]] == nil else { return nil }
+            result.append(index)
+            previous = index
+        }
+        return result
+    }
+
+    nonisolated static func rustInvalidIdentifiers(valid: Set<String>, candidates: [String]) -> Set<String>? {
+        guard let candidateCount = UInt32(exactly: candidates.count),
+              let validCount = UInt32(exactly: valid.count) else { return nil }
+        var wire = Data()
+        let total = valid.count.addingReportingOverflow(candidates.count)
+        if !total.overflow { wire.reserveCapacity(12 + min(total.partialValue, 10_000) * 64) }
+        for count in [candidateCount, validCount, UInt32(0)] {
+            var little = count.littleEndian
+            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
+        }
+        for id in valid { guard appendWireIdentifier(id, to: &wire) else { return nil } }
+        for id in candidates {
+            wire.append(1)
+            guard appendWireIdentifier(id, to: &wire) else { return nil }
+        }
+        let output = RustIndexBuffer()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
+            guard let context, let indices, let count = Int(exactly: count) else { return }
+            let output = Unmanaged<RustIndexBuffer>.fromOpaque(context).takeUnretainedValue()
+            output.indices = Array(UnsafeBufferPointer(start: indices, count: count))
+            output.received = true
+        }
+        let status = wire.withUnsafeBytes { bytes in
+            launchpad_unplaced_records(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
+        }
+        guard status == 1, output.received else { return nil }
+        var invalid = Set<String>()
+        var previous = -1
+        for raw in output.indices {
+            let index = Int(raw)
+            guard candidates.indices.contains(index), index > previous, !valid.contains(candidates[index]) else { return nil }
+            invalid.insert(candidates[index])
+            previous = index
+        }
+        return invalid
+    }
+
     public func orderedRecords(from records: [ApplicationRecord]) -> [ApplicationRecord] {
+        var placed: [String] = []
+        for page in pages {
+            for item in page {
+                switch item {
+                case .app(let id): placed.append(id.value)
+                case .folder(let folderID):
+                    for folderPage in folders[folderID]?.pages ?? [] {
+                        for folderItem in folderPage {
+                            if case .app(let id) = folderItem { placed.append(id.value) }
+                        }
+                    }
+                }
+            }
+        }
+        guard let indices = Self.rustRecordOrder(recordIDs: records.map { $0.id.value }, placedIDs: placed) else {
+            return orderedRecordsFallback(from: records)
+        }
+        return indices.map { records[$0] }
+    }
+
+    private func orderedRecordsFallback(from records: [ApplicationRecord]) -> [ApplicationRecord] {
         let recordsByID = Dictionary(uniqueKeysWithValues: records.map { ($0.id.value, $0) })
         var orderedIDs: [String] = []
         var seen = Set<String>()
@@ -384,27 +651,32 @@ public final class GridModel {
         let previousDateAdded = document.dateAddedByID
         let previousKnown = document.knownApplications
 
-        recordsByIDValue = Dictionary(uniqueKeysWithValues: records.map { ($0.id.value, $0) })
+        var indexed = Dictionary<String, ApplicationRecord>(minimumCapacity: records.count)
+        for record in records {
+            let existing = indexed.updateValue(record, forKey: record.id.value)
+            precondition(existing == nil, "Duplicate application identifier")
+        }
+        recordsByIDValue = indexed
         // Before anything is pruned: an app that has moved looks, to the code
         // below, like one that was uninstalled and another that was installed.
         if prunesMissingItems {
             migrateMovedApplications(previousRecords: previousRecords)
         }
         let hiddenIDs = Set(document.hiddenApplicationIDs.map(\.value))
-        let validIDs = Set(recordsByIDValue.values.filter(isEligibleForGrid(_:)).map { $0.id.value })
-            .subtracting(hiddenIDs)
-
         if prunesMissingItems {
+            var validIDs = Set<String>()
+            validIDs.reserveCapacity(records.count)
+            for record in records where isEligibleForGrid(record) && !hiddenIDs.contains(record.id.value) {
+                validIDs.insert(record.id.value)
+            }
             pruneMissingItems(validIDs: validIDs)
         }
         backfillMissingDateAdded()
 
         let placedIDs = allPlacedAppIdentifierValues()
-        let newRecords = records
-            .filter(isEligibleForGrid(_:))
-            .filter { !hiddenIDs.contains($0.id.value) }
-            .filter { !placedIDs.contains($0.id.value) }
-            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        var newRecords = Self.rustUnplacedRecords(records: records, showMenuBar: showMenuBarApplications, hidden: hiddenIDs, placed: placedIDs)
+            ?? records.filter { isEligibleForGrid($0) && !hiddenIDs.contains($0.id.value) && !placedIDs.contains($0.id.value) }
+        newRecords.sort { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
 
         for record in newRecords {
             let identifier = record.id.asPersistenceIdentifier
@@ -435,10 +707,10 @@ public final class GridModel {
     /// or carrying a date.
     private func referencedIdentifierValues() -> Set<String> {
         var values = allPlacedAppIdentifierValues()
-        values.formUnion(document.aliases.keys.map(\.value))
-        values.formUnion(document.hiddenApplicationIDs.map(\.value))
-        values.formUnion(document.dateAddedByID.keys.map(\.value))
-        values.formUnion(document.lastUsedByID.keys.map(\.value))
+        values.formUnion(document.aliases.keys.lazy.map(\.value))
+        values.formUnion(document.hiddenApplicationIDs.lazy.map(\.value))
+        values.formUnion(document.dateAddedByID.keys.lazy.map(\.value))
+        values.formUnion(document.lastUsedByID.keys.lazy.map(\.value))
         return values
     }
 
@@ -463,25 +735,78 @@ public final class GridModel {
     /// same bundle identifier and signing team and there is exactly one of each.
     /// Two of either is ambiguous — which copy went where cannot be told — and is
     /// left alone, as it always was.
+    nonisolated static func rustFingerprintMatches(_ old: [KnownApplication], _ new: [KnownApplication]) -> [(Int, Int)]? {
+        guard let oldCount = UInt32(exactly: old.count), let newCount = UInt32(exactly: new.count) else { return nil }
+        var wire = Data()
+        for count in [oldCount, newCount] {
+            var little = count.littleEndian
+            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
+        }
+        func append(_ value: String?) -> Bool {
+            guard let value else {
+                var marker = UInt32.max.littleEndian
+                withUnsafeBytes(of: &marker) { wire.append(contentsOf: $0) }
+                return true
+            }
+            let normalized = value.utf8.allSatisfy { $0 < 0x80 } ? value : value.precomposedStringWithCanonicalMapping
+            let bytes = normalized.utf8
+            guard let count = UInt32(exactly: bytes.count), count != UInt32.max else { return false }
+            var little = count.littleEndian
+            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
+            wire.append(contentsOf: bytes)
+            return true
+        }
+        for group in [old, new] {
+            for item in group {
+                guard append(item.bundleIdentifier), append(item.teamIdentifier) else { return nil }
+            }
+        }
+        let output = RustIndexBuffer()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
+            guard let context, let indices, let count = Int(exactly: count) else { return }
+            Unmanaged<RustIndexBuffer>.fromOpaque(context).takeUnretainedValue().indices = Array(UnsafeBufferPointer(start: indices, count: count))
+        }
+        let status = wire.withUnsafeBytes { bytes in
+            launchpad_match_moved_apps(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
+        }
+        guard status == 1, output.indices.count.isMultiple(of: 2) else { return nil }
+        var result: [(Int, Int)] = []
+        var seenOld = [UInt8](repeating: 0, count: old.count)
+        var seenNew = [UInt8](repeating: 0, count: new.count)
+        for index in stride(from: 0, to: output.indices.count, by: 2) {
+            let oldIndex = Int(output.indices[index])
+            let newIndex = Int(output.indices[index + 1])
+            guard old.indices.contains(oldIndex), new.indices.contains(newIndex), old[oldIndex] == new[newIndex],
+                  seenOld[oldIndex] == 0, seenNew[newIndex] == 0 else { return nil }
+            seenOld[oldIndex] = 1
+            seenNew[newIndex] = 1
+            result.append((oldIndex, newIndex))
+        }
+        return result
+    }
+
     private func migrateMovedApplications(previousRecords: [String: ApplicationRecord]) {
         let referenced = referencedIdentifierValues()
-        let orphans = referenced.filter { recordsByIDValue[$0] == nil }
+        let orphans = referenced.filter { recordsByIDValue[$0] == nil }.compactMap { id -> (String, KnownApplication)? in
+            guard let known = previousRecords[id].map(fingerprint(of:)) ?? document.knownApplications[StableAppIdentifier(value: id)] else { return nil }
+            return (id, known)
+        }
         guard !orphans.isEmpty else { return }
         let newcomers = recordsByIDValue.values.filter { !referenced.contains($0.id.value) }
         guard !newcomers.isEmpty else { return }
-
+        let oldFingerprints = orphans.map(\.1)
+        let newFingerprints = newcomers.map(fingerprint(of:))
+        if let pairs = Self.rustFingerprintMatches(oldFingerprints, newFingerprints) {
+            for (old, new) in pairs {
+                remapIdentifier(from: StableAppIdentifier(value: orphans[old].0), to: newcomers[new].id.asPersistenceIdentifier)
+            }
+            return
+        }
+        // Preserve the existing layout if the Rust boundary rejects its input.
         var orphansByApp: [KnownApplication: [String]] = [:]
-        for orphan in orphans {
-            let known = previousRecords[orphan].map(fingerprint(of:))
-                ?? document.knownApplications[StableAppIdentifier(value: orphan)]
-            guard let known else { continue }
-            orphansByApp[known, default: []].append(orphan)
-        }
+        for (id, known) in orphans { orphansByApp[known, default: []].append(id) }
         var newcomersByApp: [KnownApplication: [ApplicationRecord]] = [:]
-        for record in newcomers {
-            newcomersByApp[fingerprint(of: record), default: []].append(record)
-        }
-
+        for record in newcomers { newcomersByApp[fingerprint(of: record), default: []].append(record) }
         for (app, olds) in orphansByApp {
             guard olds.count == 1, let news = newcomersByApp[app], news.count == 1 else { continue }
             remapIdentifier(from: StableAppIdentifier(value: olds[0]), to: news[0].id.asPersistenceIdentifier)
@@ -510,22 +835,28 @@ public final class GridModel {
     /// time, so position is the best available proxy. Anchored to the epoch so
     /// backfilled values always sort older than genuinely new ones.
     private func backfillMissingDateAdded() {
-        var index = 0
+        var ordered: [StableAppIdentifier] = []
         for page in pages {
-            for item in page {
-                guard case .app(let id) = item, document.dateAddedByID[id] == nil else { continue }
-                document.dateAddedByID[id] = Date(timeIntervalSince1970: TimeInterval(index))
-                index += 1
-            }
+            for case .app(let id) in page { ordered.append(id) }
         }
         for folderID in folders.keys.sorted(by: { $0.value < $1.value }) {
             guard let folder = folders[folderID] else { continue }
-            for folderPage in folder.pages {
-                for item in folderPage {
-                    guard case .app(let id) = item, document.dateAddedByID[id] == nil else { continue }
-                    document.dateAddedByID[id] = Date(timeIntervalSince1970: TimeInterval(index))
-                    index += 1
-                }
+            for page in folder.pages {
+                for case .app(let id) in page { ordered.append(id) }
+            }
+        }
+        guard ordered.contains(where: { document.dateAddedByID[$0] == nil }) else { return }
+        if let indices = Self.rustMissingDateIndices(ordered: ordered, existing: document.dateAddedByID) {
+            var position = 0
+            for index in indices where document.dateAddedByID[ordered[index]] == nil {
+                document.dateAddedByID[ordered[index]] = Date(timeIntervalSince1970: TimeInterval(position))
+                position += 1
+            }
+        } else {
+            var position = 0
+            for id in ordered where document.dateAddedByID[id] == nil {
+                document.dateAddedByID[id] = Date(timeIntervalSince1970: TimeInterval(position))
+                position += 1
             }
         }
     }
@@ -558,16 +889,45 @@ public final class GridModel {
     /// Every pruned identifier is logged: why specific apps stop matching
     /// between scans has never been root-caused.
     private func pruneMissingItems(validIDs: Set<String>) {
+        func missing(_ item: LayoutItem) -> Bool {
+            guard case .app(let id) = item else { return false }
+            return !validIDs.contains(id.value)
+        }
+        let needsPruning = pages.contains { $0.contains(where: missing) }
+            || folders.values.contains { folder in folder.pages.contains { $0.contains(where: missing) } }
+        let emptyPage = pages.isEmpty || pages.contains(where: \.isEmpty)
+        let emptyFolder = folders.values.contains { $0.pages.allSatisfy(\.isEmpty) }
+        guard needsPruning || emptyPage || emptyFolder else { return }
+        var invalid: Set<String>?
+        if needsPruning {
+            var candidates: [String] = []
+            for page in pages {
+                for case .app(let id) in page { candidates.append(id.value) }
+            }
+            for folder in folders.values {
+                for page in folder.pages {
+                    for case .app(let id) in page { candidates.append(id.value) }
+                }
+            }
+            invalid = Self.rustInvalidIdentifiers(valid: validIDs, candidates: candidates)
+            if invalid?.isEmpty == true { invalid = nil }
+        } else {
+            invalid = []
+        }
+        func isValid(_ id: String) -> Bool {
+            if let invalid { return !invalid.contains(id) }
+            return validIDs.contains(id)
+        }
         for pageIndex in pages.indices {
             let before = pages[pageIndex]
             pages[pageIndex] = before.filter { item in
                 guard case .app(let id) = item else { return true }
-                return validIDs.contains(id.value)
+                return isValid(id.value)
             }
             let removed = before.count - pages[pageIndex].count
             if removed > 0 {
                 let removedIDs = before.compactMap { item -> String? in
-                    guard case .app(let id) = item, !validIDs.contains(id.value) else { return nil }
+                    guard case .app(let id) = item, !isValid(id.value) else { return nil }
                     return id.value
                 }
                 DiagnosticsLog.grid.notice("Pruned \(removed, privacy: .public) item(s) from page \(pageIndex, privacy: .public): \(removedIDs, privacy: .private)")
@@ -580,12 +940,12 @@ public final class GridModel {
             folder.pages = folder.pages.map { folderPage in
                 folderPage.filter { item in
                     guard case .app(let id) = item else { return true }
-                    let isValid = validIDs.contains(id.value)
-                    if !isValid {
+                    let keep = isValid(id.value)
+                    if !keep {
                         prunedFromFolder += 1
                         removedFromFolder.append(id.value)
                     }
-                    return isValid
+                    return keep
                 }
             }
             if prunedFromFolder > 0 {
@@ -604,6 +964,8 @@ public final class GridModel {
                 dissolveFolder(folderID)
             }
         }
+        pages.removeAll(where: \.isEmpty)
+        if pages.isEmpty { pages = [[]] }
     }
 
     private var capacityPerPage: Int { max(gridSettings.columns * gridSettings.rows, 1) }
@@ -626,24 +988,126 @@ public final class GridModel {
 
     // MARK: - Mutations
 
-    public func moveItem(fromPage: Int, fromIndex: Int, toPage: Int, toIndex: Int) {
-        guard pages.indices.contains(fromPage), pages[fromPage].indices.contains(fromIndex) else { return }
+
+    nonisolated private static func validatedOverflowActions(
+        _ raw: [UInt], sizes initial: [Int], start: Int, capacity: Int
+    ) -> [(Int, Int)]? {
+        guard start >= 0, capacity > 0, raw.count.isMultiple(of: 2) else { return nil }
+        var sizes = initial
+        var expectedPage = start
+        var result: [(Int, Int)] = []
+        for index in stride(from: 0, to: raw.count, by: 2) {
+            guard let page = Int(exactly: raw[index]), let overflow = Int(exactly: raw[index + 1]),
+                  page == expectedPage, sizes.indices.contains(page), sizes[page] > capacity,
+                  overflow == sizes[page] - capacity else { return nil }
+            sizes[page] -= overflow
+            if page + 1 == sizes.count { sizes.append(0) }
+            let next = sizes[page + 1].addingReportingOverflow(overflow)
+            guard !next.overflow else { return nil }
+            sizes[page + 1] = next.partialValue
+            result.append((page, overflow))
+            expectedPage += 1
+        }
+        guard !sizes.indices.contains(expectedPage) || sizes[expectedPage] <= capacity else { return nil }
+        return result
+    }
+
+    nonisolated private static func applyOverflowActions(_ actions: [(Int, Int)], to pages: inout [[LayoutItem]]) {
+        for (page, overflow) in actions {
+            let moved = Array(pages[page].suffix(overflow))
+            pages[page].removeLast(overflow)
+            if page + 1 == pages.count { pages.append(moved) }
+            else { pages[page + 1].insert(contentsOf: moved, at: 0) }
+        }
+    }
+
+    nonisolated private static func moveWithRust(_ pages: inout [[LayoutItem]], fromPage: Int, fromIndex: Int, toPage: Int, toIndex: Int, capacity: Int) -> Bool {
+        guard pages.indices.contains(fromPage), pages[fromPage].indices.contains(fromIndex), toPage >= 0 else { return false }
+        let counts = pages.map { UInt($0.count) }
+        let plan = LayoutMovePlan()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UInt, UnsafePointer<UInt>?, UInt) -> Void = { context, insertion, actions, count in
+            guard let context, let actions, let count = Int(exactly: count) else { return }
+            let plan = Unmanaged<LayoutMovePlan>.fromOpaque(context).takeUnretainedValue()
+            plan.insertion = insertion
+            plan.actions = Array(UnsafeBufferPointer(start: actions, count: count))
+        }
+        let status = counts.withUnsafeBufferPointer { buffer in
+            launchpad_layout_move_one(buffer.baseAddress, UInt(buffer.count), UInt(fromPage), UInt(fromIndex), UInt(toPage), UInt(max(toIndex, 0)), UInt(capacity), Unmanaged.passUnretained(plan).toOpaque(), callback)
+        }
+        guard status == 1, let rawInsertion = plan.insertion, let insertion = Int(exactly: rawInsertion), plan.actions.count.isMultiple(of: 2) else { return false }
+        var sizes = pages.map(\.count)
+        sizes[fromPage] -= 1
+        while sizes.count <= toPage { sizes.append(0) }
+        guard insertion <= sizes[toPage] else { return false }
+        sizes[toPage] += 1
+        guard let actions = validatedOverflowActions(plan.actions, sizes: sizes, start: toPage, capacity: capacity) else { return false }
         let item = pages[fromPage].remove(at: fromIndex)
         while pages.count <= toPage { pages.append([]) }
-        var clampedIndex = min(max(toIndex, 0), pages[toPage].count)
-        // Landing past the last slot of an already-full page would make the
-        // dropped item itself the one the cascade pushes onto the next page:
-        // the icon would appear to fly off the slot it was just dropped on,
-        // and the settle animation — which targets a slot on *this* page —
-        // would point at a different app. Whatever was already there is the
-        // right thing to displace.
-        if pages[toPage].count >= capacityPerPage {
-            clampedIndex = min(clampedIndex, max(capacityPerPage - 1, 0))
-        }
-        pages[toPage].insert(item, at: clampedIndex)
-        cascadeOverflow(from: toPage)
+        pages[toPage].insert(item, at: insertion)
+        applyOverflowActions(actions, to: &pages)
+        return true
+    }
+
+    public func moveItem(fromPage: Int, fromIndex: Int, toPage: Int, toIndex: Int) {
+        let capacity = capacityPerPage
+        guard Self.moveWithRust(&pages, fromPage: fromPage, fromIndex: fromIndex, toPage: toPage, toIndex: toIndex, capacity: capacity) else { return }
         orderDidChange()
     }
+
+    private func reorderWithRust(_ items: Set<LayoutItem>, leader: LayoutItem, toPage: Int, toIndex: Int) -> Int? {
+        let flat = pages.flatMap { $0 }
+        guard let leaderIndex = flat.firstIndex(of: leader), flat.filter({ items.contains($0) }).count == items.count else { return nil }
+        let counts = pages.map { UInt($0.count) }
+        let selected = flat.map { UInt8(items.contains($0) ? 1 : 0) }
+        let result = LayoutReorderResult()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt>?, UInt, UnsafePointer<UInt>?, UInt, UInt) -> Void = { LayoutReorderResult.receive($0, $1, $2, $3, $4, $5) }
+        let status = counts.withUnsafeBufferPointer { countBuffer in
+            selected.withUnsafeBufferPointer { selectionBuffer in
+                launchpad_layout_reorder(countBuffer.baseAddress, UInt(countBuffer.count), selectionBuffer.baseAddress, UInt(selectionBuffer.count), UInt(leaderIndex), UInt(toPage), UInt(max(toIndex, 0)), UInt(capacityPerPage), Unmanaged.passUnretained(result).toOpaque(), callback)
+            }
+        }
+        guard status == 1, let rebuilt = result.rebuild(from: flat, allowsEmpty: false), let target = Int(exactly: result.page) else { return nil }
+        pages = rebuilt
+        return target
+    }
+
+    @discardableResult
+    public func moveItems(_ items: Set<LayoutItem>, leader: LayoutItem, toPage: Int, toIndex: Int, folderTarget: LayoutItem? = nil) -> Int? {
+        guard !items.isEmpty, items.contains(leader), pages.indices.contains(toPage) else { return nil }
+        if folderTarget == nil {
+            guard let page = reorderWithRust(items, leader: leader, toPage: toPage, toIndex: toIndex) else { return nil }
+            orderDidChange()
+            return page
+        }
+        let ordered = pages.flatMap { $0 }.filter { items.contains($0) }
+        guard ordered.count == items.count else { return nil }
+        let destination = pages[toPage]
+        if let target = folderTarget {
+            guard !items.contains(target), destination.contains(target),
+                  ordered.allSatisfy({ if case .app = $0 { return true }; return false }) else { return nil }
+            var folder: Folder
+            switch target {
+            case .app:
+                folder = Folder(name: "New Folder", pages: [[]])
+                appendToFolder(&folder, item: target)
+            case .folder(let id):
+                guard let existing = folders[id] else { return nil }
+                folder = existing
+            }
+            for item in ordered { appendToFolder(&folder, item: item) }
+            folders[folder.id] = folder
+            for page in pages.indices { pages[page].removeAll { items.contains($0) } }
+            guard let targetIndex = pages[toPage].firstIndex(of: target) else { return nil }
+            pages[toPage][targetIndex] = .folder(folder.id)
+        }
+        let resultPage = toPage - pages[..<toPage].filter(\.isEmpty).count
+        pages.removeAll(where: \.isEmpty)
+        if pages.isEmpty { pages = [[]] }
+        orderDidChange()
+        return min(resultPage, pages.count - 1)
+    }
+
+
 
     /// Pushes whatever no longer fits off the end of a page onto the next one,
     /// carrying on for as long as pages overflow and adding a page at the end
@@ -658,6 +1122,25 @@ public final class GridModel {
     /// where `loadDocument` repacks every page, which is itself the disruptive
     /// operation `updateGridSettings` deliberately avoids running on its own.
     private func cascadeOverflow(from page: Int) {
+        guard pages.indices.contains(page), pages[page].count > capacityPerPage else { return }
+        if page >= 0, capacityPerPage > 0 {
+            let counts = pages.map { UInt($0.count) }
+            let plan = LayoutMovePlan()
+            let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt>?, UInt) -> Void = { context, actions, count in
+                guard let context, let actions, let count = Int(exactly: count) else { return }
+                let plan = Unmanaged<LayoutMovePlan>.fromOpaque(context).takeUnretainedValue()
+                plan.insertion = 0
+                plan.actions = Array(UnsafeBufferPointer(start: actions, count: count))
+            }
+            let status = counts.withUnsafeBufferPointer { buffer in
+                launchpad_layout_overflow(buffer.baseAddress, UInt(buffer.count), UInt(page), UInt(capacityPerPage), Unmanaged.passUnretained(plan).toOpaque(), callback)
+            }
+            if status == 1, plan.insertion != nil,
+               let actions = Self.validatedOverflowActions(plan.actions, sizes: pages.map(\.count), start: page, capacity: capacityPerPage) {
+                Self.applyOverflowActions(actions, to: &pages)
+                return
+            }
+        }
         var index = page
         while pages.indices.contains(index), pages[index].count > capacityPerPage {
             let overflow = pages[index].removeLast()
@@ -683,9 +1166,8 @@ public final class GridModel {
               folder.pages.indices.contains(page),
               folder.pages[page].indices.contains(fromIndex),
               fromIndex != toIndex else { return }
-        let item = folder.pages[page].remove(at: fromIndex)
-        let clampedIndex = min(max(toIndex, 0), folder.pages[page].count)
-        folder.pages[page].insert(item, at: clampedIndex)
+        let capacity = max(folder.pages[page].count, 1)
+        guard Self.moveWithRust(&folder.pages, fromPage: page, fromIndex: fromIndex, toPage: page, toIndex: toIndex, capacity: capacity) else { return }
         folders[folderID] = folder
         orderDidChange()
     }
@@ -738,17 +1220,7 @@ public final class GridModel {
     /// including an empty folder (`[[]]`), so callers can apply this
     /// unconditionally.
     nonisolated static func folderPagesRepacked(_ pages: [[LayoutItem]], capacity: Int) -> [[LayoutItem]] {
-        let capacity = max(capacity, 1)
-        let flattened = pages.flatMap { $0 }
-        guard !flattened.isEmpty else { return [[]] }
-        var repacked: [[LayoutItem]] = []
-        var index = flattened.startIndex
-        while index < flattened.endIndex {
-            let end = min(index + capacity, flattened.endIndex)
-            repacked.append(Array(flattened[index..<end]))
-            index = end
-        }
-        return repacked
+        repackWithRust(pages, capacity: capacity) ?? pages
     }
 
     /// Brings every folder's pages back in line with `folderGridSize`.
@@ -922,7 +1394,7 @@ public final class GridModel {
     @discardableResult
     public func applyLegacyImportIfFirstRun(_ result: LegacyImportResult) -> Bool {
         let hasExistingArrangement = folders.isEmpty == false || pages.contains { !$0.isEmpty }
-        guard !hasExistingArrangement else { return false }
+        guard result.succeeded, !hasExistingArrangement else { return false }
 
         for folder in result.folders {
             folders[folder.id] = folder
@@ -958,6 +1430,114 @@ public final class GridModel {
         guard saveFailed == succeeded else { return }
         saveFailed = !succeeded
         onSaveFailureChange?(saveFailed)
+    }
+
+
+
+    private func currentDocument() -> LayoutDocument {
+        var current = document
+        current.gridSettings = gridSettings
+        current.pages = pages
+        current.folders = folders
+        return current
+    }
+
+    private func backupDocument() -> LayoutDocument {
+        var backup = LayoutDocument.empty
+        backup.gridSettings = gridSettings
+        backup.pages = pages
+        backup.folders = folders
+        backup.aliases = document.aliases
+        backup.hiddenApplicationIDs = document.hiddenApplicationIDs
+        backup.dateAddedByID = document.dateAddedByID
+        backup.lastUsedByID = document.lastUsedByID
+        backup.knownApplications = document.knownApplications
+        return backup
+    }
+
+    public func exportLayoutBackup(to url: URL) async throws {
+        let data = try RustLayoutJSON.encode(backupDocument())
+        try await layoutStore.writeBackup(data, to: url)
+    }
+
+    public func restoreLayoutBackup(from url: URL) async throws {
+        let data = try await layoutStore.readBackup(at: url)
+        let backup = try RustLayoutJSON.decode(data)
+        guard backup.schemaVersion == LayoutDocument.currentSchemaVersion,
+              backup.pages.count <= 1_000, backup.folders.count <= 1_000 else {
+            throw LayoutBackupError.invalidFormat
+        }
+
+        var appIDs = Set<StableAppIdentifier>()
+        var folderIDs = Set<FolderID>()
+        func addApp(_ id: StableAppIdentifier) throws {
+            guard !id.value.isEmpty, id.value.utf8.count <= 1_024,
+                  appIDs.insert(id).inserted, appIDs.count <= 50_000 else {
+                throw LayoutBackupError.invalidFormat
+            }
+        }
+        for page in backup.pages {
+            for item in page {
+                switch item {
+                case .app(let id): try addApp(id)
+                case .folder(let id):
+                    guard backup.folders[id] != nil, folderIDs.insert(id).inserted else {
+                        throw LayoutBackupError.invalidFormat
+                    }
+                }
+            }
+        }
+        guard folderIDs.count == backup.folders.count else { throw LayoutBackupError.invalidFormat }
+        for (id, folder) in backup.folders {
+            guard folder.id == id, folder.pages.count <= 1_000 else { throw LayoutBackupError.invalidFormat }
+            for page in folder.pages {
+                for item in page {
+                    guard case .app(let appID) = item else { throw LayoutBackupError.invalidFormat }
+                    try addApp(appID)
+                }
+            }
+        }
+        guard appIDs.isDisjoint(with: backup.hiddenApplicationIDs) else { throw LayoutBackupError.invalidFormat }
+
+        let before = try RustLayoutJSON.encode(currentDocument())
+        var candidate = currentDocument()
+        candidate.gridSettings = backup.gridSettings
+        candidate.pages = backup.pages.filter { !$0.isEmpty }
+        if candidate.pages.isEmpty { candidate.pages = [[]] }
+        candidate.folders = backup.folders
+        candidate.aliases = backup.aliases
+        candidate.hiddenApplicationIDs = backup.hiddenApplicationIDs
+        candidate.dateAddedByID = backup.dateAddedByID
+        candidate.lastUsedByID = backup.lastUsedByID
+        candidate.knownApplications = backup.knownApplications
+        try await layoutStore.save(currentDocument())
+        guard try RustLayoutJSON.encode(currentDocument()) == before else {
+            try await layoutStore.save(currentDocument())
+            throw LayoutBackupError.changedDuringRestore
+        }
+        try await layoutStore.save(candidate)
+
+        if try RustLayoutJSON.encode(currentDocument()) != before {
+            try await layoutStore.save(currentDocument())
+            throw LayoutBackupError.changedDuringRestore
+        }
+
+        document = candidate
+        pages = candidate.pages
+        folders = candidate.folders
+        gridSettings = candidate.gridSettings
+        if pages.contains(where: { $0.count > capacityPerPage }) { reflowPagesToCurrentCapacity() }
+        _ = normalizeFolderPages()
+        _ = reconcile(with: Array(recordsByIDValue.values), prunesMissingItems: false)
+        onChange?()
+        onSearchableRecordsChange?()
+        do {
+            try await layoutStore.save(currentDocument(), updateBackup: false)
+            recordSave(succeeded: true)
+        } catch {
+            recordSave(succeeded: false)
+            throw LayoutBackupError.saveFailed
+        }
     }
 
     @discardableResult

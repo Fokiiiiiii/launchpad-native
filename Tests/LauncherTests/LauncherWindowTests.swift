@@ -27,6 +27,49 @@ func launcherViewLoadsEmptySearchStateWithoutInvalidCrossHierarchyConstraints() 
 }
 
 @Test @MainActor
+func backgroundClickRespectsTheDismissalSetting() {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = GridModel(layoutStore: LayoutStore(directory: directory))
+    var dismissals = 0
+    let controller = LauncherViewController(
+        viewModel: LauncherViewModel(),
+        gridModel: model,
+        iconCache: IconCache(cacheDirectory: directory.appendingPathComponent("icons")),
+        onDidLaunch: {},
+        onDidCancel: { dismissals += 1 },
+        onOpenSettings: {}
+    )
+    controller.dismissForBackgroundClick()
+    #expect(dismissals == 1)
+    model.setCloseOnBackgroundClick(false)
+    controller.dismissForBackgroundClick()
+    #expect(dismissals == 1)
+    model.setCloseOnBackgroundClick(true)
+    controller.dismissForBackgroundClick()
+    #expect(dismissals == 2)
+}
+
+@Test @MainActor
+func windowScreenSelectionUsesLargestIntersection() {
+    let screens = [CGRect(x: 0, y: 0, width: 1000, height: 800),
+                   CGRect(x: -800, y: 200, width: 800, height: 600)]
+    #expect(LauncherWindowController.screenIndex(intersecting: CGRect(x: -500, y: 250, width: 700, height: 400), frames: screens) == 1)
+    #expect(LauncherWindowController.screenIndex(intersecting: CGRect(x: 500, y: 100, width: 400, height: 400), frames: screens) == 0)
+    #expect(LauncherWindowController.screenIndex(intersecting: CGRect(x: 3000, y: 0, width: 200, height: 200), frames: screens) == nil)
+}
+
+@Test @MainActor func windowedFrameStaysInsideVisibleScreen() {
+    let screen = NSRect(x: -1920, y: 0, width: 1920, height: 1080)
+    let visible = NSRect(x: -1920, y: 25, width: 1920, height: 1030)
+    let frame = LauncherWindowController.launcherFrame(screenFrame: screen, visibleFrame: visible, windowed: true)
+    #expect(visible.contains(frame))
+    #expect(frame.width == 1100)
+    #expect(frame.height == 760)
+    #expect(LauncherWindowController.launcherFrame(screenFrame: screen, visibleFrame: visible, windowed: false) == screen)
+}
+
+@Test @MainActor
 func searchSurfaceUsesPagingWithoutScrollbars() {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("launchpad-search-surface-test-\(UUID().uuidString)", isDirectory: true)

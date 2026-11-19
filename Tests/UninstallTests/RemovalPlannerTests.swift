@@ -29,6 +29,8 @@ private func makeRecord(
     )
 }
 
+import Darwin
+
 @Suite("RemovalPlanner")
 struct RemovalPlannerTests {
     @Test("system-protected apps collapse to a single unknown item")
@@ -113,6 +115,80 @@ struct RemovalPlannerTests {
         let plan = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: [sibling])
         #expect(plan.count == 1)
         #expect(plan[0].classification == .owned)
+    }
+
+    @Test("nested ownership checks agree with Foundation for files, links, and unusual identifiers")
+    func nestedChecksMatchFoundation() throws {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = temp.appendingPathComponent("root", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        let existing = root.appendingPathComponent("com.example.existing")
+        try Data().write(to: existing)
+        try Data().write(to: root.appendingPathComponent("日本語"))
+        try Data().write(to: temp.appendingPathComponent("outside"))
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("com.example.link"), withDestinationURL: existing)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("com.example.broken"), withDestinationURL: root.appendingPathComponent("absent"))
+        let loop = root.appendingPathComponent("com.example.loop")
+        try FileManager.default.createSymbolicLink(at: loop, withDestinationURL: loop)
+        let record = makeRecord(bundleIdentifier: "com.example.main", teamIdentifier: "TEAM")
+        let evidence = OwnershipEvidence(
+            bundleURL: record.bundleURL,
+            relatedPaths: [RelatedPath(url: root, category: .applicationSupport, exists: true)],
+            userLaunchAgents: [],
+            systemLaunchItems: [],
+            receiptPackageIDs: [],
+            systemExtensionIdentifiers: []
+        )
+        for name in ["com.example.existing", "com.example.link", "com.example.broken", "com.example.loop", "com.example.missing", "日本語", "../outside", "com.example.%"] {
+            let sibling = makeRecord(bundleIdentifier: name, teamIdentifier: "TEAM")
+            let expected = FileManager.default.fileExists(atPath: root.appendingPathComponent(name).path)
+            let result = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: [sibling])
+            #expect(result.map(\.classification) == [expected ? .sharedRisk : .owned], "\(name)")
+        }
+        for names in [["com.example.missing", "日本語"], ["日本語", "com.example.existing"]] {
+            let siblings = names.map { makeRecord(bundleIdentifier: $0, teamIdentifier: "TEAM") }
+            let expected = names.contains { FileManager.default.fileExists(atPath: root.appendingPathComponent($0).path) }
+            let result = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: siblings)
+            #expect(result.map(\.classification) == [expected ? .sharedRisk : .owned])
+        }
+    }
+
+    @Test func benchmarkNestedOwnershipMemory() throws {
+        guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1" else { return }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let record = makeRecord(bundleIdentifier: "com.example.main", teamIdentifier: "TEAM")
+        let siblings = (0..<1024).map { makeRecord(bundleIdentifier: "com.example.sibling\($0)", teamIdentifier: "TEAM") }
+        let related = try (0..<8).map { index -> RelatedPath in
+            let path = root.appendingPathComponent("data\(index)", isDirectory: true)
+            try FileManager.default.createDirectory(at: path, withIntermediateDirectories: false)
+            return RelatedPath(url: path, category: .applicationSupport, exists: true)
+        }
+        let evidence = OwnershipEvidence(bundleURL: record.bundleURL, relatedPaths: related, userLaunchAgents: [], systemLaunchItems: [], receiptPackageIDs: [], systemExtensionIdentifiers: [])
+        let useRust = ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_MODE"] == "ownership-rust"
+        func peak() -> Int {
+            var usage = rusage()
+            _ = getrusage(RUSAGE_SELF, &usage)
+            return usage.ru_maxrss
+        }
+        let baseline = peak()
+        let start = DispatchTime.now().uptimeNanoseconds
+        for _ in 0..<3 {
+            let classifications: [OwnershipClassification]
+            if useRust {
+                classifications = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: siblings).map(\.classification)
+            } else {
+                classifications = related.map { entry in
+                    if RemovalPlanner.hasOtherInstalledCopy(of: record, in: siblings) { return .sharedRisk }
+                    let candidates = siblings.filter { $0.bundleIdentifier != record.bundleIdentifier && $0.teamIdentifier == record.teamIdentifier }
+                    return candidates.contains { FileManager.default.fileExists(atPath: entry.url.appendingPathComponent($0.bundleIdentifier).path) } ? .sharedRisk : .owned
+                }
+            }
+            #expect(classifications == Array(repeating: .owned, count: related.count))
+        }
+        print("MEMORY_BENCH scenario=ownership-\(useRust ? "rust" : "swift") siblings=1024 paths=8 baseline_bytes=\(baseline) peak_bytes=\(peak()) elapsed_ns=\(DispatchTime.now().uptimeNanoseconds - start)")
     }
 
     @Test("user LaunchAgents are owned and don't require a privileged helper")

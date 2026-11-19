@@ -76,7 +76,7 @@ enum DockSafeArea {
     static func isHiddenBottomDockEdge(point: CGPoint, screenFrame: CGRect, orientation: String, canReveal: Bool) -> Bool {
         // shortcut: hidden side Docks need visible bounds, upgrade when paging and Dock intent can be distinguished.
         return canReveal && orientation == "bottom" && point.x >= screenFrame.minX && point.x < screenFrame.maxX &&
-            point.y >= screenFrame.minY && point.y <= screenFrame.minY + 2
+            point.y >= screenFrame.minY && point.y <= screenFrame.minY + 48
     }
 
     static func visibleDockFrames(on screen: NSScreen) -> [CGRect] {

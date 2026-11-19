@@ -32,6 +32,40 @@ public enum L10n {
     public static func rowsLabel(_ n: Int) -> String {
         String(format: string("settings.grid.rows", "Rows: %d"), n)
     }
+
+    private static func bilingualFallback(_ english: String, _ japanese: String) -> String {
+        let isJapanese = LocalizationBundle.bundle.preferredLocalizations.first?.hasPrefix("ja") == true
+        return isJapanese ? japanese : english
+    }
+
+    public static var layoutBackupHeader: String { bilingualFallback("Layout backup", "レイアウトのバックアップ") }
+    public static var layoutBackupExport: String { bilingualFallback("Export backup", "バックアップを書き出す") }
+    public static var layoutBackupImport: String { bilingualFallback("Import backup", "バックアップを読み込む") }
+    public static var layoutBackupConfirm: String { bilingualFallback("Replace the current layout?", "現在のレイアウトを置き換えますか？") }
+    public static var layoutBackupConfirmMessage: String { bilingualFallback("Pages, folders and hidden apps will be replaced. Trigger and system settings are kept.", "ページ、フォルダ、非表示アプリが置き換わります。ショートカットなどの設定は維持されます。") }
+    public static var layoutBackupFailed: String { bilingualFallback("Backup operation failed", "バックアップ処理に失敗しました") }
+
+    public static var glassUltraThin: String { bilingualFallback("Ultra Thin", "極薄") }
+    public static var glassThin: String { bilingualFallback("Thin", "薄い") }
+    public static var glassRegular: String { bilingualFallback("Regular", "標準") }
+    public static var glassThick: String { bilingualFallback("Thick", "厚い") }
+    public static var glassUltraThick: String { bilingualFallback("Ultra Thick", "極厚") }
+
+    public static var showIconNamesLabel: String { bilingualFallback("Show icon names", "アイコン名を表示") }
+
+    public static var windowedLabel: String { bilingualFallback("Windowed display", "ウィンドウ表示") }
+
+    public static var closeOnBackgroundClickLabel: String { bilingualFallback("Close when clicking empty space", "空白部分をクリックして閉じる") }
+
+    public static var screenTargetLabel: String { bilingualFallback("Show on", "表示する画面") }
+    public static var cursorScreenLabel: String { bilingualFallback("Cursor screen", "カーソルの画面") }
+    public static var mainScreenLabel: String { bilingualFallback("Main screen", "メイン画面") }
+    public static var activeScreenLabel: String { bilingualFallback("Active window screen", "アクティブな画面") }
+    public static var dockScreenLabel: String { bilingualFallback("Dock screen", "Dock の画面") }
+
+    public static var returnToFirstPageLabel: String {
+        bilingualFallback("Return to the first page when reopened", "再表示時に最初のページに戻す")
+    }
     public static func horizontalSpacingLabel(_ n: Int) -> String {
         String(format: string("settings.grid.spacing.horizontal", "Horizontal gap: %d pt"), n)
     }

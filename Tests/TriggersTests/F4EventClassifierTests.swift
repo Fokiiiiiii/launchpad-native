@@ -38,3 +38,12 @@ private func packData1(keyCode: Int, keyDown: Bool, isRepeat: Bool) -> Int {
     let event = F4EventClassifier.classify(subtype: 8, data1: data1)!
     #expect(F4EventClassifier.isLaunchPanelActivation(event) == false)
 }
+
+@Test func classificationPreservesAllRawKeyBits() {
+    for data in [0, 0x000d0100, 0xffff0101, -1, Int.min, Int.max] {
+        let event = F4EventClassifier.classify(subtype: 8, data1: data)!
+        #expect(event.keyCode == (data & 0xffff0000) >> 16)
+        #expect(event.isKeyDown == ((data & 0xff00) >> 8 == 1))
+        #expect(event.isRepeat == (data & 1 != 0))
+    }
+}

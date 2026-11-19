@@ -7,6 +7,191 @@ import Foundation
 /// catalog: records are pruned when their bundle path no longer exists or its
 /// modification date no longer matches, and the live scanner reconciles it in
 /// the background after the first frame.
+import CLaunchpadCore
+
+private final class RustOwnedBuffer: @unchecked Sendable {
+    let handle: UnsafeMutableRawPointer
+    init(_ handle: UnsafeMutableRawPointer) { self.handle = handle }
+    deinit { launchpad_read_owned_free(handle) }
+}
+public enum RustFileIO {
+    public static func read(_ url: URL, limit: Int? = nil) -> Data? {
+        if let limit, limit < 0 { return nil }
+        var bytes: UnsafeMutablePointer<UInt8>?
+        var length: UInt = 0
+        let handle = url.withUnsafeFileSystemRepresentation { path -> UnsafeMutableRawPointer? in
+            guard let path else { return nil }
+            return launchpad_read_owned(path, limit.map(UInt.init) ?? UInt.max, &bytes, &length)
+        }
+        guard let handle else { return nil }
+        guard let count = Int(exactly: length), let bytes else {
+            launchpad_read_owned_free(handle)
+            return nil
+        }
+        if count == 0 {
+            launchpad_read_owned_free(handle)
+            return Data()
+        }
+        let owner = RustOwnedBuffer(handle)
+        return Data(bytesNoCopy: bytes, count: count, deallocator: .custom { _, _ in _ = owner })
+    }
+
+    static func write(_ data: Data, to url: URL) -> Bool {
+        url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return false }
+            return data.withUnsafeBytes { bytes in
+                launchpad_write_cache_atomic(path, bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count)) == 0
+            }
+        }
+    }
+}
+private enum SnapshotWireError: Error { case invalid }
+
+private final class SnapshotBuffer { var data = Data() }
+
+private final class SnapshotRecordsBuffer { var records: [ApplicationRecord]? }
+
+private enum SnapshotWire {
+    struct Reader {
+        let data: UnsafeRawBufferPointer
+        var offset = 0
+
+        mutating func take(_ count: Int) throws -> UnsafeRawBufferPointer {
+            guard count >= 0, offset <= data.count, count <= data.count - offset else { throw SnapshotWireError.invalid }
+            defer { offset += count }
+            return UnsafeRawBufferPointer(rebasing: data[offset..<(offset + count)])
+        }
+
+        mutating func u32() throws -> UInt32 {
+            let bytes = try take(4)
+            return UInt32(littleEndian: bytes.loadUnaligned(as: UInt32.self))
+        }
+
+        mutating func string(optional: Bool = false) throws -> String? {
+            let count = try u32()
+            if count == UInt32.max {
+                guard optional else { throw SnapshotWireError.invalid }
+                return nil
+            }
+            guard let value = String(bytes: try take(Int(count)), encoding: .utf8) else { throw SnapshotWireError.invalid }
+            return value
+        }
+
+        mutating func required() throws -> String {
+            guard let result = try string() else { throw SnapshotWireError.invalid }
+            return result
+        }
+
+        mutating func flag() throws -> Bool {
+            guard let value = try take(1).first, value <= 1 else { throw SnapshotWireError.invalid }
+            return value == 1
+        }
+
+        mutating func date() throws -> Date {
+            let bytes = try take(8)
+            let bits = UInt64(littleEndian: bytes.loadUnaligned(as: UInt64.self))
+            let value = Double(bitPattern: bits)
+            guard value.isFinite else { throw SnapshotWireError.invalid }
+            return Date(timeIntervalSinceReferenceDate: value)
+        }
+    }
+
+    static func appendString(_ value: String?, to data: inout Data) throws {
+        guard let value else {
+            var marker = UInt32.max.littleEndian
+            withUnsafeBytes(of: &marker) { data.append(contentsOf: $0) }
+            return
+        }
+        let bytes = value.utf8
+        guard let size = UInt32(exactly: bytes.count), size != UInt32.max else { throw SnapshotWireError.invalid }
+        var sizeLE = size.littleEndian
+        withUnsafeBytes(of: &sizeLE) { data.append(contentsOf: $0) }
+        data.append(contentsOf: bytes)
+    }
+
+    static func pack(_ records: [ApplicationRecord]) throws -> Data {
+        guard let count = UInt32(exactly: records.count) else { throw SnapshotWireError.invalid }
+        var data = Data()
+        var countLE = count.littleEndian
+        withUnsafeBytes(of: &countLE) { data.append(contentsOf: $0) }
+        for record in records {
+            for value in [record.bundleIdentifier, record.bundleURL.absoluteString, record.displayName, record.originalDisplayName, record.sourceID, record.iconCacheKey, record.id.value] {
+                try appendString(value, to: &data)
+            }
+            for value in [record.executableURL?.absoluteString, record.bundleVersion, record.teamIdentifier, record.category] {
+                try appendString(value, to: &data)
+            }
+            data.append(contentsOf: [record.isSystemProtected, record.isBackgroundOnly, record.isMenuBarApp, record.canLaunch, record.canOpenNewInstance].map { $0 ? 1 : 0 })
+            let date = record.lastSeenModificationDate.timeIntervalSinceReferenceDate
+            guard date.isFinite else { throw SnapshotWireError.invalid }
+            var bits = date.bitPattern.littleEndian
+            withUnsafeBytes(of: &bits) { data.append(contentsOf: $0) }
+        }
+        return data
+    }
+
+    static func unpack(_ data: UnsafeRawBufferPointer) throws -> [ApplicationRecord] {
+        var reader = Reader(data: data)
+        let count = try reader.u32()
+        guard Int(count) <= (data.count - reader.offset) / 57 else { throw SnapshotWireError.invalid }
+        var records: [ApplicationRecord] = []
+        records.reserveCapacity(Int(count))
+        for _ in 0..<count {
+            let bundleID = try reader.required()
+            guard let bundleURL = URL(string: try reader.required()) else { throw SnapshotWireError.invalid }
+            let displayName = try reader.required()
+            let originalName = try reader.required()
+            let sourceID = try reader.required()
+            let iconKey = try reader.required()
+            let stableID = try reader.required()
+            let executableString = try reader.string(optional: true)
+            let executableURL = executableString.flatMap(URL.init(string:))
+            guard executableString == nil || executableURL != nil else { throw SnapshotWireError.invalid }
+            let version = try reader.string(optional: true)
+            let team = try reader.string(optional: true)
+            let category = try reader.string(optional: true)
+            let protected = try reader.flag()
+            let background = try reader.flag()
+            let menuBar = try reader.flag()
+            let canLaunch = try reader.flag()
+            let canOpenNewInstance = try reader.flag()
+            let date = try reader.date()
+            records.append(ApplicationRecord(id: StableAppID(snapshotValue: stableID), bundleIdentifier: bundleID, bundleURL: bundleURL, executableURL: executableURL, displayName: displayName, originalDisplayName: originalName, bundleVersion: version, teamIdentifier: team, category: category, sourceID: sourceID, isSystemProtected: protected, isBackgroundOnly: background, isMenuBarApp: menuBar, iconCacheKey: iconKey, canLaunch: canLaunch, canOpenNewInstance: canOpenNewInstance, lastSeenModificationDate: date))
+        }
+        guard reader.offset == data.count else { throw SnapshotWireError.invalid }
+        return records
+    }
+
+    static func decodeRecords(_ data: Data) -> [ApplicationRecord]? {
+        let output = SnapshotRecordsBuffer()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt) -> Void = { context, bytes, count in
+            guard let context, let bytes, let count = Int(exactly: count) else { return }
+            // Rust owns the buffer only for this callback; unpack copies each retained value.
+            let wire = UnsafeRawBufferPointer(start: bytes, count: count)
+            Unmanaged<SnapshotRecordsBuffer>.fromOpaque(context).takeUnretainedValue().records = try? SnapshotWire.unpack(wire)
+        }
+        let context = Unmanaged.passUnretained(output).toOpaque()
+        let result = data.withUnsafeBytes { bytes in
+            launchpad_catalog_decode(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), context, callback)
+        }
+        return result == 1 ? output.records : nil
+    }
+
+    static func convert(_ data: Data) -> Data? {
+        let output = SnapshotBuffer()
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>?, UInt) -> Void = { context, bytes, count in
+            guard let context, let bytes, let count = Int(exactly: count) else { return }
+            Unmanaged<SnapshotBuffer>.fromOpaque(context).takeUnretainedValue().data = Data(bytes: bytes, count: count)
+        }
+        let context = Unmanaged.passUnretained(output).toOpaque()
+        // Rust serializes borrowed records without constructing a second object tree.
+        let result = data.withUnsafeBytes { bytes in
+            let pointer = bytes.bindMemory(to: UInt8.self).baseAddress
+            return launchpad_catalog_encode(pointer, UInt(bytes.count), context, callback)
+        }
+        return result == 1 ? output.data : nil
+    }
+}
 public enum CatalogSnapshotStore {
     public static let currentVersion = 1
     public static let defaultMaximumRecords = 4_096
@@ -27,8 +212,9 @@ public enum CatalogSnapshotStore {
         records: [ApplicationRecord],
         maximumRecords: Int = defaultMaximumRecords
     ) throws -> Data {
-        let bounded = boundedRecords(records, maximumRecords: maximumRecords)
-        return try JSONEncoder().encode(Snapshot(records: bounded))
+        let wire = try SnapshotWire.pack(boundedRecords(records, maximumRecords: maximumRecords))
+        guard let result = SnapshotWire.convert(wire) else { throw SnapshotWireError.invalid }
+        return result
     }
 
     /// Decodes a snapshot without touching the filesystem or calling any
@@ -40,12 +226,8 @@ public enum CatalogSnapshotStore {
         maximumBytes: Int = defaultMaximumBytes
     ) -> [ApplicationRecord]? {
         guard data.count <= maximumBytes,
-              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data),
-              snapshot.version == currentVersion
-        else {
-            return nil
-        }
-        return boundedRecords(snapshot.records, maximumRecords: maximumRecords)
+              let records = SnapshotWire.decodeRecords(data) else { return nil }
+        return boundedRecords(records, maximumRecords: maximumRecords)
     }
 
     /// Loads and prunes the last-known-good file. The file itself is never
@@ -57,7 +239,7 @@ public enum CatalogSnapshotStore {
         maximumRecords: Int = defaultMaximumRecords
     ) -> [ApplicationRecord] {
         let snapshotURL = url ?? defaultURL
-        guard let data = try? Data(contentsOf: snapshotURL),
+        guard let data = RustFileIO.read(snapshotURL, limit: defaultMaximumBytes),
               let records = decode(data, maximumRecords: maximumRecords)
         else {
             return []
@@ -84,21 +266,16 @@ public enum CatalogSnapshotStore {
             return
         }
 
-        let fm = FileManager.default
+        guard data.count <= defaultMaximumBytes else { return }
         let directory = snapshotURL.deletingLastPathComponent()
-        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
-        let temporaryURL = directory.appendingPathComponent(
-            ".\(snapshotURL.lastPathComponent).\(UUID().uuidString).tmp"
-        )
         do {
-            try data.write(to: temporaryURL, options: .atomic)
-            if fm.fileExists(atPath: snapshotURL.path) {
-                _ = try fm.replaceItemAt(snapshotURL, withItemAt: temporaryURL)
-            } else {
-                try fm.moveItem(at: temporaryURL, to: snapshotURL)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            guard RustFileIO.write(data, to: snapshotURL) else {
+                DiagnosticsLog.catalog.error("Failed to write catalog snapshot")
+                return
             }
         } catch {
-            try? fm.removeItem(at: temporaryURL)
+            DiagnosticsLog.catalog.error("Failed to create catalog snapshot directory: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -140,33 +317,10 @@ public enum CatalogSnapshotStore {
 
                 if rootIsPresent[record.sourceID] == false { return true }
 
-                // Deliberately `fileExists` and not a `resourceValues` lookup
-                // for existence: `URL` caches resource values, so a bundle
-                // deleted after the snapshot was taken can still answer from
-                // that cache and survive pruning. `CatalogSnapshotStoreTests`
-                // covers exactly this case.
-                var isDirectory: ObjCBool = false
-                guard FileManager.default.fileExists(
-                    atPath: record.bundleURL.path,
-                    isDirectory: &isDirectory
-                ), isDirectory.boolValue else {
-                    return false
+                return record.bundleURL.withUnsafeFileSystemRepresentation { path in
+                    guard let path else { return false }
+                    return launchpad_catalog_fresh(path, record.lastSeenModificationDate.timeIntervalSinceReferenceDate) != 0
                 }
-
-                guard let modificationDate = (try? record.bundleURL.resourceValues(
-                    forKeys: [.contentModificationDateKey]
-                ))?.contentModificationDate else {
-                    return false
-                }
-
-                // HFS/APFS metadata can be rounded by a small amount when
-                // serialized through JSON. A sub-second tolerance avoids
-                // throwing away a perfectly usable snapshot while still
-                // rejecting a bundle changed since it was scanned.
-                return abs(
-                    modificationDate.timeIntervalSinceReferenceDate
-                        - record.lastSeenModificationDate.timeIntervalSinceReferenceDate
-                ) < 1.0
             }
             .sorted {
                 if $0.displayName != $1.displayName {

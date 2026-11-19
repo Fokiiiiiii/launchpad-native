@@ -11,7 +11,7 @@ private func decodedDocument(editing edit: (inout [String: Any]) -> Void) throws
     let encoded = try JSONEncoder().encode(LayoutDocument.empty)
     var json = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
     edit(&json)
-    return try JSONDecoder().decode(LayoutDocument.self, from: JSONSerialization.data(withJSONObject: json))
+    return try RustLayoutJSON.decode(JSONSerialization.data(withJSONObject: json))
 }
 
 private func editingGridSettings(_ edit: @escaping (inout [String: Any]) -> Void) -> (inout [String: Any]) -> Void {
@@ -100,4 +100,12 @@ private func editingGridSettings(_ edit: @escaping (inout [String: Any]) -> Void
 @Test func glassIntensityStaysBetweenZeroAndOne() throws {
     #expect(try decodedDocument(editing: { $0["glassMaterialIntensity"] = 7.0 }).glassMaterialIntensity == 1)
     #expect(try decodedDocument(editing: { $0["glassMaterialIntensity"] = -3.0 }).glassMaterialIntensity == 0)
+}
+
+@Test func wallpaperBlurRadiusIsClampedWithoutLosingTheLayout() throws {
+    #expect(try decodedDocument(editing: { $0["wallpaperBlurRadius"] = 80.0 }).wallpaperBlurRadius == 40)
+    #expect(try decodedDocument(editing: { $0["wallpaperBlurRadius"] = -3.0 }).wallpaperBlurRadius == 0)
+    let invalid = try decodedDocument(editing: { $0["wallpaperBlurRadius"] = "unknown" })
+    #expect(invalid.wallpaperBlurRadius == 8)
+    #expect(invalid.gridSettings == LayoutDocument.empty.gridSettings)
 }

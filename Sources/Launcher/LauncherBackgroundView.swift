@@ -9,41 +9,48 @@ import QuartzCore
 import UniformTypeIdentifiers
 #endif
 
-final class LauncherBackgroundView: NSView {
-    struct GlassMaterialParameters: Equatable {
-        let wallpaperOpacity: Float
-        let blurRadius: CGFloat
-        let sheenOpacity: Float
+
+import SwiftUI
+
+@MainActor
+enum LauncherMaterialSurface {
+    static func presetIndex(for intensity: Double) -> Int {
+        guard intensity.isFinite else { return 1 }
+        return min(max(Int((min(max(intensity, 0), 1) * 4).rounded()), 0), 4)
     }
 
+    static func material(for intensity: Double) -> NSVisualEffectView.Material {
+        switch presetIndex(for: intensity) {
+        case 0: .hudWindow
+        case 1: .fullScreenUI
+        case 2: .popover
+        case 3: .menu
+        default: .underWindowBackground
+        }
+    }
+
+    static func makeView() -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+}
+
+final class LauncherBackgroundView: NSView {
+
+
     struct Configuration {
-        /// Off for any future narrow decorative surface — the
-        /// bloom/highlight ellipses are sized for a full screen and would
-        /// barely register in a small strip.
-        var includeBloomHighlights: Bool = true
-        /// `.glass` (the default) keeps a readable Liquid Glass-style
-        /// composition: a visibly present, blurred wallpaper, a moderate
-        /// scrim, and material sheen. `.wallpaper` keeps the desktop image
-        /// first in the stack, optionally blurred, with only a very light
-        /// translucent scrim above it so the wallpaper remains visible.
         var mode: LauncherBackgroundMode = .glass
-        /// 0...1, `.glass` mode only — scales the sheen highlight's
-        /// opacity. The reference's own default (0.35) is this view's
-        /// existing hardcoded `sheenLayer.opacity`, so `materialIntensity
-        /// == 0.35` reproduces the pre-Round-20 look exactly.
         var materialIntensity: Double = 0.35
-        /// `.wallpaper` mode only — whether the wallpaper layer itself is
-        /// blurred (softly, less than `.glass` mode's heavier blur) or
-        /// shown crisp.
         var blursWallpaper: Bool = true
+        var wallpaperBlurRadius: Double = 8
     }
 
     private let baseLayer = CALayer()
     private let wallpaperLayer = CALayer()
     private let scrimLayer = CAGradientLayer()
-    private let sheenLayer = CAGradientLayer()
-    private var bloomLayer: CALayer?
-    private var highlightLayer: CALayer?
     private var fullScreenSize: CGSize
     /// This view's offset within the screen's full-frame coordinate space.
     /// The launcher owns the full target display, so the normal value is
@@ -83,71 +90,17 @@ final class LauncherBackgroundView: NSView {
         root.addSublayer(baseLayer)
 
         wallpaperLayer.contentsGravity = .resizeAspectFill
-        wallpaperLayer.transform = CATransform3DMakeScale(1.14, 1.14, 1)
+        wallpaperLayer.masksToBounds = true
+        wallpaperLayer.actions = ["contents": NSNull(), "filters": NSNull(), "opacity": NSNull(),
+                                  "bounds": NSNull(), "position": NSNull(), "frame": NSNull()]
         root.addSublayer(wallpaperLayer)
 
-        scrimLayer.colors = [
-            // Keep the glass mode legible without crushing the wallpaper into
-            // a nearly uniform blue-black surface. Together with the
-            // intensity-dependent wallpaper layer this leaves roughly
-            // 20–25% of the desktop's colour/contrast visible behind the UI.
-            NSColor(srgb: 0x0C0C0D, alpha: 0.62).cgColor,
-            NSColor(srgb: 0x101011, alpha: 0.68).cgColor
-        ]
-        scrimLayer.startPoint = CGPoint(x: 0.5, y: 1.0)
-        scrimLayer.endPoint = CGPoint(x: 0.5, y: 0.0)
+        scrimLayer.colors = [NSColor.black.cgColor, NSColor.black.cgColor]
         root.addSublayer(scrimLayer)
 
-        sheenLayer.type = .radial
-        sheenLayer.colors = [
-            NSColor.white.withAlphaComponent(0.10).cgColor,
-            NSColor.white.withAlphaComponent(0.02).cgColor,
-            NSColor.clear.cgColor
-        ]
-        sheenLayer.locations = [0.0, 0.6, 1.0]
-        // Radial gradients in Core Animation are centered/sized by
-        // start/end *point* (center) and *radius* is implied by the
-        // distance between them along the layer's unit square — top-center
-        // start, wide end approximates the reference's
-        // `radial-gradient(120% 100% at 50% 0%, ...)`.
-        sheenLayer.startPoint = CGPoint(x: 0.5, y: 1.0)
-        sheenLayer.endPoint = CGPoint(x: 1.1, y: -0.2)
-        root.addSublayer(sheenLayer)
-
-        if configuration.includeBloomHighlights {
-            let bloom = CALayer()
-            bloom.backgroundColor = NSColor.clear.cgColor
-            let bloomGradient = CAGradientLayer()
-            bloomGradient.type = .radial
-            bloomGradient.colors = [
-                NSColor(srgb: 0x78AAFF, alpha: 0.20).cgColor,
-                NSColor(srgb: 0x78AAFF, alpha: 0.06).cgColor,
-                NSColor.clear.cgColor
-            ]
-            bloomGradient.locations = [0.0, 0.45, 0.72]
-            bloomGradient.startPoint = CGPoint(x: 0.5, y: 0.5)
-            bloomGradient.endPoint = CGPoint(x: 1.0, y: 1.0)
-            bloom.addSublayer(bloomGradient)
-            self.bloomLayerGradient = bloomGradient
-            root.addSublayer(bloom)
-            bloomLayer = bloom
-            addBloomDrift(to: bloom)
-
-            let highlight = CALayer()
-            let highlightGradient = CAGradientLayer()
-            highlightGradient.type = .radial
-            highlightGradient.colors = [
-                NSColor.white.withAlphaComponent(0.06).cgColor,
-                NSColor.clear.cgColor
-            ]
-            highlightGradient.startPoint = CGPoint(x: 0.5, y: 0.5)
-            highlightGradient.endPoint = CGPoint(x: 1.0, y: 1.0)
-            highlight.addSublayer(highlightGradient)
-            self.highlightLayerGradient = highlightGradient
-            root.addSublayer(highlight)
-            highlightLayer = highlight
-        }
-
+        materialHost.frame = bounds
+        materialHost.autoresizingMask = [.width, .height]
+        addSubview(materialHost)
         applyConfiguration()
         updateLayerFrames()
     }
@@ -158,6 +111,9 @@ final class LauncherBackgroundView: NSView {
     /// the wallpaper contribution visible while retaining enough contrast for
     /// the icon grid; material intensity adjusts opacity, blur, and sheen
     /// together.
+
+    private lazy var materialHost = LauncherMaterialSurface.makeView()
+
     private func applyConfiguration(
         clearWallpaper: Bool = true,
         reloadWallpaper: Bool = true
@@ -175,22 +131,22 @@ final class LauncherBackgroundView: NSView {
         if clearWallpaper && reloadWallpaper {
             wallpaperLayer.contents = nil
         }
+        let showsGlass = configuration.mode == .glass
+        materialHost.isHidden = !showsGlass
+        materialHost.material = LauncherMaterialSurface.material(for: configuration.materialIntensity)
+        baseLayer.isHidden = showsGlass
+        wallpaperLayer.isHidden = showsGlass
+        scrimLayer.isHidden = showsGlass
+        scrimLayer.opacity = Self.wallpaperDimOpacity(isBlurred: configuration.blursWallpaper)
         switch configuration.mode {
         case .glass:
-            let material = Self.glassMaterialParameters(for: configuration.materialIntensity)
-            wallpaperLayer.opacity = material.wallpaperOpacity
-            scrimLayer.opacity = 1
-            sheenLayer.opacity = material.sheenOpacity
             if reloadWallpaper {
                 lastWallpaperMode = .glass
-                lastWallpaperRadius = material.blurRadius
-                requestWallpaper(radius: material.blurRadius, generation: requestGeneration)
+                lastWallpaperRadius = 0
             }
         case .wallpaper:
-            let radius = Self.wallpaperBlurRadius(isEnabled: configuration.blursWallpaper)
-            wallpaperLayer.opacity = 1.0
-            scrimLayer.opacity = 0.14
-            sheenLayer.opacity = 0
+            let radius = Self.wallpaperBlurRadius(isEnabled: configuration.blursWallpaper, radius: configuration.wallpaperBlurRadius)
+            wallpaperLayer.opacity = 1
             if reloadWallpaper {
                 lastWallpaperMode = .wallpaper
                 lastWallpaperRadius = radius
@@ -199,19 +155,14 @@ final class LauncherBackgroundView: NSView {
         }
     }
 
-    static func glassMaterialParameters(for materialIntensity: Double) -> GlassMaterialParameters {
-        let intensity = materialIntensity.isFinite
-            ? min(max(materialIntensity, 0), 1)
-            : 0
-        return GlassMaterialParameters(
-            wallpaperOpacity: Float(0.78 - 0.37 * intensity),
-            blurRadius: 30 + 40 * CGFloat(intensity),
-            sheenOpacity: Float(intensity)
-        )
+
+
+    static func wallpaperBlurRadius(isEnabled: Bool, radius: Double = 8) -> CGFloat {
+        isEnabled && radius.isFinite ? CGFloat(min(max(radius, 0), 40)) : 0
     }
 
-    static func wallpaperBlurRadius(isEnabled: Bool) -> CGFloat {
-        isEnabled ? 8 : 0
+    static func wallpaperDimOpacity(isBlurred: Bool) -> Float {
+        isBlurred ? 0.3 : 0.2
     }
 
     /// Radii closer than this look the same, so a slider drag does not decode and
@@ -223,8 +174,8 @@ final class LauncherBackgroundView: NSView {
     /// otherwise.
     static func requestedBlurRadius(for configuration: Configuration) -> CGFloat {
         switch configuration.mode {
-        case .glass: return glassMaterialParameters(for: configuration.materialIntensity).blurRadius
-        case .wallpaper: return wallpaperBlurRadius(isEnabled: configuration.blursWallpaper)
+        case .glass: return 0
+        case .wallpaper: return wallpaperBlurRadius(isEnabled: configuration.blursWallpaper, radius: configuration.wallpaperBlurRadius)
         }
     }
 
@@ -239,7 +190,8 @@ final class LauncherBackgroundView: NSView {
         configuration: Configuration
     ) -> Bool {
         guard lastMode == configuration.mode, let lastRadius else { return true }
-        return abs(lastRadius - requestedBlurRadius(for: configuration)) >= radiusReloadStep
+        let step: CGFloat = configuration.mode == .wallpaper ? 0.5 : radiusReloadStep
+        return abs(lastRadius - requestedBlurRadius(for: configuration)) >= step
     }
 
     private func requestWallpaper(radius: CGFloat, generation: Int) {
@@ -272,6 +224,12 @@ final class LauncherBackgroundView: NSView {
                 self.wallpaperLayer.contents = nil
                 self.wallpaperTask = nil
                 return
+            }
+            if self.wallpaperLayer.contents != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                let transition = CATransition()
+                transition.type = .fade
+                transition.duration = 0.2
+                self.wallpaperLayer.add(transition, forKey: "wallpaperTransition")
             }
             self.wallpaperLayer.contents = image
             self.wallpaperTask = nil
@@ -327,7 +285,7 @@ final class LauncherBackgroundView: NSView {
             // change is the only case that needs a new WindowServer/image
             // request.
             self.applyConfiguration(
-                clearWallpaper: wallpaperNeedsReload,
+                clearWallpaper: self.lastWallpaperMode != configuration.mode,
                 reloadWallpaper: wallpaperNeedsReload
             )
             self.configurationTask = nil
@@ -371,8 +329,6 @@ final class LauncherBackgroundView: NSView {
     // don't auto-track a differently-shaped parent), so the bloom/highlight
     // gradients are kept as direct properties for `updateLayerFrames` to
     // resize alongside their containing layer.
-    private var bloomLayerGradient: CAGradientLayer?
-    private var highlightLayerGradient: CAGradientLayer?
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unavailable") }
@@ -398,53 +354,11 @@ final class LauncherBackgroundView: NSView {
         baseLayer.frame = bounds
         wallpaperLayer.frame = bounds
         scrimLayer.frame = bounds
-        sheenLayer.frame = bounds
-
-        // Sized as a fraction of the real screen rather than the
-        // reference's own fixed 1440x900-canvas pixel values, so this
-        // looks proportionally correct on any real display.
-        if let bloomLayer, let bloomLayerGradient {
-            let bloomSize = CGSize(width: size.width * (620.0 / 1440.0), height: size.height * (520.0 / 900.0))
-            bloomLayer.frame = CGRect(
-                x: origin.x + size.width - bloomSize.width * 0.72,
-                y: origin.y - bloomSize.height * 0.35,
-                width: bloomSize.width,
-                height: bloomSize.height
-            )
-            bloomLayerGradient.frame = bloomLayer.bounds
-        }
-        if let highlightLayer, let highlightLayerGradient {
-            let highlightSize = CGSize(width: size.width * (420.0 / 1440.0), height: size.height * (360.0 / 900.0))
-            highlightLayer.frame = CGRect(
-                x: origin.x - highlightSize.width * 0.35,
-                y: origin.y + size.height - highlightSize.height * 0.65,
-                width: highlightSize.width,
-                height: highlightSize.height
-            )
-            highlightLayerGradient.frame = highlightLayer.bounds
-        }
 
         CATransaction.commit()
     }
 
-    private func addBloomDrift(to layer: CALayer) {
-        // The drift never stops, which is what Reduce Motion asks not to have.
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        let animation = CAKeyframeAnimation(keyPath: "transform")
-        animation.values = [
-            CATransform3DIdentity,
-            CATransform3DConcat(CATransform3DMakeTranslation(-28, -18, 0), CATransform3DMakeScale(1.08, 1.08, 1)),
-            CATransform3DIdentity
-        ]
-        animation.keyTimes = [0, 0.5, 1.0]
-        animation.duration = 26
-        animation.repeatCount = .infinity
-        animation.timingFunctions = [
-            CAMediaTimingFunction(name: .easeInEaseOut),
-            CAMediaTimingFunction(name: .easeInEaseOut)
-        ]
-        layer.add(animation, forKey: "bloomDrift")
-    }
+
 }
 
 private extension NSColor {

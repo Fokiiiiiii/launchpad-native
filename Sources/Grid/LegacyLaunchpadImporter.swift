@@ -18,10 +18,49 @@ import SQLite3
 /// exact page-break placement was not called out as required and doing it
 /// precisely would need reverse-engineering undocumented "holding page"
 /// semantics with no behavioral payoff.
+import CLaunchpadCore
+
+private final class LegacyImportBuffer {
+    var records: [String: StableAppIdentifier] = [:]
+    var unresolved: Set<String> = []
+    var folders: [Folder] = []
+    var order: [LayoutItem] = []
+    var folderName: String?
+    var folderItems: [LayoutItem] = []
+    var valid = true
+
+    func accept(_ kind: Int32, _ bytes: UnsafePointer<UInt8>?, _ count: UInt) {
+        guard let length = Int(exactly: count), length == 0 || bytes != nil else { valid = false; return }
+        let value = String(decoding: UnsafeBufferPointer(start: bytes, count: length), as: UTF8.self)
+        switch kind {
+        case 0, 2:
+            guard (kind == 2) == (folderName != nil) else { valid = false; return }
+            if let identifier = records[value] {
+                if kind == 2 { folderItems.append(.app(identifier)) } else { order.append(.app(identifier)) }
+            } else { unresolved.insert(value) }
+        case 1:
+            guard folderName == nil else { valid = false; return }
+            folderName = value
+            folderItems.removeAll(keepingCapacity: true)
+        case 3:
+            guard let name = folderName else { valid = false; return }
+            if !folderItems.isEmpty {
+                let folder = Folder(name: name, pages: [folderItems])
+                folders.append(folder)
+                order.append(.folder(folder.id))
+            }
+            folderName = nil
+        default:
+            valid = false
+        }
+    }
+}
+
 public struct LegacyImportResult: Sendable {
     public var folders: [Folder]
     public var unplacedAppOrder: [LayoutItem]
     public var unresolvedBundleIDs: [String]
+    public var succeeded: Bool = true
 }
 
 public enum LegacyLaunchpadImporter {
@@ -40,120 +79,21 @@ public enum LegacyLaunchpadImporter {
     }
 
     public static func importLegacyLayout(from url: URL, matching records: [ApplicationRecord]) -> LegacyImportResult {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
-            return LegacyImportResult(folders: [], unplacedAppOrder: [], unresolvedBundleIDs: [])
+        let buffer = LegacyImportBuffer()
+        for record in records where buffer.records[record.bundleIdentifier] == nil {
+            buffer.records[record.bundleIdentifier] = record.id.asPersistenceIdentifier
         }
-        defer { sqlite3_close(db) }
-
-        struct ItemRow { var rowid: Int64; var uuid: String }
-
-        var uuidByRowID: [Int64: String] = [:]
-        var childrenByParent: [Int64: [(rowid: Int64, ordering: Int)]] = [:]
-
-        queryRows(db, "SELECT rowid, uuid, parent_id, ordering FROM items") { stmt in
-            let rowid = sqlite3_column_int64(stmt, 0)
-            let uuid = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
-            let parentID = sqlite3_column_int64(stmt, 2)
-            let ordering = Int(sqlite3_column_int(stmt, 3))
-            uuidByRowID[rowid] = uuid
-            childrenByParent[parentID, default: []].append((rowid, ordering))
+        let callback: @convention(c) (UnsafeMutableRawPointer?, Int32, UnsafePointer<UInt8>?, UInt) -> Void = { context, kind, bytes, count in
+            guard let context else { return }
+            Unmanaged<LegacyImportBuffer>.fromOpaque(context).takeUnretainedValue().accept(kind, bytes, count)
         }
-
-        var bundleIDByItem: [Int64: String] = [:]
-        queryRows(db, "SELECT item_id, bundleid FROM apps") { stmt in
-            let itemID = sqlite3_column_int64(stmt, 0)
-            if let cstr = sqlite3_column_text(stmt, 1) {
-                bundleIDByItem[itemID] = String(cString: cstr)
-            }
+        let status = url.withUnsafeFileSystemRepresentation { path in
+            launchpad_import_legacy(path, Unmanaged.passUnretained(buffer).toOpaque(), callback)
         }
-
-        var folderTitleByItem: [Int64: String] = [:]
-        queryRows(db, "SELECT item_id, title FROM groups") { stmt in
-            let itemID = sqlite3_column_int64(stmt, 0)
-            if let cstr = sqlite3_column_text(stmt, 1) {
-                folderTitleByItem[itemID] = String(cString: cstr)
-            }
+        guard status == 1, buffer.valid, buffer.folderName == nil else {
+            return LegacyImportResult(folders: [], unplacedAppOrder: [], unresolvedBundleIDs: [], succeeded: false)
         }
-
-        let recordsByBundleID = Dictionary(grouping: records, by: \.bundleIdentifier)
-        func resolveIdentifier(bundleID: String) -> StableAppIdentifier? {
-            recordsByBundleID[bundleID]?.first?.id.asPersistenceIdentifier
-        }
-
-        func sortedChildren(of parentID: Int64) -> [Int64] {
-            (childrenByParent[parentID] ?? []).sorted { $0.ordering < $1.ordering }.map(\.rowid)
-        }
-
-        // The parent links come from a database that can be damaged. A loop
-        // among them would otherwise be followed for ever, so each row is
-        // visited once per walk.
-        func collectAppBundleIDs(under parentID: Int64, visited: Set<Int64> = []) -> [String] {
-            guard !visited.contains(parentID) else { return [] }
-            let path = visited.union([parentID])
-            return sortedChildren(of: parentID).flatMap { child -> [String] in
-                if let bundleID = bundleIDByItem[child] {
-                    return [bundleID]
-                }
-                return collectAppBundleIDs(under: child, visited: path)
-            }
-        }
-
-        var unresolvedBundleIDs: Set<String> = []
-        var folders: [Folder] = []
-        var unplacedItems: [LayoutItem] = []
-
-        func resolveOrMarkUnresolved(_ bundleID: String) -> LayoutItem? {
-            guard let identifier = resolveIdentifier(bundleID: bundleID) else {
-                unresolvedBundleIDs.insert(bundleID)
-                return nil
-            }
-            return .app(identifier)
-        }
-
-        var walked: Set<Int64> = []
-        func walk(parentID: Int64) {
-            guard walked.insert(parentID).inserted else { return }
-            for child in sortedChildren(of: parentID) {
-                if let bundleID = bundleIDByItem[child] {
-                    if let item = resolveOrMarkUnresolved(bundleID) {
-                        unplacedItems.append(item)
-                    }
-                } else if let folderName = folderTitleByItem[child] {
-                    let folderItems = collectAppBundleIDs(under: child).compactMap(resolveOrMarkUnresolved)
-                    if !folderItems.isEmpty {
-                        let folder = Folder(name: folderName, pages: [folderItems])
-                        folders.append(folder)
-                        // Kept interleaved with app items (not appended
-                        // separately at the end) so the folder's position
-                        // relative to top-level apps matches the legacy
-                        // ordering.
-                        unplacedItems.append(.folder(folder.id))
-                    }
-                } else {
-                    walk(parentID: child)
-                }
-            }
-        }
-
-        guard let root = uuidByRowID.first(where: { $0.value == "ROOTPAGE" })?.key else {
-            return LegacyImportResult(folders: [], unplacedAppOrder: [], unresolvedBundleIDs: [])
-        }
-        walk(parentID: root)
-
-        return LegacyImportResult(
-            folders: folders,
-            unplacedAppOrder: unplacedItems,
-            unresolvedBundleIDs: unresolvedBundleIDs.sorted()
-        )
+        return LegacyImportResult(folders: buffer.folders, unplacedAppOrder: buffer.order, unresolvedBundleIDs: buffer.unresolved.sorted())
     }
 
-    private static func queryRows(_ db: OpaquePointer, _ sql: String, _ handler: (OpaquePointer) -> Void) {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { return }
-        defer { sqlite3_finalize(stmt) }
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            handler(stmt)
-        }
-    }
 }

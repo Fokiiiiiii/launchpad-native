@@ -83,6 +83,13 @@ public enum LauncherBackgroundMode: String, Codable, Sendable {
     case glass
 }
 
+public enum LauncherScreenTarget: String, Codable, Sendable, CaseIterable {
+    case cursor
+    case main
+    case active
+    case dock
+}
+
 /// Populated in Phase 6 (Customization); present now so the schema doesn't
 /// need a migration just to add it later.
 ///
@@ -102,6 +109,7 @@ public struct GridSettings: Codable, Sendable, Hashable {
     public var horizontalSpacing: Double
     public var verticalSpacing: Double
     public var labelVisible: Bool
+    public var windowed: Bool
     public var pageMargins: Double
     public var folderGridSize: Int
     public var sortMode: SortMode
@@ -119,13 +127,15 @@ public struct GridSettings: Codable, Sendable, Hashable {
         pageMargins: Double,
         folderGridSize: Int,
         sortMode: SortMode = .custom,
-        iconScale: Double = 1.0
+        iconScale: Double = 1.0,
+        windowed: Bool = false
     ) {
         self.columns = columns
         self.rows = rows
         self.horizontalSpacing = horizontalSpacing
         self.verticalSpacing = verticalSpacing
         self.labelVisible = labelVisible
+        self.windowed = windowed
         self.pageMargins = pageMargins
         self.folderGridSize = folderGridSize
         self.sortMode = sortMode
@@ -133,7 +143,7 @@ public struct GridSettings: Codable, Sendable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case columns, rows, horizontalSpacing, verticalSpacing, labelVisible, pageMargins, folderGridSize, sortMode, iconScale
+        case columns, rows, horizontalSpacing, verticalSpacing, labelVisible, pageMargins, folderGridSize, sortMode, iconScale, windowed
     }
 
     /// What a decoded value is held to. These are wider than the Settings
@@ -159,6 +169,7 @@ public struct GridSettings: Codable, Sendable, Hashable {
         horizontalSpacing = Self.clamped(try container.decode(Double.self, forKey: .horizontalSpacing), to: Self.spacingRange)
         verticalSpacing = Self.clamped(try container.decode(Double.self, forKey: .verticalSpacing), to: Self.spacingRange)
         labelVisible = try container.decode(Bool.self, forKey: .labelVisible)
+        windowed = try container.decodeIfPresent(Bool.self, forKey: .windowed) ?? false
         pageMargins = Self.clamped(try container.decode(Double.self, forKey: .pageMargins), to: Self.marginRange)
         folderGridSize = Self.clamped(try container.decode(Int.self, forKey: .folderGridSize), to: Self.folderGridSizeRange)
         // A value this version does not know — written by a newer one — falls
@@ -511,6 +522,10 @@ public struct LayoutDocument: Codable, Sendable {
     /// Only meaningful when `backgroundMode == .wallpaper`; see
     /// `LauncherBackgroundView.Configuration.blursWallpaper`.
     public var blursWallpaper: Bool
+    public var screenTarget: LauncherScreenTarget
+    public var closeOnBackgroundClick: Bool
+    public var returnToFirstPage: Bool
+    public var wallpaperBlurRadius: Double
     public var menuIconVisibility: MenuIconVisibility
     /// Kept for every app currently known and every app the layout still refers
     /// to — see `KnownApplication`. Absent from a file written before it existed.
@@ -536,6 +551,10 @@ public struct LayoutDocument: Codable, Sendable {
         backgroundMode: LauncherBackgroundMode = .glass,
         glassMaterialIntensity: Double = 0.35,
         blursWallpaper: Bool = true,
+        wallpaperBlurRadius: Double = 8,
+        returnToFirstPage: Bool = false,
+        closeOnBackgroundClick: Bool = true,
+        screenTarget: LauncherScreenTarget = .cursor,
         menuIconVisibility: MenuIconVisibility = .automatic,
         knownApplications: [StableAppIdentifier: KnownApplication] = [:]
     ) {
@@ -559,11 +578,15 @@ public struct LayoutDocument: Codable, Sendable {
         self.backgroundMode = backgroundMode
         self.glassMaterialIntensity = glassMaterialIntensity
         self.blursWallpaper = blursWallpaper
+        self.screenTarget = screenTarget
+        self.closeOnBackgroundClick = closeOnBackgroundClick
+        self.returnToFirstPage = returnToFirstPage
+        self.wallpaperBlurRadius = wallpaperBlurRadius.isFinite ? min(max(wallpaperBlurRadius, 0), 40) : 8
         self.menuIconVisibility = menuIconVisibility
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, layoutMode, gridSettings, pages, folders, aliases, hiddenApplicationIDs, customSources, triggerSettings, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle, showsMenuBarIcon, showMenuBarApplications, showsHiddenAppsInSearch, backgroundMode, glassMaterialIntensity, blursWallpaper, menuIconVisibility, knownApplications
+        case schemaVersion, layoutMode, gridSettings, pages, folders, aliases, hiddenApplicationIDs, customSources, triggerSettings, hideDockWhileLauncherOpen, dateAddedByID, lastUsedByID, appIconStyle, showsMenuBarIcon, showMenuBarApplications, showsHiddenAppsInSearch, backgroundMode, glassMaterialIntensity, blursWallpaper, wallpaperBlurRadius, returnToFirstPage, closeOnBackgroundClick, screenTarget, menuIconVisibility, knownApplications
     }
 
     public init(from decoder: Decoder) throws {
@@ -587,6 +610,11 @@ public struct LayoutDocument: Codable, Sendable {
         backgroundMode = (try? container.decodeIfPresent(LauncherBackgroundMode.self, forKey: .backgroundMode)) ?? .glass
         glassMaterialIntensity = min(max(try container.decodeIfPresent(Double.self, forKey: .glassMaterialIntensity) ?? 0.35, 0), 1)
         blursWallpaper = try container.decodeIfPresent(Bool.self, forKey: .blursWallpaper) ?? true
+        let radius = (try? container.decodeIfPresent(Double.self, forKey: .wallpaperBlurRadius)) ?? 8
+        wallpaperBlurRadius = radius.isFinite ? min(max(radius, 0), 40) : 8
+        returnToFirstPage = (try? container.decodeIfPresent(Bool.self, forKey: .returnToFirstPage)) ?? false
+        closeOnBackgroundClick = (try? container.decodeIfPresent(Bool.self, forKey: .closeOnBackgroundClick)) ?? true
+        screenTarget = (try? container.decodeIfPresent(LauncherScreenTarget.self, forKey: .screenTarget)) ?? .cursor
         menuIconVisibility = (try? container.decodeIfPresent(MenuIconVisibility.self, forKey: .menuIconVisibility)) ?? .automatic
         knownApplications = (try? container.decodeIfPresent([StableAppIdentifier: KnownApplication].self, forKey: .knownApplications)) ?? [:]
     }

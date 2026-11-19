@@ -145,11 +145,13 @@ public enum PanelPlacement {
 public struct PanelCloseButton: View {
     private let accessibilityLabel: String
     private let action: () -> Void
+    private let hitTargetSize: CGFloat
 
     @State private var isHovering = false
 
-    public init(accessibilityLabel: String, action: @escaping () -> Void) {
+    public init(accessibilityLabel: String, hitTargetSize: CGFloat = 20, action: @escaping () -> Void) {
         self.accessibilityLabel = accessibilityLabel
+        self.hitTargetSize = hitTargetSize
         self.action = action
     }
 
@@ -169,7 +171,7 @@ public struct PanelCloseButton: View {
             }
             .frame(width: 13, height: 13)
             .shadow(color: .black.opacity(0.18), radius: 1, y: 0.5)
-            .frame(width: 20, height: 20)
+            .frame(width: hitTargetSize, height: hitTargetSize)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)

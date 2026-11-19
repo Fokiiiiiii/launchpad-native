@@ -126,6 +126,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             // no drag is active.
             self?.resetDragStateIfNeeded()
             self?.itemDrag.cancelItemDragIfNeeded()
+            self?.itemDrag.clearGroupSelection()
             self?.onBackgroundClick()
         }
 
@@ -817,6 +818,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         forceResetPageDrag()
     }
 
+    public func resetToFirstPage() {
+        pageTransitionGeneration &+= 1
+        pendingEdgeSelection = nil
+        currentPage = 0
+        forceResetPageDrag()
+        pageControl.numberOfPages = model.pages.count
+        prefetchAdjacentPageIcons()
+    }
+
     private func forceResetPageDrag() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -1421,7 +1431,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
               model.pages[currentPage].indices.contains(indexPath.item) else {
             return NSCollectionViewItem()
         }
-        let isSelected = keyboardSelectionActive && collectionView.selectionIndexPaths.contains(indexPath)
+        let isSelected = (keyboardSelectionActive && collectionView.selectionIndexPaths.contains(indexPath)) || itemDrag.isGroupSelected(model.pages[currentPage][indexPath.item])
         cell.setPressAction { [weak self, weak cell] in
             guard let self, let cell, let path = self.collectionView.indexPath(for: cell) else { return }
             self.activate(at: path)
@@ -1437,20 +1447,20 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             let expectedKey = record.iconCacheKey
             if let cachedIcon = cache.cachedIconIfAvailable(for: record) {
                 DiagnosticsLog.grid.debug("itemForRepresentedObjectAt: icon cache hit for \(record.bundleIdentifier, privacy: .public)")
-                cell.configureAsApp(record: record, icon: cachedIcon, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, displayName: displayName)
+                cell.configureAsApp(record: record, icon: cachedIcon, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, displayName: displayName, showsLabel: model.gridSettings.labelVisible)
             } else {
                 DiagnosticsLog.grid.debug("itemForRepresentedObjectAt: icon cache miss for \(record.bundleIdentifier, privacy: .public), fetching async")
-                cell.configureAsApp(record: record, icon: NSImage(), isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, displayName: displayName)
-                Task { @MainActor in
+                cell.configureAsApp(record: record, icon: GridCellItem.loadingIcon, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, displayName: displayName, showsLabel: model.gridSettings.labelVisible)
+                cell.setIconLoadTask(Task { @MainActor [weak cell] in
                     let icon = await cache.icon(for: record)
                     // The cell may have been recycled for a different record by
                     // the time this fetch completes (reloadData() fires on
                     // every grid-settings Apply and search keystroke) — only
                     // apply if it's still showing what we started fetching for.
-                    guard cell.currentRequestKey == expectedKey else { return }
+                    guard !Task.isCancelled, let cell, cell.currentRequestKey == expectedKey else { return }
                     // The picture only: the selection captured above may be old by now.
                     cell.setIcon(icon)
-                }
+                })
             }
         case .folder(let folderID):
             let folder = model.folders[folderID]
@@ -1465,25 +1475,27 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             // already looked at — real icons for anything not yet cached
             // arrive moments later via the async fetch below.
             let warmIcons = previews.compactMap { iconCache.cachedIconIfAvailable(for: $0) }
-            cell.configureAsFolder(name: name, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, icons: warmIcons, requestKey: key)
+            cell.configureAsFolder(name: name, isSelected: isSelected, iconSize: iconSize, visualScale: visualScale, icons: warmIcons, requestKey: key, showsLabel: model.gridSettings.labelVisible)
             // Every warm icon is already on the tile. Re-fetching them would
             // rebuild the same thumbnail from the same images — and this runs
             // for every folder cell on every `reloadData()`.
             if warmIcons.count < previews.count {
                 let cache = iconCache
-                Task { @MainActor in
+                cell.setIconLoadTask(Task { @MainActor [weak cell] in
                     var icons: [NSImage] = []
                     for record in previews {
+                        guard !Task.isCancelled else { return }
                         icons.append(await cache.icon(for: record))
                     }
                     // Same cell-reuse guard as the app case above — the cell
                     // may have been recycled for a different folder (or an
                     // app) by the time these fetches complete.
-                    guard cell.currentRequestKey == key else { return }
+                    guard !Task.isCancelled, let cell, cell.currentRequestKey == key else { return }
                     cell.setFolderIcons(icons)
-                }
+                })
             }
         }
+        if itemDrag.isGroupItemBeingDragged(model.pages[currentPage][indexPath.item]) { cell.view.layer?.opacity = 0 }
         return cell
     }
 

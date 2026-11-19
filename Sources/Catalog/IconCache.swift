@@ -28,29 +28,19 @@ public final class IconCache: @unchecked Sendable {
     }()
     private let writeQueue = DispatchQueue(label: "com.launchpadnative.iconcache.write")
     private let memoryLock = NSLock()
-    /// LRU bookkeeping is a monotonic counter per entry rather than an
-    /// order array. Reads outnumber writes by a wide margin here (a cache hit
-    /// happens for every cell of every `reloadData()`), and moving a key to
-    /// the back of a 192-element array of strings made each *read* linear.
-    private struct MemoryEntry {
-        let image: NSImage
-        var tick: UInt64
-    }
-
-    private var memory: [String: MemoryEntry] = [:]
-    private var memoryTick: UInt64 = 0
-    /// Keeps the usual current plus adjacent/target working set resident. At
-    /// 128pt requests this is roughly 48 MiB of 2x RGBA pixels before NSImage
-    /// overhead; custom page sizes may exceed it, but the LRU bound prevents
-    /// prefetch from retaining an unbounded catalog.
-    private let memoryLimit = 192
+    private let memoryIndex = launchpad_memory_cache_new(48 * 1024 * 1024, 192)
+    private var memory: [UInt64: NSImage] = [:]
 
     private struct Waiter {
         let id: UUID
         let continuation: CheckedContinuation<NSImage, Never>
     }
+    private struct InFlight {
+        let generation: UUID
+        var waiters: [Waiter]
+    }
     private let requestLock = NSLock()
-    private var inFlight: [String: [Waiter]] = [:]
+    private var inFlight: [String: InFlight] = [:]
     private var cancelledRequestIDs: Set<UUID> = []
     private let maxInFlightKeys = 256
     private let maxWaitersPerKey = 32
@@ -77,6 +67,10 @@ public final class IconCache: @unchecked Sendable {
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         // Behind the launch: the queue is serial and nothing waits on it.
         writeQueue.async { [self] in trimDiskCache(toBytes: diskBudgetBytes) }
+    }
+
+    deinit {
+        launchpad_memory_cache_free(memoryIndex)
     }
 
     /// Deletes the oldest PNGs until the folder fits in `budget`. Age is the file's
@@ -128,9 +122,19 @@ public final class IconCache: @unchecked Sendable {
 
     public func evictMemoryCache() {
         memoryLock.lock()
+        launchpad_memory_cache_clear(memoryIndex)
         memory.removeAll()
         memoryLock.unlock()
     }
+
+#if DEBUG
+    func setIconLoadsSuspendedForTesting(_ suspended: Bool) { queue.isSuspended = suspended }
+    func inFlightCountForTesting() -> Int {
+        requestLock.lock()
+        defer { requestLock.unlock() }
+        return inFlight.count
+    }
+#endif
 
     /// Internal test hook for proving the explicit memory/in-flight/write
 
@@ -152,112 +156,93 @@ public final class IconCache: @unchecked Sendable {
             continuation.resume(returning: Self.placeholder(size: size))
             return
         }
-
         if inFlight[key] == nil, inFlight.count >= maxInFlightKeys {
             requestLock.unlock()
             continuation.resume(returning: Self.placeholder(size: size))
             return
         }
-
-        let currentWaiterCount = inFlight[key]?.count ?? 0
+        let currentWaiterCount = inFlight[key]?.waiters.count ?? 0
         guard currentWaiterCount < maxWaitersPerKey else {
             requestLock.unlock()
             continuation.resume(returning: Self.placeholder(size: size))
             return
         }
-
-        let shouldStart = inFlight[key] == nil
-        inFlight[key, default: []].append(
-            Waiter(id: requestID, continuation: continuation)
-        )
+        let generation: UUID?
+        if var work = inFlight[key] {
+            work.waiters.append(Waiter(id: requestID, continuation: continuation))
+            inFlight[key] = work
+            generation = nil
+        } else {
+            let id = UUID()
+            inFlight[key] = InFlight(generation: id, waiters: [Waiter(id: requestID, continuation: continuation)])
+            generation = id
+        }
         requestLock.unlock()
-
-        if shouldStart {
+        if let generation {
             queue.addOperation { [self] in
-                load(record: record, size: size, key: key)
+                load(record: record, size: size, key: key, generation: generation)
             }
         }
     }
 
     private func cancel(requestID: UUID, key: String, size: CGFloat) {
         requestLock.lock()
-        guard var waiters = inFlight[key] else {
-            // Cancellation may race registration. The enqueue path consumes
-            // this marker and resumes without launching a fetch.
-            if cancelledRequestIDs.count >= maxCancelledRequestIDs {
-                _ = cancelledRequestIDs.popFirst()
-            }
+        guard var work = inFlight[key], let index = work.waiters.firstIndex(where: { $0.id == requestID }) else {
+            if cancelledRequestIDs.count >= maxCancelledRequestIDs { _ = cancelledRequestIDs.popFirst() }
             cancelledRequestIDs.insert(requestID)
             requestLock.unlock()
             return
         }
-        guard let index = waiters.firstIndex(where: { $0.id == requestID }) else {
-            requestLock.unlock()
-            return
-        }
-        let waiter = waiters.remove(at: index)
-        // Keep an empty entry until the scheduled worker calls finish().
-        // This prevents a second worker from being launched while the first
-        // one is still unwinding after every waiter canceled.
-        inFlight[key] = waiters
+        let waiter = work.waiters.remove(at: index)
+        if work.waiters.isEmpty { inFlight.removeValue(forKey: key) }
+        else { inFlight[key] = work }
         requestLock.unlock()
-
         waiter.continuation.resume(returning: Self.placeholder(size: size))
     }
 
-    private func load(record: ApplicationRecord, size: CGFloat, key: String) {
-        guard hasWaiters(for: key) else {
-            finish(key: key, image: nil)
-            return
-        }
-
+    private func load(record: ApplicationRecord, size: CGFloat, key: String, generation: UUID) {
+        guard hasWaiters(for: key, generation: generation) else { return }
         if let cached = readMemory(key) {
-            finish(key: key, image: cached)
+            finish(key: key, generation: generation, image: cached)
             return
         }
-
         let diskURL = cacheFileURL(forKey: key)
         let diskStart = DispatchTime.now()
-        if let data = try? Data(contentsOf: diskURL), let image = NSImage(data: data) {
+        if let data = RustFileIO.read(diskURL), let image = NSImage(data: data) {
+            guard hasWaiters(for: key, generation: generation) else { return }
+            // Disk PNGs contain 2x pixels; retain the requested logical point size.
+            image.size = NSSize(width: size, height: size)
             writeMemory(key, image)
             logSlowIfNeeded(record: record, phase: "disk-hit", start: diskStart)
-            finish(key: key, image: image)
+            finish(key: key, generation: generation, image: image)
             return
         }
-
         let fetchStart = DispatchTime.now()
         let icon = NSWorkspace.shared.icon(forFile: record.bundleURL.path)
         icon.size = NSSize(width: size, height: size)
         logSlowIfNeeded(record: record, phase: "NSWorkspace.icon(forFile:)", start: fetchStart)
-
-        // If every waiter canceled while the synchronous fetch was running,
-        // drop the result instead of retaining another image or enqueueing a
-        // disk write nobody needs.
-        guard hasWaiters(for: key) else {
-            finish(key: key, image: nil)
-            return
-        }
-
+        guard hasWaiters(for: key, generation: generation) else { return }
         writeMemory(key, icon)
         enqueueDiskWrite(icon: icon, record: record, size: size, diskURL: diskURL)
-        finish(key: key, image: icon)
+        finish(key: key, generation: generation, image: icon)
     }
 
-    private func hasWaiters(for key: String) -> Bool {
+    private func hasWaiters(for key: String, generation: UUID) -> Bool {
         requestLock.lock()
         defer { requestLock.unlock() }
-        return !(inFlight[key]?.isEmpty ?? true)
+        guard let work = inFlight[key], work.generation == generation else { return false }
+        return !work.waiters.isEmpty
     }
 
-    private func finish(key: String, image: NSImage?) {
+    private func finish(key: String, generation: UUID, image: NSImage) {
         requestLock.lock()
-        let waiters = inFlight.removeValue(forKey: key) ?? []
-        requestLock.unlock()
-
-        let result = image ?? Self.placeholder(size: 1)
-        for waiter in waiters {
-            waiter.continuation.resume(returning: result)
+        guard let work = inFlight[key], work.generation == generation else {
+            requestLock.unlock()
+            return
         }
+        inFlight.removeValue(forKey: key)
+        requestLock.unlock()
+        for waiter in work.waiters { waiter.continuation.resume(returning: image) }
     }
 
     private func enqueueDiskWrite(
@@ -282,7 +267,7 @@ public final class IconCache: @unchecked Sendable {
             }
             let encodeStart = DispatchTime.now()
             if let pngData = Self.pngData(for: icon, size: size) {
-                try? pngData.write(to: diskURL, options: .atomic)
+                _ = RustFileIO.write(pngData, to: diskURL)
             }
             logSlowIfNeeded(record: record, phase: "png-encode+write", start: encodeStart)
             writesSinceTrim += 1
@@ -293,25 +278,57 @@ public final class IconCache: @unchecked Sendable {
         }
     }
 
-    private func readMemory(_ key: String) -> NSImage? {
+    func readMemory(_ key: String) -> NSImage? {
+        var normalized = key.utf8.allSatisfy { $0 < 0x80 } ? key : key.precomposedStringWithCanonicalMapping
         memoryLock.lock()
         defer { memoryLock.unlock() }
-        guard let entry = memory[key] else { return nil }
-        memoryTick &+= 1
-        memory[key]?.tick = memoryTick
-        return entry.image
+        let id = normalized.withUTF8 { bytes in
+            launchpad_memory_cache_touch(memoryIndex, bytes.baseAddress, UInt(bytes.count))
+        }
+        return memory[id]
     }
 
-    private func writeMemory(_ key: String, _ image: NSImage) {
+    func writeMemory(_ key: String, _ image: NSImage) {
+        var normalized = key.utf8.allSatisfy { $0 < 0x80 } ? key : key.precomposedStringWithCanonicalMapping
+        let cost = Self.estimatedImageCost(image)
         memoryLock.lock()
-        memoryTick &+= 1
-        memory[key] = MemoryEntry(image: image, tick: memoryTick)
-        // Only the write path scans, and only once the cache is full.
-        while memory.count > memoryLimit {
-            guard let oldest = memory.min(by: { $0.value.tick < $1.value.tick })?.key else { break }
-            memory.removeValue(forKey: oldest)
+        defer { memoryLock.unlock() }
+        var removed: [UInt64] = []
+        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt64>?, UInt) -> Void = { context, values, count in
+            guard let context, let values, let length = Int(exactly: count) else { return }
+            context.assumingMemoryBound(to: [UInt64].self).pointee.append(contentsOf: UnsafeBufferPointer(start: values, count: length))
         }
-        memoryLock.unlock()
+        let id = withUnsafeMutablePointer(to: &removed) { destination in
+            normalized.withUTF8 { bytes in
+                launchpad_memory_cache_put(memoryIndex, bytes.baseAddress, UInt(bytes.count), cost, destination, callback)
+            }
+        }
+        for removedID in removed { memory.removeValue(forKey: removedID) }
+        if id != 0 { memory[id] = image }
+    }
+
+    private static func estimatedImageCost(_ image: NSImage) -> UInt64 {
+        func product(_ values: [UInt64]) -> UInt64 {
+            values.reduce(1) { total, value in
+                let (result, overflow) = total.multipliedReportingOverflow(by: value)
+                return overflow ? UInt64.max : result
+            }
+        }
+        func scaled(_ value: CGFloat) -> UInt64? {
+            guard value.isFinite, value >= 0, value <= 32_768 else { return nil }
+            return UInt64((value * 2).rounded(.up))
+        }
+        guard let width = scaled(image.size.width), let height = scaled(image.size.height) else { return UInt64.max }
+        let displayCost = product([width, height, 4])
+        var representationsCost: UInt64 = 0
+        for case let bitmap as NSBitmapImageRep in image.representations where bitmap.bytesPerRow > 0 {
+            let height = UInt64(max(bitmap.pixelsHigh, 0))
+            let planes = bitmap.isPlanar ? max(bitmap.samplesPerPixel, 1) : 1
+            let cost = product([UInt64(bitmap.bytesPerRow), height, UInt64(planes)])
+            let (sum, overflow) = representationsCost.addingReportingOverflow(cost)
+            representationsCost = overflow ? UInt64.max : sum
+        }
+        return max(1, displayCost, representationsCost)
     }
 
     /// Rasterizes to a single fixed-size bitmap and encodes as PNG.

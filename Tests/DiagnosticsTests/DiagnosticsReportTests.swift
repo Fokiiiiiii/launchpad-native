@@ -21,8 +21,8 @@ private let environment = DiagnosticsReport.Environment(
 
 @Test func theReportIncludesTheLogInOrder() {
     let report = DiagnosticsReport.compose(environment: environment, logLines: ["first", "second", "third"])
-    let first = try? #require(report.range(of: "first"))
-    let third = try? #require(report.range(of: "third"))
+    let first = report.range(of: "first")
+    let third = report.range(of: "third")
     #expect(first != nil && third != nil)
     if let first, let third { #expect(first.lowerBound < third.lowerBound) }
     #expect(report.contains("3 entries"))
