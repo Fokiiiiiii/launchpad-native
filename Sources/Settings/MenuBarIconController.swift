@@ -42,23 +42,11 @@ public final class MenuBarIconController {
         statusItem = item
     }
 
-    /// Re-reads the process icon after Settings changes `AppIconStyle` so an
-    /// already-visible status item does not keep the stale image captured at
-    /// creation time. No-op while the menu-bar item is hidden.
-    public func refreshIcon() {
-        guard let statusItem else { return }
-        applyIcon(to: statusItem)
-    }
-
+    /// A template symbol, as the HIG asks of menu bar extras, so the system can
+    /// tint it for light and dark menu bars and for the highlighted state.
     private func applyIcon(to item: NSStatusItem) {
-        guard let image = (NSApp.applicationIconImage ?? NSImage(named: NSImage.applicationIconName)) else {
-            item.button?.image = nil
-            return
-        }
-        let icon = image.copy() as? NSImage ?? image
-        icon.isTemplate = false
-        icon.size = NSSize(width: 18, height: 18)
-        item.button?.image = icon
+        let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+        item.button?.image = NSImage(systemSymbolName: "square.grid.3x3.fill", accessibilityDescription: name)
     }
 
     private func hide() {

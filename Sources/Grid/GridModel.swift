@@ -85,6 +85,7 @@ public final class GridModel {
     }
 
     public func loadDocument() async {
+        forgetUndoHistory()
         document = await layoutStore.load()
         pages = document.pages.isEmpty ? [[]] : document.pages
         folders = document.folders
@@ -132,6 +133,7 @@ public final class GridModel {
     /// page tightly, destroying gaps the user arranged on purpose, on every
     /// unrelated settings change ("行数の設定やページごとのアプリ数がおかしい").
     public func updateGridSettings(_ settings: GridSettings) {
+        forgetUndoHistory()
         let oldCapacity = capacityPerPage
         gridSettings = settings
         document.gridSettings = settings
@@ -149,6 +151,7 @@ public final class GridModel {
     /// under the *current*, unchanged grid settings — e.g. after manually
     /// dragging gaps into pages over time.
     public func reorganizePages() {
+        forgetUndoHistory()
         reflowPagesToCurrentCapacity()
         orderDidChange()
     }
@@ -307,6 +310,7 @@ public final class GridModel {
     /// the manual order was already overwritten, and restoring it would need
     /// undo history this does not keep.
     public func applySortMode(_ mode: SortMode) {
+        forgetUndoHistory()
         gridSettings.sortMode = mode
         document.gridSettings = gridSettings
         switch mode {
@@ -693,6 +697,7 @@ public final class GridModel {
             || previousDateAdded != document.dateAddedByID
             || previousKnown != document.knownApplications
         if changed {
+            forgetUndoHistory()
             onChange?()
         }
         return changed
@@ -1050,6 +1055,7 @@ public final class GridModel {
     }
 
     public func moveItem(fromPage: Int, fromIndex: Int, toPage: Int, toIndex: Int) {
+        let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
         let capacity = capacityPerPage
         guard Self.moveWithRust(&pages, fromPage: fromPage, fromIndex: fromIndex, toPage: toPage, toIndex: toIndex, capacity: capacity) else { return }
         orderDidChange()
@@ -1074,6 +1080,7 @@ public final class GridModel {
 
     @discardableResult
     public func moveItems(_ items: Set<LayoutItem>, leader: LayoutItem, toPage: Int, toIndex: Int, folderTarget: LayoutItem? = nil) -> Int? {
+        let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
         guard !items.isEmpty, items.contains(leader), pages.indices.contains(toPage) else { return nil }
         if folderTarget == nil {
             guard let page = reorderWithRust(items, leader: leader, toPage: toPage, toIndex: toIndex) else { return nil }
@@ -1163,6 +1170,7 @@ public final class GridModel {
     /// decision about how the two pages' capacities absorb the move, which the
     /// caller is not set up to resolve.
     public func moveItemWithinFolder(_ folderID: FolderID, page: Int, fromIndex: Int, toIndex: Int) {
+        let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
         guard var folder = folders[folderID],
               folder.pages.indices.contains(page),
               folder.pages[page].indices.contains(fromIndex),
@@ -1176,6 +1184,7 @@ public final class GridModel {
     /// Dragging one item onto another: onto a bare app, both merge into a new
     /// folder; onto an existing folder, the dragged item joins it.
     public func createOrJoinFolder(sourcePage: Int, sourceIndex: Int, destinationPage: Int, destinationIndex: Int, defaultFolderName: String = L10n.defaultFolderName) {
+        let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
         guard pages.indices.contains(sourcePage), pages[sourcePage].indices.contains(sourceIndex),
               pages.indices.contains(destinationPage), pages[destinationPage].indices.contains(destinationIndex),
               !(sourcePage == destinationPage && sourceIndex == destinationIndex) else { return }
@@ -1244,6 +1253,7 @@ public final class GridModel {
     }
 
     public func removeFromFolder(_ folderID: FolderID, folderPage: Int, folderIndex: Int, toPage: Int) {
+        let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
         guard var folder = folders[folderID],
               folder.pages.indices.contains(folderPage),
               folder.pages[folderPage].indices.contains(folderIndex) else { return }
@@ -1281,6 +1291,7 @@ public final class GridModel {
     }
 
     public func renameFolder(_ id: FolderID, to name: String) {
+        let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         folders[id]?.name = name
         onChange?()
@@ -1291,6 +1302,7 @@ public final class GridModel {
     /// the folder's items into `pages` at its former position, contiguous, and
     /// reuses the normal reflow for the overflow that can cause.
     public func ungroupFolder(_ id: FolderID) {
+        let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
         guard let folder = folders[id] else { return }
         let flattenedItems = folder.pages.flatMap { $0 }
 
@@ -1317,6 +1329,7 @@ public final class GridModel {
     /// installed and known to Catalog, it just drops out of pages/folders
     /// and normal search until unhidden.
     public func hideApplication(_ id: StableAppID) {
+        let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
         let identifier = id.asPersistenceIdentifier
         document.hiddenApplicationIDs.insert(identifier)
         let hiddenValues = Set(document.hiddenApplicationIDs.map(\.value))
@@ -1327,12 +1340,59 @@ public final class GridModel {
     }
 
     public func unhideApplication(_ identifier: StableAppIdentifier) {
+        let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
         document.hiddenApplicationIDs.remove(identifier)
         if recordsByIDValue[identifier.value] != nil, !allPlacedAppIdentifierValues().contains(identifier.value) {
             appendToLastPage(.app(identifier))
         }
         onChange?()
         onSearchableRecordsChange?()
+    }
+
+    // MARK: - Undo
+
+    /// The parts of the layout people arrange by hand, as they were before one
+    /// change. ⌘Z puts the last one back.
+    private struct LayoutSnapshot: Equatable {
+        var pages: [[LayoutItem]]
+        var folders: [FolderID: Folder]
+        var aliases: [StableAppIdentifier: String]
+        var hiddenApplicationIDs: Set<StableAppIdentifier>
+    }
+
+    private static let undoLimit = 20
+    private var undoStack: [LayoutSnapshot] = []
+
+    public var canUndo: Bool { !undoStack.isEmpty }
+
+    private var layoutSnapshot: LayoutSnapshot {
+        LayoutSnapshot(pages: pages, folders: folders, aliases: document.aliases, hiddenApplicationIDs: document.hiddenApplicationIDs)
+    }
+
+    /// Keeps `before` only when the change made since then did something, so a
+    /// refused drop does not leave a ⌘Z that appears to do nothing.
+    private func rememberForUndo(_ before: LayoutSnapshot) {
+        guard layoutSnapshot != before else { return }
+        undoStack.append(before)
+        if undoStack.count > Self.undoLimit { undoStack.removeFirst() }
+    }
+
+    /// Snapshots stop fitting once apps come or go, the page size changes, or
+    /// the whole arrangement is replaced.
+    private func forgetUndoHistory() {
+        undoStack.removeAll()
+    }
+
+    /// Puts back the layout as it was before the last hand-made change.
+    @discardableResult
+    public func undo() -> Bool {
+        guard let snapshot = undoStack.popLast() else { return false }
+        pages = snapshot.pages
+        folders = snapshot.folders
+        document.aliases = snapshot.aliases
+        document.hiddenApplicationIDs = snapshot.hiddenApplicationIDs
+        orderDidChange()
+        return true
     }
 
     public var hiddenApplicationIdentifiers: [StableAppIdentifier] {
@@ -1344,6 +1404,7 @@ public final class GridModel {
     /// Overrides display name only for this app — never touches the bundle
     /// or Info.plist. Passing `nil` (or blank) clears the alias.
     public func setAlias(_ alias: String?, for id: StableAppID) {
+        let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
         let identifier = id.asPersistenceIdentifier
         let trimmed = alias?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let trimmed, !trimmed.isEmpty {
@@ -1394,6 +1455,7 @@ public final class GridModel {
     /// call on every launch; it's a no-op once real state exists.
     @discardableResult
     public func applyLegacyImportIfFirstRun(_ result: LegacyImportResult) -> Bool {
+        forgetUndoHistory()
         let hasExistingArrangement = folders.isEmpty == false || pages.contains { !$0.isEmpty }
         guard result.succeeded, !hasExistingArrangement else { return false }
 
@@ -1462,6 +1524,7 @@ public final class GridModel {
     }
 
     public func restoreLayoutBackup(from url: URL) async throws {
+        forgetUndoHistory()
         let data = try await layoutStore.readBackup(at: url)
         let backup = try LayoutJSON.decode(data)
         guard backup.schemaVersion == LayoutDocument.currentSchemaVersion,

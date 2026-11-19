@@ -341,6 +341,17 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         view.window?.makeFirstResponder(searchField)
     }
 
+    /// Puts back the last change made to the arrangement. An open folder is
+    /// closed first, since the change may have been the one that created it.
+    func undoLayoutChange() -> Bool {
+        guard gridModel.canUndo else { return false }
+        gridViewController.cancelItemDragIfNeeded()
+        gridViewController.closeFolderIfOpen()
+        gridModel.undo()
+        Task { await gridModel.save() }
+        return true
+    }
+
     /// The controls on the search pill, for checking that clicks still reach
     /// them wherever the glass behind them sits in the hierarchy.
     var searchPillControlsForTesting: [NSView] { [searchField, clearSearchButton, quickMenuButton] }

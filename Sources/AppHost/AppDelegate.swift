@@ -37,7 +37,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         },
         onDockVisibilityChanged: { [weak self] hideDock in self?.launcherWindowController.updateDockVisibilityPreference(hideDock) },
         onShowsMenuBarIconChanged: { [weak self] visible in self?.menuBarIconController.setVisible(visible) },
-        onAppIconStyleChanged: { [weak self] _ in self?.menuBarIconController.refreshIcon() },
         onShowsHiddenAppsInSearchChanged: { [weak self] in self?.launcherWindowController.refreshSearchableRecords() },
         onMenuBarApplicationsChanged: { [weak self] in self?.launcherWindowController.refreshSearchableRecords() },
         onBackgroundSettingsChanged: { [weak self] in

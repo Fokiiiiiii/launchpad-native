@@ -25,7 +25,7 @@ public struct SettingsView: View {
         static let contentBottomPadding: CGFloat = 12
     }
 
-    let accent = Color(red: 10 / 255, green: 132 / 255, blue: 255 / 255)
+    let accent = Color.accentColor
 
     public init(viewModel: SettingsViewModel, onClose: @escaping () -> Void = {}) {
         self.viewModel = viewModel

@@ -9,6 +9,9 @@ final class LauncherWindow: NSWindow {
     var onCloseWindow: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onFocusSearch: (() -> Void)?
+    /// ⌘Z with nothing typed in the search field. Returns whether there was a
+    /// layout change to put back.
+    var onUndo: (() -> Bool)?
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -27,6 +30,10 @@ final class LauncherWindow: NSWindow {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
+        // Drawn over the dimmed wallpaper in either system appearance, like
+        // Launchpad: white labels and controls, which the dark base and the
+        // white search icons already assume.
+        appearance = NSAppearance(named: .darkAqua)
         applyDockVisibilityPreference(hideDock: hideDock, reason: "init")
         // `toggleFullScreen` creates a separate Space. The launcher is an
         // overlay, so join the current/all Spaces and remain auxiliary to an
@@ -87,6 +94,13 @@ final class LauncherWindow: NSWindow {
         case "f":
             onFocusSearch?()
             return true
+        case "z" where !event.modifierFlags.contains(.shift):
+            // Text typed into the search field keeps its own undo.
+            if let text = firstResponder as? NSText, !text.string.isEmpty {
+                return super.performKeyEquivalent(with: event)
+            }
+            if onUndo?() == true { return true }
+            return super.performKeyEquivalent(with: event)
         default:
             return super.performKeyEquivalent(with: event)
         }

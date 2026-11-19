@@ -586,6 +586,46 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(model.folders[folderID]?.pages.first?.count == 2)
 }
 
+@Test @MainActor func undoPutsBackTheLastChangesInReverseOrder() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let c = record("C", id: "c")
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), c])
+    let original = model.pages
+
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+    let withFolder = model.pages
+    model.hideApplication(c.id)
+
+    #expect(model.undo())
+    #expect(model.pages == withFolder)
+    #expect(model.hiddenApplicationIdentifiers.isEmpty)
+    #expect(model.undo())
+    #expect(model.pages == original)
+    #expect(model.folders.isEmpty)
+    #expect(!model.undo())
+}
+
+@Test @MainActor func refusedChangesAndCatalogChangesLeaveNothingToUndo() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let a = record("A", id: "a")
+    model.reconcile(with: [a, record("B", id: "b")])
+
+    model.moveItem(fromPage: 0, fromIndex: 0, toPage: 0, toIndex: 0)
+    model.renameFolder(FolderID(value: "missing"), to: "X")
+    #expect(!model.canUndo)
+
+    model.hideApplication(a.id)
+    #expect(model.canUndo)
+    model.reconcile(with: [a, record("B", id: "b"), record("D", id: "d")])
+    #expect(!model.canUndo)
+}
+
 @Test @MainActor func draggingIntoExistingFolderAddsToIt() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
