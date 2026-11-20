@@ -73,38 +73,63 @@ public enum AppIconStyleApplier {
         // anything once there is a process showing one.
         guard let app = NSApp else { return }
         // nil falls back to the bundle's own .icns
-        app.applicationIconImage = image(for: style, pointSize: applicationIconPointSize)
+        app.applicationIconImage = image(for: style, pointSize: applicationIconPointSize).flatMap(paddedForIconGrid)
         guard let directory = Bundle.main.resourceURL?.appendingPathComponent("AppIconVariants") else { return }
         applyToBundle(style, bundleURL: Bundle.main.bundleURL, variants: directory, defaults: .standard)
     }
 
+    /// How much of the canvas an icon's shape fills. Apple's icon grid is 824 of
+    /// 1024 points, which leaves the margin every other icon in the Dock and
+    /// Finder has. The variants are drawn edge to edge for the picker, so used
+    /// as they were they came out about a quarter larger than their neighbours.
+    static let iconGridFraction: CGFloat = 824.0 / 1024.0
+
+    /// `image` shrunk onto a transparent canvas of the same size, at the icon grid.
+    static func paddedForIconGrid(_ image: NSImage) -> NSImage? {
+        guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let context = CGContext(
+                data: nil, width: source.width, height: source.height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return nil }
+        let width = CGFloat(source.width), height = CGFloat(source.height)
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(
+            x: width * (1 - iconGridFraction) / 2, y: height * (1 - iconGridFraction) / 2,
+            width: width * iconGridFraction, height: height * iconGridFraction
+        ))
+        guard let padded = context.makeImage() else { return nil }
+        return NSImage(cgImage: padded, size: image.size)
+    }
+
     private static let appliedBundleStyleKey = "AppliedBundleIconStyle"
+    /// Bumped when the picture drawn for the bundle changes, so an icon written
+    /// by an older version is written again.
+    private static let bundleIconRendering = 2
 
     /// Dock, Finder and Spotlight draw the bundle's icon, not the process's, and
     /// this app has no Dock tile of its own, so a style set only on the process
     /// showed nowhere. It is also set on the bundle the way Finder's Get Info
     /// does: an `Icon\r` file the code signature leaves out, so the CDHash, and
-    /// the permissions granted to it, stay as they are. `classic` is the
-    /// bundle's own icon, so it removes the custom one. Written only when it
+    /// the permissions granted to it, stay as they are. Every style, `classic`
+    /// included, is written at the icon grid: the bundle's own `AppIcon.icns` is
+    /// drawn edge to edge too. Written only when the style or the rendering
     /// changes, and skipped for a host without the variants (tests).
     static func applyToBundle(_ style: AppIconStyle, bundleURL: URL, variants: URL, defaults: UserDefaults) {
         guard FileManager.default.fileExists(atPath: variants.path) else { return }
         let bundlePath = bundleURL.path
+        let marker = "\(style.rawValue)#\(bundleIconRendering)"
         let hasCustomIcon = FileManager.default.fileExists(atPath: bundleURL.appendingPathComponent("Icon\r").path)
-        let applied: Bool
-        if style == .classic {
-            guard hasCustomIcon else { return }
-            applied = NSWorkspace.shared.setIcon(nil, forFile: bundlePath, options: [])
-        } else {
-            guard !hasCustomIcon || defaults.string(forKey: appliedBundleStyleKey) != style.rawValue else { return }
-            guard let icon = NSImage(contentsOf: variants.appendingPathComponent("\(style.rawValue).png")) else { return }
-            applied = NSWorkspace.shared.setIcon(icon, forFile: bundlePath, options: [])
-        }
-        guard applied else {
+        guard !hasCustomIcon || defaults.string(forKey: appliedBundleStyleKey) != marker else { return }
+        guard let picture = NSImage(contentsOf: variants.appendingPathComponent("\(style.rawValue).png")),
+              let icon = paddedForIconGrid(picture),
+              NSWorkspace.shared.setIcon(icon, forFile: bundlePath, options: [])
+        else {
             DiagnosticsLog.settings.error("Could not set the \(style.rawValue, privacy: .public) icon on the app bundle")
             return
         }
-        defaults.set(style.rawValue, forKey: appliedBundleStyleKey)
+        defaults.set(marker, forKey: appliedBundleStyleKey)
         NSWorkspace.shared.noteFileSystemChanged(bundlePath)
     }
 }

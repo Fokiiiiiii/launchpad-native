@@ -62,9 +62,9 @@ private func pixelWidth(of image: NSImage) -> Int? {
     #expect(AppIconStyleApplier.image(for: .classic, pointSize: 40, in: directory) == nil)
 }
 
-/// Dock and Finder show the bundle's icon. A style other than `classic` puts a
-/// Finder custom icon on the bundle, and `classic` takes it off again.
-@Test @MainActor func theChosenStyleIsSetOnTheBundleAndClassicRemovesIt() throws {
+/// Dock and Finder show the bundle's icon, so the chosen style is put on it as a
+/// Finder custom icon.
+@Test @MainActor func theChosenStyleIsSetOnTheBundle() throws {
     let variants = try variantsDirectory(with: .monochrome)
     let bundle = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).app")
     try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
@@ -75,11 +75,31 @@ private func pixelWidth(of image: NSImage) -> Int? {
         try? FileManager.default.removeItem(at: bundle)
         defaults.removePersistentDomain(forName: suite)
     }
-    let customIcon = bundle.appendingPathComponent("Icon\r")
 
     AppIconStyleApplier.applyToBundle(.monochrome, bundleURL: bundle, variants: variants, defaults: defaults)
-    #expect(FileManager.default.fileExists(atPath: customIcon.path))
 
-    AppIconStyleApplier.applyToBundle(.classic, bundleURL: bundle, variants: variants, defaults: defaults)
-    #expect(!FileManager.default.fileExists(atPath: customIcon.path))
+    #expect(FileManager.default.fileExists(atPath: bundle.appendingPathComponent("Icon\r").path))
+}
+
+/// An icon drawn edge to edge came out about a quarter larger than every other
+/// icon in the Dock. The picture is put on a transparent canvas at Apple's icon
+/// grid, 824 of 1024.
+@Test @MainActor func anIconIsPaddedToTheIconGrid() throws {
+    let directory = try variantsDirectory(with: .solid)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let picture = try #require(NSImage(contentsOf: directory.appendingPathComponent("solid.png")))
+
+    let padded = try #require(AppIconStyleApplier.paddedForIconGrid(picture))
+    let pixels = try #require(padded.cgImage(forProposedRect: nil, context: nil, hints: nil))
+    let rep = NSBitmapImageRep(cgImage: pixels)
+    let side = pixels.width
+
+    #expect(side == 1_024)
+    func alpha(atFraction fraction: CGFloat) -> CGFloat? {
+        let position = Int(CGFloat(side) * fraction)
+        return rep.colorAt(x: position, y: side / 2)?.alphaComponent
+    }
+    #expect(alpha(atFraction: 0.05) == 0)
+    #expect(alpha(atFraction: 0.12) == 1)
+    #expect(alpha(atFraction: 0.5) == 1)
 }
