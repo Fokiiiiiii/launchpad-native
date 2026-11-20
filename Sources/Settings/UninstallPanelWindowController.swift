@@ -220,6 +220,7 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
         dismissal.stopMonitoring()
         window?.close()
         window = nil
+        viewModel?.cancelPendingWork()
         viewModel = nil
         rootContentView = nil
         currentHostingView = nil

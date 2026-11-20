@@ -44,11 +44,49 @@ public enum RemovalExecutor {
         ].map { library.appendingPathComponent($0, isDirectory: true) }
     }
 
+    /// How asking launchd to stop one user LaunchAgent ended.
+    public enum AgentStopResult: Sendable, Equatable {
+        case stopped
+        /// Not running, or the plist names no job: nothing to stop.
+        case notLoaded
+        /// It is running and could not be stopped.
+        case failed
+    }
+
+    /// Stops the selected LaunchAgents before any file is moved, so a helper that
+    /// keeps running is not left writing into folders that are being emptied.
+    /// An agent that could not be stopped keeps its file in place and is reported
+    /// as failed: moving the plist to the Trash would leave the job running with
+    /// nothing to say it exists.
     public static func execute(
         _ items: [RemovalItem],
-        allowedRoots: [URL] = RemovalExecutor.defaultAllowedRoots
+        allowedRoots: [URL] = RemovalExecutor.defaultAllowedRoots,
+        stopAgent: ((URL) -> AgentStopResult)? = nil
     ) -> [RemovalOutcome] {
-        items.map { executeOne($0, allowedRoots: allowedRoots) }
+        var notStopped: Set<URL> = []
+        for item in items where isRemovable(item, allowedRoots: allowedRoots) && isUserLaunchAgent(item.path) {
+            let result = stopAgent.map { $0(item.path) } ?? stopUserLaunchAgent(at: item.path)
+            if result == .failed { notStopped.insert(item.path) }
+        }
+        return items.map { item in
+            guard !notStopped.contains(item.path) else {
+                return RemovalOutcome(
+                    item: item,
+                    succeeded: false,
+                    errorDescription: "the agent is running and could not be stopped, so its file was left in place"
+                )
+            }
+            return executeOne(item, allowedRoots: allowedRoots)
+        }
+    }
+
+    /// Whether `execute` would act on this item: owned, in the user's domain,
+    /// somewhere removal is allowed, and still there.
+    private static func isRemovable(_ item: RemovalItem, allowedRoots: [URL]) -> Bool {
+        item.classification == .owned
+            && !item.requiresPrivilegedHelper
+            && isPermittedTarget(item.path, allowedRoots: allowedRoots)
+            && FileManager.default.fileExists(atPath: item.path.path)
     }
 
     /// Whether `url` is somewhere a removal may act: an `.app` bundle, or
@@ -80,18 +118,29 @@ public enum RemovalExecutor {
         bundleIdentifier: String,
         timeout: TimeInterval = 5
     ) async -> TerminationResult {
-        let target = bundleURL.standardizedFileURL
         let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
-            .filter { $0.bundleURL?.standardizedFileURL == target }
+            .filter { isSameBundle($0.bundleURL, bundleURL) }
         guard !running.isEmpty else { return .notRunning }
         for app in running { _ = app.terminate() }
 
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if running.allSatisfy({ $0.isTerminated }) { return .terminated }
+            // A cancelled sleep returns at once, so without this the loop spins
+            // until the deadline.
+            guard !Task.isCancelled else { return .stillRunning }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
         return running.allSatisfy { $0.isTerminated } ? .terminated : .stillRunning
+    }
+
+    /// Whether two URLs name the same bundle on disk. The catalog can hold the link
+    /// to an app that lives outside the scanned folders, while a running app
+    /// reports the real location, and comparing the two as written called a
+    /// running app not running.
+    static func isSameBundle(_ lhs: URL?, _ rhs: URL) -> Bool {
+        guard let lhs else { return false }
+        return lhs.resolvingSymlinksInPath().standardizedFileURL == rhs.resolvingSymlinksInPath().standardizedFileURL
     }
 
     private static func executeOne(_ item: RemovalItem, allowedRoots: [URL]) -> RemovalOutcome {
@@ -113,10 +162,6 @@ public enum RemovalExecutor {
             return RemovalOutcome(item: item, succeeded: true, errorDescription: nil)
         }
 
-        if isUserLaunchAgent(item.path) {
-            unloadUserLaunchAgent(at: item.path)
-        }
-
         do {
             try FileManager.default.trashItem(at: item.path, resultingItemURL: nil)
             return RemovalOutcome(item: item, succeeded: true, errorDescription: nil)
@@ -130,23 +175,38 @@ public enum RemovalExecutor {
         url.pathExtension == "plist" && url.path.contains("/Library/LaunchAgents/")
     }
 
-    /// `launchctl bootout` is the public CLI tool for unregistering a user
-    /// LaunchAgent from launchd — not a private API. Best-effort: if the
-    /// plist can't be parsed or the agent was never loaded, this silently
-    /// does nothing and the Trash move below still proceeds (the plist file
-    /// itself is the thing being removed either way).
-    private static func unloadUserLaunchAgent(at url: URL) {
+    /// Stops a user LaunchAgent with `launchctl`, the public CLI for it. It is
+    /// asked first whether the job is loaded at all, because `bootout` of one that
+    /// is not fails too, and that is not a failure to stop anything.
+    static func stopUserLaunchAgent(
+        at url: URL,
+        launchctl: ([String]) -> Int32? = { runLaunchctl($0) }
+    ) -> AgentStopResult {
         guard let data = try? Data(contentsOf: url),
               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let label = plist["Label"] as? String else { return }
-        let uid = getuid()
+              let label = plist["Label"] as? String else { return .notLoaded }
+        let target = "gui/\(getuid())/\(label)"
+        guard let printed = launchctl(["print", target]) else { return .failed }
+        guard printed == 0 else { return .notLoaded }
+        return launchctl(["bootout", target]) == 0 ? .stopped : .failed
+    }
+
+    /// Runs `/bin/launchctl`, with its output discarded and a limit on the wait.
+    /// Returns nil if it could not be run or did not finish in time.
+    private static func runLaunchctl(_ arguments: [String], timeout: TimeInterval = 5) -> Int32? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = ["bootout", "gui/\(uid)/\(label)"]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-        try? process.run()
-        process.waitUntilExit()
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+        do { try process.run() } catch { return nil }
+        guard finished.wait(timeout: .now() + timeout) == .success else {
+            process.terminate()
+            return nil
+        }
+        return process.terminationStatus
     }
 }
 
@@ -157,6 +217,8 @@ public struct RemovalRun: Sendable {
         case nothingSelected
         /// The app had not quit, so no file was moved.
         case blockedByRunningApp
+        /// The panel was closed while this waited for the app to quit.
+        case cancelled
         case completed
     }
 
@@ -183,7 +245,11 @@ public enum RemovalCoordinator {
         }
     ) async -> RemovalRun {
         guard !items.isEmpty else { return RemovalRun(status: .nothingSelected, outcomes: []) }
-        if await terminate(bundleURL, bundleIdentifier) == .stillRunning {
+        let termination = await terminate(bundleURL, bundleIdentifier)
+        // Checked before the files are touched: closing the panel is Cancel, and
+        // it used to leave the removal running behind it.
+        if Task.isCancelled { return RemovalRun(status: .cancelled, outcomes: []) }
+        if termination == .stillRunning {
             return RemovalRun(status: .blockedByRunningApp, outcomes: [])
         }
         return RemovalRun(status: .completed, outcomes: RemovalExecutor.execute(items, allowedRoots: allowedRoots))

@@ -74,12 +74,18 @@ public final class TriggerCoordinator {
     /// restore point (for example, an unsupported finger count or a partial
     /// point that would need restoring).
 
-    private func prepareFiveFingerRestorePoint(_ backup: GestureConflictBackup) -> GestureConflictBackup {
-        guard backup.fingerCount == 5, let applied = backup.appliedKeys else { return backup }
+    /// Records, before anything is written, which preferences this transaction will
+    /// write: both pinch keys for five fingers, the one for four. A restore then
+    /// touches those and only those. A point with no list at all (`appliedKeys ==
+    /// nil`) is one from before the list existed and means "everything it
+    /// captured", so a new point must carry a list or its restore would put back
+    /// settings the user changed in System Settings in the meantime.
+    private func planAppliedKeys(_ backup: GestureConflictBackup) -> GestureConflictBackup {
+        guard let applied = backup.appliedKeys else { return backup }
         var result = backup
         var counts = backup.valuesByFingerCount ?? [:]
         var planned = Set(applied)
-        for count in [4, 5] {
+        for count in (backup.fingerCount == 5 ? [4, 5] : [backup.fingerCount]) {
             guard let key = ConflictingGestureManager.PinchKey(fingerCount: count) else { continue }
             var values = counts[count] ?? [:]
             for domain in ConflictingGestureManager.domains {
@@ -112,7 +118,7 @@ public final class TriggerCoordinator {
                     ? upgradedRestorePoint(existingBackup, fingerCount: settings.multitouchFingerCount)
                     : existingBackup
                 if let backup = prepared.gestureConflictBackup {
-                    prepared.gestureConflictBackup = prepareFiveFingerRestorePoint(backup)
+                    prepared.gestureConflictBackup = planAppliedKeys(backup)
                 }
                 return prepared
             }
@@ -125,8 +131,8 @@ public final class TriggerCoordinator {
             }
             var prepared = settings
             var backup = captured
-            if settings.multitouchFingerCount == 5 { backup.appliedKeys = [] }
-            prepared.gestureConflictBackup = prepareFiveFingerRestorePoint(backup)
+            backup.appliedKeys = []
+            prepared.gestureConflictBackup = planAppliedKeys(backup)
             return prepared
         }
 

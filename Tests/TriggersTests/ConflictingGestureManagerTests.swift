@@ -880,6 +880,40 @@ private func storeWithEveryGestureOn() -> FakeTrackpadPreferenceStore {
     #expect(store.synchronizeCallCount == 0)
 }
 
+/// A restore point with no list of written keys reads as one from before the list
+/// existed, and restores everything it captured. A new four-finger point has to
+/// name the keys it will write, so putting it back leaves the other gestures
+/// alone.
+@Test @MainActor func aNewFourFingerRestorePointRestoresOnlyTheKeysItWrote() throws {
+    let domains = ConflictingGestureManager.domains
+    let store = FakeTrackpadPreferenceStore(initialValues: [
+        domains[0]: [fourFingerKey: 2, fiveFingerKey: 1],
+        domains[1]: [fourFingerKey: 2, fiveFingerKey: 1]
+    ])
+    let coordinator = TriggerCoordinator(onActivate: {}, onPinchClose: {}, onSpreadOpen: {}, trackpadPreferenceStore: store)
+    let settings = TriggerSettings(hotkeyEnabled: false, hotkeyKeyCode: nil, hotkeyModifierFlags: 0, hotCornersEnabled: [:], f4Enabled: false, multitouchGestureEnabled: true, multitouchSensitivity: 0.5, multitouchFingerCount: 4, gestureConflictPreventionEnabled: true, gestureConflictBackup: nil)
+
+    let prepared = try #require(coordinator.prepareRestorePoint(for: settings)?.gestureConflictBackup)
+    #expect(Set(try #require(prepared.appliedKeys)) == Set(domains.map { "\($0)|\(fourFingerKey)" }))
+
+    // The point that is saved first is the one the apply then keeps.
+    guard case .succeeded(let applied) = ConflictingGestureManager.disableVerified(
+        fingerCount: 4, store: store, preserving: prepared, disableBothFingerCounts: false, disableRelatedNavigation: false
+    ) else {
+        Issue.record("disabling the four-finger pinch failed"); return
+    }
+    #expect(applied.appliedKeys != nil)
+
+    // The user changes the five-finger pinch in System Settings while this runs.
+    for domain in domains { store.setIntegerValue(0, forKey: fiveFingerKey, domain: domain) }
+    #expect(ConflictingGestureManager.restore(applied, store: store))
+
+    for domain in domains {
+        #expect(store.integerValue(forKey: fourFingerKey, domain: domain) == 2)
+        #expect(store.integerValue(forKey: fiveFingerKey, domain: domain) == 0, "the five-finger setting the user changed was put back")
+    }
+}
+
 @Test @MainActor func fiveFingerRestorePointCapturesTheCurrentFourFingerSetting() throws {
     let domains = ConflictingGestureManager.domains
     let store = FakeTrackpadPreferenceStore(initialValues: [

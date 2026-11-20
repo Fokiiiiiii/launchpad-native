@@ -246,4 +246,134 @@ struct RemovalExecutorTests {
         #expect(run.outcomes.map(\.succeeded) == [true])
         #expect(!FileManager.default.fileExists(atPath: file.path))
     }
+
+    // MARK: Cancel
+
+    /// Closing the panel is Cancel. A removal that was waiting for the app to quit
+    /// used to carry on behind the closed panel and move the files once it had.
+    @Test("cancelling while the app is quitting moves nothing")
+    func cancelWhileWaitingMovesNothing() async throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("data.txt")
+        try "data".write(to: file, atomically: true, encoding: .utf8)
+        let waiting = Flag()
+
+        let removal = Task {
+            await RemovalCoordinator.run(
+                items: [RemovalItem(path: file, classification: .owned, requiresPrivilegedHelper: false)],
+                bundleURL: dir.appendingPathComponent("Slow.app"),
+                bundleIdentifier: "com.example.slow",
+                allowedRoots: [dir],
+                terminate: { _, _ in
+                    waiting.set()
+                    while !Task.isCancelled { try? await Task.sleep(nanoseconds: 5_000_000) }
+                    return .terminated
+                }
+            )
+        }
+        while !waiting.isSet { try await Task.sleep(nanoseconds: 5_000_000) }
+        removal.cancel()
+        let run = await removal.value
+
+        #expect(run.status == .cancelled)
+        #expect(run.outcomes.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    // MARK: LaunchAgents
+
+    private func makeAgentItems(in dir: URL) throws -> (data: RemovalItem, agent: RemovalItem) {
+        let data = dir.appendingPathComponent("data.txt")
+        try "data".write(to: data, atomically: true, encoding: .utf8)
+        let agents = dir.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+        try FileManager.default.createDirectory(at: agents, withIntermediateDirectories: true)
+        let plist = agents.appendingPathComponent("com.example.helper.plist")
+        try PropertyListSerialization.data(fromPropertyList: ["Label": "com.example.helper"], format: .xml, options: 0).write(to: plist)
+        return (
+            RemovalItem(path: data, classification: .owned, requiresPrivilegedHelper: false),
+            RemovalItem(path: plist, classification: .owned, requiresPrivilegedHelper: false)
+        )
+    }
+
+    /// The plan lists an app's data before its agents. A helper left running while
+    /// its folders were emptied could write into them again.
+    @Test("selected LaunchAgents are stopped before any file is moved")
+    func agentsAreStoppedFirst() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (data, agent) = try makeAgentItems(in: dir)
+        var dataWasStillThere: Bool?
+
+        let outcomes = RemovalExecutor.execute([data, agent], allowedRoots: [dir], stopAgent: { _ in
+            dataWasStillThere = FileManager.default.fileExists(atPath: data.path.path)
+            return .stopped
+        })
+
+        #expect(dataWasStillThere == true)
+        #expect(outcomes.map(\.succeeded) == [true, true])
+    }
+
+    /// Moving the plist of a job that is still running leaves it running with
+    /// nothing to say it exists, and the report called that a success.
+    @Test("an agent that could not be stopped keeps its file and is reported failed")
+    func agentThatWillNotStopIsLeftInPlace() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (data, agent) = try makeAgentItems(in: dir)
+
+        let outcomes = RemovalExecutor.execute([data, agent], allowedRoots: [dir], stopAgent: { _ in .failed })
+
+        #expect(outcomes.map(\.succeeded) == [true, false])
+        #expect(FileManager.default.fileExists(atPath: agent.path.path))
+        #expect(!FileManager.default.fileExists(atPath: data.path.path))
+    }
+
+    @Test("a LaunchAgent is stopped only when it is loaded, and a failed stop is a failure")
+    func stoppingAnAgentReadsTheLaunchctlResults() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (_, agent) = try makeAgentItems(in: dir)
+
+        func stop(_ results: [String: Int32?]) -> (RemovalExecutor.AgentStopResult, [String]) {
+            var called: [String] = []
+            let result = RemovalExecutor.stopUserLaunchAgent(at: agent.path, launchctl: { arguments in
+                called.append(arguments[0])
+                return results[arguments[0]] ?? nil
+            })
+            return (result, called)
+        }
+
+        let notLoaded = stop(["print": 113])
+        #expect(notLoaded.0 == .notLoaded)
+        #expect(notLoaded.1 == ["print"])
+        #expect(stop(["print": 0, "bootout": 0]).0 == .stopped)
+        #expect(stop(["print": 0, "bootout": 5]).0 == .failed)
+        #expect(stop([:]).0 == .failed)
+
+        let unlabelled = dir.appendingPathComponent("Library/LaunchAgents/none.plist")
+        try PropertyListSerialization.data(fromPropertyList: ["Other": 1], format: .xml, options: 0).write(to: unlabelled)
+        #expect(RemovalExecutor.stopUserLaunchAgent(at: unlabelled, launchctl: { _ in 0 }) == .notLoaded)
+    }
+
+    // MARK: Which bundle is running
+
+    /// The catalog can hold a link to an app that lives outside the scanned
+    /// folders, while the running app reports where it really is.
+    @Test("a link to an app is the same bundle as the app it points at")
+    func linkAndTargetAreTheSameBundle() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let real = dir.appendingPathComponent("Real.app", isDirectory: true)
+        let other = dir.appendingPathComponent("Other.app", isDirectory: true)
+        let link = dir.appendingPathComponent("Link.app")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+
+        #expect(RemovalExecutor.isSameBundle(real, link))
+        #expect(RemovalExecutor.isSameBundle(link, real))
+        #expect(!RemovalExecutor.isSameBundle(other, link))
+        #expect(!RemovalExecutor.isSameBundle(nil, link))
+    }
 }

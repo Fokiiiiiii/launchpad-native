@@ -53,6 +53,7 @@ public final class UninstallPanelViewModel: ObservableObject {
     private let operationReportStore: OperationReportStore
     private let measureSize: @Sendable (URL) async -> Int64?
     private var loadTask: Task<Void, Never>?
+    private var removalTask: Task<Void, Never>?
 
     public convenience init(
         record: ApplicationRecord,
@@ -78,6 +79,15 @@ public final class UninstallPanelViewModel: ObservableObject {
         self.operationReportStore = operationReportStore
         self.measureSize = measureSize
         loadTask = Task { await self.load(allRecords: allRecords) }
+    }
+
+    /// Called when the panel closes, which is Cancel: a removal still waiting for
+    /// the app to quit stops before it moves anything, and sizes not yet started
+    /// are not measured. Once files have started to move this changes nothing,
+    /// and the rows already done are not undone.
+    public func cancelPendingWork() {
+        removalTask?.cancel()
+        loadTask?.cancel()
     }
 
     /// Resolves once the plan is built and every size has been measured.
@@ -139,6 +149,7 @@ public final class UninstallPanelViewModel: ObservableObject {
     private func computeSizes() async {
         let targets = rowsBySection.values.flatMap { $0 }.map { ($0.id, $0.removalItem.path) }
         for (id, path) in targets {
+            guard !Task.isCancelled else { break }
             let size = await measureSize(path)
             // NSWorkspace's own icon lookup — same API Finder itself
             // uses, so a folder gets the real folder icon, a plist gets
@@ -213,7 +224,7 @@ public final class UninstallPanelViewModel: ObservableObject {
         let bundleURL = record.bundleURL
         let bundleIdentifier = record.bundleIdentifier
         let operationReportStore = self.operationReportStore
-        Task { @MainActor in
+        removalTask = Task { @MainActor in
             let run = await RemovalCoordinator.run(
                 items: checked,
                 bundleURL: bundleURL,
