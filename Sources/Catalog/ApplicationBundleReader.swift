@@ -44,6 +44,12 @@ enum ApplicationBundleReader {
     struct ScanReport: Sendable {
         let outcome: ScanOutcome
         let failedDirectories: [URL]
+        /// `.app` bundles that were listed but whose metadata could not be read —
+        /// no usable Info.plist or bundle identifier, which is how an app looks
+        /// while it is being updated. That says nothing about whether the app is
+        /// installed, so the scanner keeps what it already knew about them
+        /// instead of reporting them uninstalled.
+        var unreadableBundles: [URL] = []
     }
 
     private struct BundleListing {
@@ -101,12 +107,14 @@ enum ApplicationBundleReader {
                 }
             }
             var byIndex: [Int: ApplicationRecord] = [:]
+            var unreadable: [URL] = []
             for await (index, record) in group {
-                if let record { byIndex[index] = record }
+                if let record { byIndex[index] = record } else { unreadable.append(appURLs[index]) }
             }
             return ScanReport(
                 outcome: .scanned(appURLs.indices.compactMap { byIndex[$0] }),
-                failedDirectories: listing.failedDirectories
+                failedDirectories: listing.failedDirectories,
+                unreadableBundles: unreadable
             )
         }
     }

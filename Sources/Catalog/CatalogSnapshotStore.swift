@@ -238,18 +238,28 @@ public enum CatalogSnapshotStore {
         url: URL? = nil,
         maximumRecords: Int = defaultMaximumRecords
     ) -> [ApplicationRecord] {
+        loadWithStale(sources: sources, url: url, maximumRecords: maximumRecords).fresh
+    }
+
+    /// `load`, plus the records `classify` calls stale, for the scanner to keep as
+    /// a fallback rather than to show.
+    public static func loadWithStale(
+        sources: [ApplicationSource],
+        url: URL? = nil,
+        maximumRecords: Int = defaultMaximumRecords
+    ) -> (fresh: [ApplicationRecord], stale: [ApplicationRecord]) {
         let snapshotURL = url ?? defaultURL
         guard let data = RustFileIO.read(snapshotURL, limit: defaultMaximumBytes),
               let records = decode(data, maximumRecords: maximumRecords)
         else {
-            return []
+            return ([], [])
         }
 
-        let valid = prune(records, sources: sources)
+        let classified = classify(records, sources: sources)
         DiagnosticsLog.catalog.info(
-            "Catalog snapshot restored: \(valid.count, privacy: .public) records"
+            "Catalog snapshot restored: \(classified.fresh.count, privacy: .public) records, \(classified.stale.count, privacy: .public) kept only as a fallback"
         )
-        return valid
+        return classified
     }
 
     /// Saves a bounded snapshot atomically. A failed write leaves the previous
@@ -286,6 +296,23 @@ public enum CatalogSnapshotStore {
         _ records: [ApplicationRecord],
         sources: [ApplicationSource]
     ) -> [ApplicationRecord] {
+        classify(records, sources: sources).fresh
+    }
+
+    /// Sorts the records into those that can be shown at once and those that are
+    /// only worth keeping as a fallback.
+    ///
+    /// `stale` is a record whose bundle is still on disk but whose modification
+    /// time has moved: the details may have changed, so it is not shown, but it
+    /// is the last thing known about that app. A scan that then finds the bundle
+    /// unreadable — an app caught in the middle of an update — has nothing else
+    /// to keep, and without it the grid forgets the app's place. A record whose
+    /// bundle is gone is in neither list; that is the one case that really
+    /// means uninstalled.
+    public static func classify(
+        _ records: [ApplicationRecord],
+        sources: [ApplicationSource]
+    ) -> (fresh: [ApplicationRecord], stale: [ApplicationRecord]) {
         // Duplicate source IDs must not trap; the first source with an ID wins.
         let sourceByID = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         // Resolve each source root once instead of once per record.
@@ -305,30 +332,39 @@ public enum CatalogSnapshotStore {
             return FileManager.default.fileExists(atPath: source.rootURL.path, isDirectory: &isDirectory)
                 && isDirectory.boolValue
         }
-        return records
-            .filter { record in
-                guard let source = sourceByID[record.sourceID],
-                      let resolvedRoot = resolvedRootByID[record.sourceID],
-                      record.bundleURL.pathExtension == "app",
-                      isPath(record.bundleURL, insideResolvedRoot: resolvedRoot),
-                      source.matches(bundleFilename: record.bundleURL.lastPathComponent)
-                else {
-                    return false
-                }
+        var fresh: [ApplicationRecord] = []
+        var stale: [ApplicationRecord] = []
+        for record in records {
+            guard let source = sourceByID[record.sourceID],
+                  let resolvedRoot = resolvedRootByID[record.sourceID],
+                  record.bundleURL.pathExtension == "app",
+                  isPath(record.bundleURL, insideResolvedRoot: resolvedRoot),
+                  source.matches(bundleFilename: record.bundleURL.lastPathComponent)
+            else { continue }
 
-                if rootIsPresent[record.sourceID] == false { return true }
-
-                return record.bundleURL.withUnsafeFileSystemRepresentation { path in
-                    guard let path else { return false }
-                    return launchpad_catalog_fresh(path, record.lastSeenModificationDate.timeIntervalSinceReferenceDate) != 0
-                }
+            if rootIsPresent[record.sourceID] == false {
+                fresh.append(record)
+                continue
             }
-            .sorted {
+            let isFresh = record.bundleURL.withUnsafeFileSystemRepresentation { path -> Bool in
+                guard let path else { return false }
+                return launchpad_catalog_fresh(path, record.lastSeenModificationDate.timeIntervalSinceReferenceDate) != 0
+            }
+            if isFresh {
+                fresh.append(record)
+            } else if FileManager.default.fileExists(atPath: record.bundleURL.path) {
+                stale.append(record)
+            }
+        }
+        func ordered(_ list: [ApplicationRecord]) -> [ApplicationRecord] {
+            list.sorted {
                 if $0.displayName != $1.displayName {
                     return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
                 }
                 return $0.id.value < $1.id.value
             }
+        }
+        return (ordered(fresh), ordered(stale))
     }
 
     public static var defaultURL: URL {

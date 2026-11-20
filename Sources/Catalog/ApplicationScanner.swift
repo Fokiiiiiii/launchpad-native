@@ -28,6 +28,12 @@ public actor ApplicationScanner {
     /// whose result was accepted — see `integrate`.
     private var nextScanToken = 0
     private var lastAcceptedToken: [String: Int] = [:]
+    /// Records the launch cache held but could not vouch for: the bundle is there,
+    /// its modification time has moved. They are not shown, but they are what
+    /// `carryForward` has to fall back on if the first scan finds that bundle
+    /// unreadable (an app caught mid-update). Dropped once a scan of their
+    /// source has been taken in.
+    private var carryForwardOnly: [StableAppID: ApplicationRecord] = [:]
     private let scanReport: @Sendable (ApplicationSource, [String: ApplicationBundleReader.KnownSignature]) async -> ApplicationBundleReader.ScanReport
 
     public init(sources: [ApplicationSource] = ApplicationSource.standardSources) {
@@ -52,7 +58,8 @@ public actor ApplicationScanner {
     /// Restores only the cheap, last-known-good records needed for the first
     /// frame. The next full scan remains authoritative and reconciles any
     /// stale metadata or missing bundles in the background.
-    public func restoreCachedRecords(_ records: [ApplicationRecord]) {
+    public func restoreCachedRecords(_ records: [ApplicationRecord], carryForwardOnly stale: [ApplicationRecord] = []) {
+        carryForwardOnly = Dictionary(stale.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var merged: [StableAppID: ApplicationRecord] = [:]
         for record in records {
             merged[record.id] = record
@@ -135,14 +142,17 @@ public actor ApplicationScanner {
                 for record in records {
                     merged[record.id] = record
                 }
-                // Folders that could not be listed say nothing about the apps in
-                // them, so what was known there stays.
-                if !report.failedDirectories.isEmpty {
-                    carryForward(source: source, into: &merged, within: report.failedDirectories)
+                // Folders that could not be listed, and bundles that were listed but
+                // could not be read, say nothing about the apps in them, so what
+                // was known there stays.
+                let unverified = report.failedDirectories + report.unreadableBundles
+                if !unverified.isEmpty {
+                    carryForward(source: source, into: &merged, within: unverified)
                 }
             case .unreadable:
                 carryForward(source: source, into: &merged, within: nil)
             }
+            carryForwardOnly = carryForwardOnly.filter { $0.value.sourceID != source.id }
         }
         guard merged != snapshot.recordsByID else { return false }
         snapshot = Snapshot(recordsByID: merged)
@@ -168,7 +178,8 @@ public actor ApplicationScanner {
         into merged: inout [StableAppID: ApplicationRecord],
         within directories: [URL]?
     ) {
-        let carried = snapshot.recordsByID.values.filter { record in
+        let candidates = Array(snapshot.recordsByID.values) + carryForwardOnly.values.filter { snapshot.recordsByID[$0.id] == nil }
+        let carried = candidates.filter { record in
             guard record.sourceID == source.id, merged[record.id] == nil else { return false }
             guard let directories else { return true }
             return directories.contains { isPath(record.bundleURL.path, inside: $0) }

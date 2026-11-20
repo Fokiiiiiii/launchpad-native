@@ -177,8 +177,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let configuredSources = applicationSources()
             let scanner = ApplicationScanner(sources: configuredSources)
             self.scanner = scanner
-            let cachedRecords = CatalogSnapshotStore.load(sources: configuredSources)
-            await scanner.restoreCachedRecords(cachedRecords)
+            let (cachedRecords, staleRecords) = CatalogSnapshotStore.loadWithStale(sources: configuredSources)
+            await scanner.restoreCachedRecords(cachedRecords, carryForwardOnly: staleRecords)
             if !cachedRecords.isEmpty {
                 // Not authoritative: this snapshot exists to get a first frame
                 // up quickly and can lag the real disk state, so it must not
@@ -322,6 +322,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
                 launcherWindowController.updateRecords(update.records)
+                // Kept current, not written once per launch: an app added while this
+                // ran is otherwise missing from the cache at the next launch, and if
+                // its folder is unreadable then, nothing remembers it and the grid
+                // drops its place.
+                let records = update.records
+                let sources = applicationSources()
+                Task.detached(priority: .utility) {
+                    CatalogSnapshotStore.save(records: records, sources: sources)
+                }
             }
         }
 

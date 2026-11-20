@@ -67,8 +67,12 @@ private func makeRecord(_ name: String, in sourceID: String, subfolder: String? 
     )
 }
 
-private func report(_ records: [ApplicationRecord], failed: [URL] = []) -> ApplicationBundleReader.ScanReport {
-    ApplicationBundleReader.ScanReport(outcome: .scanned(records), failedDirectories: failed)
+private func report(
+    _ records: [ApplicationRecord],
+    failed: [URL] = [],
+    unreadable: [URL] = []
+) -> ApplicationBundleReader.ScanReport {
+    ApplicationBundleReader.ScanReport(outcome: .scanned(records), failedDirectories: failed, unreadableBundles: unreadable)
 }
 
 @Test func benchmarkScannerReconciliationMemory() async {
@@ -206,6 +210,81 @@ private func ids(_ scanner: ApplicationScanner) async -> Set<StableAppID> {
     await scanner.performFullScan()
 
     #expect(await ids(scanner) == [inside.id, outside.id])
+}
+
+// MARK: Bundles that could not be read
+
+/// An app being updated has its folder but, for a moment, no readable Info.plist.
+/// That is not "uninstalled": reading it as that dropped the app's place from the
+/// pages and folders for good, and it came back as a new app at the end.
+@Test func anAppWhoseBundleCouldNotBeReadIsKeptNotReportedUninstalled() async {
+    let calls = Gate()
+    let updating = makeRecord("Updating", in: "apps")
+    let other = makeRecord("Other", in: "apps")
+    let scanner = ApplicationScanner(sources: [source("apps")], scanReport: { _, _ in
+        switch await calls.nextCall() {
+        case 1: return report([updating, other])
+        case 2: return report([other], unreadable: [updating.bundleURL])
+        default: return report([other])
+        }
+    })
+
+    await scanner.performFullScan()
+    await scanner.performFullScan()
+    #expect(await ids(scanner) == [updating.id, other.id])
+
+    // Once it can be listed no more, it really is gone.
+    await scanner.performFullScan()
+    #expect(await ids(scanner) == [other.id])
+}
+
+/// The launch cache drops a record whose bundle changed since it was written. It
+/// is still the last thing known about that app, so the first scan may fall back
+/// on it, but only for a bundle that was listed and could not be read.
+@Test func aRecordTheLaunchCacheCouldNotVouchForIsOnlyAFallbackForAnUnreadableBundle() async {
+    let calls = Gate()
+    let cachedStale = makeRecord("Stale", in: "apps")
+    let alsoStale = makeRecord("AlsoStale", in: "apps")
+    let other = makeRecord("Other", in: "apps")
+    let scanner = ApplicationScanner(sources: [source("apps")], scanReport: { _, _ in
+        if await calls.nextCall() == 1 { return report([other], unreadable: [cachedStale.bundleURL]) }
+        return report([other])
+    })
+    await scanner.restoreCachedRecords([other], carryForwardOnly: [cachedStale, alsoStale])
+
+    // Not shown before a scan has looked.
+    #expect(await ids(scanner) == [other.id])
+
+    await scanner.performFullScan()
+    // Kept where the bundle was listed but unreadable, not where it was not listed.
+    #expect(await ids(scanner) == [cachedStale.id, other.id])
+
+    // The fallback does not outlive the scan it was kept for.
+    await scanner.performFullScan()
+    #expect(await ids(scanner) == [other.id])
+}
+
+@Test func theEnumerationReportsABundleItCouldNotRead() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let good = root.appendingPathComponent("Good.app/Contents", isDirectory: true)
+    let broken = root.appendingPathComponent("Broken.app/Contents", isDirectory: true)
+    try FileManager.default.createDirectory(at: good, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: broken, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let plist: [String: Any] = ["CFBundleIdentifier": "example.good", "CFBundleName": "Good", "CFBundlePackageType": "APPL"]
+    try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        .write(to: good.appendingPathComponent("Info.plist"))
+
+    let result = await ApplicationBundleReader.scanReport(
+        source: ApplicationSource(id: "t", rootURL: root, recursive: false, priority: 0)
+    )
+
+    guard case .scanned(let records) = result.outcome else {
+        Issue.record("the source itself was readable")
+        return
+    }
+    #expect(records.map(\.bundleIdentifier) == ["example.good"])
+    #expect(result.unreadableBundles.map(\.lastPathComponent) == ["Broken.app"])
 }
 
 @Test func anAppThatIsReallyGoneStillDisappearsWhenNothingFailedToRead() async {

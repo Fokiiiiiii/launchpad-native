@@ -239,6 +239,26 @@ private func makeSnapshotFixture(in root: URL, name: String = "Fixture.app") thr
     #expect(CatalogSnapshotStore.prune([gone, kept], sources: [source]) == [kept])
 }
 
+/// A bundle that is still there but has changed is not shown at once, and is not
+/// forgotten either: the scanner keeps it as a fallback. Only a bundle that is
+/// gone counts as uninstalled.
+@Test func catalogSnapshotKeepsAChangedBundleAsAFallbackAndDropsAGoneOne() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let (fresh, source) = try makeSnapshotFixture(in: root, name: "Fresh.app")
+    var changed = try makeSnapshotFixture(in: root, name: "Changed.app").0
+    changed.lastSeenModificationDate = Date(timeIntervalSince1970: 0)
+    let (gone, _) = try makeSnapshotFixture(in: root, name: "Gone.app")
+    try FileManager.default.removeItem(at: gone.bundleURL)
+
+    let classified = CatalogSnapshotStore.classify([fresh, changed, gone], sources: [source])
+
+    #expect(classified.fresh == [fresh])
+    #expect(classified.stale == [changed])
+    #expect(CatalogSnapshotStore.prune([fresh, changed, gone], sources: [source]) == [fresh])
+}
+
 @Test func catalogSnapshotEncodingIsBounded() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
