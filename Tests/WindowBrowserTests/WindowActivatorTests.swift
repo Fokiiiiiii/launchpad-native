@@ -56,6 +56,26 @@ private func candidate(_ title: String, _ frame: CGRect) -> WindowActivator.Cand
     #expect(WindowActivator.bestMatch(for: untitled, among: [candidate("", documentFrame), candidate("", otherFrame)]) == 0)
 }
 
+// Title says X is the target, frame says Y is: the list no longer describes
+// the window, so neither is acted on.
+@Test func aTitleAndFrameThatPointAtDifferentWindowsIsRefused() {
+    let candidates = [candidate("Doc", otherFrame), candidate("Other", documentFrame)]
+    #expect(WindowActivator.bestMatch(for: target(), among: candidates) == nil)
+}
+
+@Test func aTitleAndFrameThatAgreeOnOneWindowPickIt() {
+    let candidates = [candidate("Doc", documentFrame), candidate("Other", otherFrame)]
+    #expect(WindowActivator.bestMatch(for: target(), among: candidates) == 0)
+}
+
+@Test func aMovedWindowIsFoundByTitleAlone() {
+    #expect(WindowActivator.bestMatch(for: target(), among: [candidate("Doc", otherFrame)]) == 0)
+}
+
+@Test func aRenamedWindowIsFoundByFrameAlone() {
+    #expect(WindowActivator.bestMatch(for: target(), among: [candidate("Doc — edited", documentFrame)]) == 0)
+}
+
 @Test func noCandidatesGivesNoMatch() {
     #expect(WindowActivator.bestMatch(for: target(), among: []) == nil)
 }

@@ -106,7 +106,8 @@ public enum WindowActivator {
     /// title, or just the same spot. So: both must agree if any candidate
     /// satisfies both; failing that, one of them must single out exactly one
     /// window (a title edited since the list was made, a window moved). Two
-    /// candidates that fit equally well are not guessed between.
+    /// candidates that fit equally well are not guessed between. A title and a
+    /// frame that single out different windows match neither.
     static func bestMatch(for window: WindowInfo, among candidates: [Candidate]) -> Int? {
         func titleMatches(_ candidate: Candidate) -> Bool { candidate.title == window.title }
         func frameMatches(_ candidate: Candidate) -> Bool {
@@ -118,6 +119,12 @@ public enum WindowActivator {
             // An empty title identifies nothing: untitled windows all share it.
             { !window.title.isEmpty && titleMatches($0) },
         ]
+        // Title and frame pointing at different windows means the list is stale:
+        // acting on either one could hit the wrong window.
+        let titled = candidates.indices.filter { !window.title.isEmpty && titleMatches(candidates[$0]) }
+        let framed = candidates.indices.filter { frameMatches(candidates[$0]) }
+        if !titled.isEmpty, !framed.isEmpty, Set(titled).isDisjoint(with: framed) { return nil }
+
         for tier in tiers {
             let matching = candidates.indices.filter { tier(candidates[$0]) }
             if matching.count == 1 { return matching[0] }
