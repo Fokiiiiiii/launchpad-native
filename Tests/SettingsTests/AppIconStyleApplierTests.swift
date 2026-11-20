@@ -61,3 +61,25 @@ private func pixelWidth(of image: NSImage) -> Int? {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     #expect(AppIconStyleApplier.image(for: .classic, pointSize: 40, in: directory) == nil)
 }
+
+/// Dock and Finder show the bundle's icon. A style other than `classic` puts a
+/// Finder custom icon on the bundle, and `classic` takes it off again.
+@Test @MainActor func theChosenStyleIsSetOnTheBundleAndClassicRemovesIt() throws {
+    let variants = try variantsDirectory(with: .monochrome)
+    let bundle = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).app")
+    try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+    let suite = "AppIconStyleApplierTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer {
+        try? FileManager.default.removeItem(at: variants)
+        try? FileManager.default.removeItem(at: bundle)
+        defaults.removePersistentDomain(forName: suite)
+    }
+    let customIcon = bundle.appendingPathComponent("Icon\r")
+
+    AppIconStyleApplier.applyToBundle(.monochrome, bundleURL: bundle, variants: variants, defaults: defaults)
+    #expect(FileManager.default.fileExists(atPath: customIcon.path))
+
+    AppIconStyleApplier.applyToBundle(.classic, bundleURL: bundle, variants: variants, defaults: defaults)
+    #expect(!FileManager.default.fileExists(atPath: customIcon.path))
+}
