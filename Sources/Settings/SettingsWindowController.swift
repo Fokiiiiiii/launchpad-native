@@ -112,14 +112,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         hosting.view.appearance = NSAppearance(named: .darkAqua)
 
         let root = NSView(frame: NSRect(origin: .zero, size: panelSize))
-        let background = GlassSurfaceFactory.makeCardBackground(
-            cornerRadius: PanelCorner.radius(beforeMacOS27: 13),
-            tint: NSColor(srgbRed: 28 / 255, green: 28 / 255, blue: 30 / 255, alpha: 0.86),
-            borderAlpha: 0.12,
-            shadowOpacity: 0.66,
-            shadowRadius: 50,
-            shadowOffset: CGSize(width: 0, height: -27)
-        )
+        let background = GlassSurfaceFactory.makePanelBackground(dense: true)
         background.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(background)
         root.addSubview(hosting.view)

@@ -82,6 +82,22 @@ public enum GlassSurfaceFactory {
         return container
     }
 
+    /// The card behind every floating panel (Settings, Uninstall, What's New,
+    /// onboarding), so they share one corner, edge and depth. `dense` darkens the
+    /// glass for the panels made of many small controls.
+    public static func makePanelBackground(dense: Bool = false) -> NSView {
+        makeCardBackground(
+            cornerRadius: PanelCorner.macOS27WindowRadius,
+            tint: dense
+                ? NSColor(srgbRed: 28 / 255, green: 28 / 255, blue: 30 / 255, alpha: 0.88)
+                : NSColor.white.withAlphaComponent(0.07),
+            borderAlpha: 0.13,
+            shadowOpacity: 0.66,
+            shadowRadius: 55,
+            shadowOffset: CGSize(width: 0, height: -27)
+        )
+    }
+
     public static func makeCardBackground(
         cornerRadius: CGFloat,
         tint: NSColor = NSColor.white.withAlphaComponent(0.07),

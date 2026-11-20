@@ -88,7 +88,7 @@ struct OnboardingView: View {
 
     private func advance(by delta: Int) {
         movingForward = delta > 0
-        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.8, dampingFraction: 1.0, blendDuration: 0).delay(0.2)) {
+        withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .spring(response: 0.5, dampingFraction: 1.0)) {
             pageIndex = max(0, min(pageCount - 1, pageIndex + delta))
         }
     }

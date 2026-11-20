@@ -39,13 +39,7 @@ public final class OnboardingWindowController: NSObject, NSWindowDelegate {
         hosting.view.translatesAutoresizingMaskIntoConstraints = false
 
         let root = NSView()
-        let background = GlassSurfaceFactory.makeCardBackground(
-            cornerRadius: PanelCorner.radius(beforeMacOS27: 22),
-            borderAlpha: 0.13,
-            shadowOpacity: 0.60,
-            shadowRadius: 55,
-            shadowOffset: CGSize(width: 0, height: -27)
-        )
+        let background = GlassSurfaceFactory.makePanelBackground()
         background.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(background)
         root.addSubview(hosting.view)

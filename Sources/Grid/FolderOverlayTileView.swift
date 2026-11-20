@@ -1,4 +1,5 @@
 import AppKit
+import DesignSystem
 import Localization
 import SwiftUI
 import UniformTypeIdentifiers
@@ -42,7 +43,7 @@ private struct FolderGridOuterDropDelegate: DropDelegate {
     func dropExited(info: DropInfo) { onDragCancelled() }
 }
 
-private let tileSnappy = Animation.spring(response: 0.26, dampingFraction: 0.90)
+private let tileSnappy = SnapSpring.animation
 
 private struct TileButtonStyle: ButtonStyle {
     let hovering: Bool

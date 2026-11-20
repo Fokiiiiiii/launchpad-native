@@ -45,9 +45,9 @@ public struct WhatsNewView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Text(L10n.whatsNewTitle)
-                .font(.system(size: 26, weight: .semibold))
+                .font(.largeTitle.weight(.semibold))
             Text(L10n.whatsNewVersionBadge(version))
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.subheadline.weight(.medium))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
                 .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
@@ -65,14 +65,14 @@ public struct WhatsNewView: View {
                 )
                 .overlay(
                     Image(systemName: feature.symbolName)
-                        .font(.system(size: 16, weight: .medium))
+                        .font(.title3.weight(.medium))
                         .foregroundStyle(.white.opacity(0.85))
                 )
             VStack(alignment: .leading, spacing: 4) {
                 Text(feature.title)
-                    .font(.system(size: 14.5, weight: .semibold))
+                    .font(.headline)
                 Text(feature.body)
-                    .font(.system(size: 13.5))
+                    .font(.body)
                     .foregroundStyle(.white.opacity(0.66))
             }
             Spacer(minLength: 0)

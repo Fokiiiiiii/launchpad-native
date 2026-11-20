@@ -33,13 +33,4 @@ private final class ConcentricProbeView: NSView {
     for corner in [radii.topLeft, radii.topRight, radii.bottomLeft, radii.bottomRight] {
         #expect(corner == PanelCorner.macOS27WindowRadius)
     }
-    #expect(PanelCorner.radius(beforeMacOS27: 13) == PanelCorner.macOS27WindowRadius)
-    #expect(PanelCorner.radius(beforeMacOS27: 22) == PanelCorner.macOS27WindowRadius)
-}
-
-/// Earlier systems keep every panel exactly as it was.
-@Test func panelsKeepTheirOwnRadiusBeforeMacOS27() {
-    #expect(PanelCorner.radius(beforeMacOS27: 13, onMacOS27: false) == 13)
-    #expect(PanelCorner.radius(beforeMacOS27: 22, onMacOS27: false) == 22)
-    #expect(PanelCorner.radius(beforeMacOS27: 22, onMacOS27: true) == PanelCorner.macOS27WindowRadius)
 }

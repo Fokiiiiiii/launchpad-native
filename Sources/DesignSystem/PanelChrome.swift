@@ -93,6 +93,12 @@ public final class OutsideClickDismissMonitor {
     }
 }
 
+/// The one spring for small things settling into place: a tile pressed or
+/// selected, a tile moving while others make room, a section opening.
+public enum SnapSpring {
+    public static let animation = Animation.spring(response: 0.26, dampingFraction: 0.90)
+}
+
 /// How round a panel's card is.
 ///
 /// On macOS 27 a panel takes the radius the system gives its own windows, so
@@ -103,20 +109,10 @@ public final class OutsideClickDismissMonitor {
 /// style and with a standard window alike. A borderless window reports 0, so
 /// Settings, being borderless, cannot ask for it and uses this value too.
 /// `PanelCornerTests` measures it again, so the constant cannot drift from
-/// the system unnoticed. Earlier systems keep each panel's own radius.
+/// the system unnoticed. Earlier systems use the same radius, so every panel
+/// matches every other on any version.
 public enum PanelCorner {
     public static let macOS27WindowRadius: CGFloat = 16
-
-    public static func radius(beforeMacOS27 radius: CGFloat) -> CGFloat {
-        if #available(macOS 27, *) {
-            return Self.radius(beforeMacOS27: radius, onMacOS27: true)
-        }
-        return Self.radius(beforeMacOS27: radius, onMacOS27: false)
-    }
-
-    static func radius(beforeMacOS27 radius: CGFloat, onMacOS27: Bool) -> CGFloat {
-        onMacOS27 ? macOS27WindowRadius : radius
-    }
 }
 
 /// Places a panel in the middle of the screen the launcher is on, falling

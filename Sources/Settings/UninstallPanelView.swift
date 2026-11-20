@@ -63,14 +63,15 @@ struct UninstallPanelView: View {
                 .shadow(radius: 4, y: 2)
             VStack(alignment: .leading, spacing: 3) {
                 Text(viewModel.record.displayName)
-                    .font(.system(size: 15.5, weight: .semibold))
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(2)
                 if viewModel.isComputingSizes {
                     Text(L10n.uninstallComputingSizesLabel)
-                        .font(.system(size: 12))
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {
                     Text(viewModel.totalSizeText)
-                        .font(.system(size: 12))
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -99,13 +100,13 @@ struct UninstallPanelView: View {
                 .disabled(selectableRows.isEmpty || viewModel.hasConfirmedRemoval)
                 .accessibilityLabel(Text(sectionTitle(kind)))
                 Label(sectionTitle(kind), systemImage: sectionSymbol(kind))
-                    .font(.system(size: 13))
+                    .font(.body)
                 Spacer()
                 Button {
                     if isExpanded { expandedSections.remove(kind) } else { expandedSections.insert(kind) }
                 } label: {
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .rotationEffect(.degrees(isExpanded ? 0 : -90))
                         .foregroundStyle(.secondary)
                 }
@@ -121,7 +122,7 @@ struct UninstallPanelView: View {
                 }
             }
         }
-        .animation(reduceMotion ? nil : Animation.spring(response: 0.26, dampingFraction: 0.90), value: isExpanded)
+        .animation(reduceMotion ? nil : SnapSpring.animation, value: isExpanded)
     }
 
     private func rowView(_ row: UninstallPanelViewModel.Row) -> some View {
@@ -155,10 +156,10 @@ struct UninstallPanelView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.removalItem.path.lastPathComponent)
-                    .font(.system(size: 12.5))
+                    .font(.callout)
                     .lineLimit(1)
                 Text(row.removalItem.path.path)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(.subheadline, design: .monospaced))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -171,14 +172,14 @@ struct UninstallPanelView: View {
             Spacer(minLength: 8)
             if let size = row.sizeInBytes {
                 Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
-                    .font(.system(size: 11.5))
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([row.removalItem.path])
             } label: {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.caption.weight(.medium))
                     .frame(width: 24, height: 24)
                     .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
@@ -240,7 +241,7 @@ struct UninstallPanelView: View {
         } icon: {
             Image(systemName: "exclamationmark.triangle.fill")
         }
-        .font(.system(size: 12, weight: .medium))
+        .font(.callout.weight(.medium))
         .foregroundStyle(.orange)
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityAddTraits(.isStaticText)

@@ -75,14 +75,7 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
         // `currentHostingView`) because the icon-fetch completion below must
         // replace only the hosting view, not this whole hierarchy.
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 586, height: 500))
-        let background = GlassSurfaceFactory.makeCardBackground(
-            cornerRadius: PanelCorner.radius(beforeMacOS27: 13),
-            tint: NSColor(srgbRed: 30 / 255, green: 30 / 255, blue: 32 / 255, alpha: 0.90),
-            borderAlpha: 0.13,
-            shadowOpacity: 0.70,
-            shadowRadius: 55,
-            shadowOffset: CGSize(width: 0, height: -31)
-        )
+        let background = GlassSurfaceFactory.makePanelBackground(dense: true)
         background.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(background)
         root.addSubview(hosting.view)
