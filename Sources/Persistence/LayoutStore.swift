@@ -34,7 +34,6 @@ public enum LayoutJSON {
 public actor LayoutStore {
     private let primaryURL: URL
     private let backupURL: URL
-    private let directoryCreationError: Error?
 
     public init(directory: URL? = nil) {
         let applicationSupport = FileManager.default
@@ -44,10 +43,9 @@ public actor LayoutStore {
             .appendingPathComponent("com.launchpadnative.app", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-            self.directoryCreationError = nil
         } catch {
+            // Logged only, not stored: save() retries directory creation, so this failure must not stick.
             DiagnosticsLog.persistence.error("Failed to create layout directory: \(error.localizedDescription, privacy: .public)")
-            self.directoryCreationError = error
         }
         self.primaryURL = base.appendingPathComponent("layout.json")
         self.backupURL = base.appendingPathComponent("layout.lastknowngood.json")
@@ -82,8 +80,12 @@ public actor LayoutStore {
     /// before the new one lands, so a write that fails partway never leaves
     /// the store worse off than before.
     public func save(_ document: LayoutDocument, updateBackup: Bool = true) throws {
-        if let directoryCreationError {
-            throw LayoutStoreError.directoryCreationFailed(directoryCreationError)
+        // Retry on every save: the directory may have been blocked when the store was created.
+        do {
+            try FileManager.default.createDirectory(at: primaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        } catch {
+            DiagnosticsLog.persistence.error("Failed to create layout directory: \(error.localizedDescription, privacy: .public)")
+            throw LayoutStoreError.directoryCreationFailed(error)
         }
         let data: Data
         do {

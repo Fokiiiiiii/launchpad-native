@@ -304,6 +304,11 @@ import Testing
     }
 
     #expect(didFailWithDirectoryError)
+
+    // Clearing the blocker must let the same instance recover without being recreated.
+    try FileManager.default.removeItem(at: blocker)
+    try await store.save(.empty)
+    #expect(FileManager.default.fileExists(atPath: blocker.appendingPathComponent("layout.json").path))
 }
 
 @Test func backupPreparationFailureDoesNotReplacePrimary() async throws {

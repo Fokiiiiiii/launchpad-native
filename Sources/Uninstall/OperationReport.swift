@@ -94,7 +94,6 @@ public extension OperationReport {
 /// reports are an append-only history, not a single mutable document.
 public actor OperationReportStore {
     private let directory: URL
-    private let directoryCreationError: Error?
 
     public init(directory: URL? = nil) {
         let applicationSupport = FileManager.default
@@ -105,18 +104,21 @@ public actor OperationReportStore {
             .appendingPathComponent("uninstall-reports", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-            self.directoryCreationError = nil
         } catch {
+            // Logged only, not stored: save() retries directory creation, so this failure must not stick.
             DiagnosticsLog.uninstall.error("Failed to create operation report directory: \(error.localizedDescription, privacy: .public)")
-            self.directoryCreationError = error
         }
         self.directory = base
     }
 
     @discardableResult
     public func save(_ report: OperationReport) throws -> URL {
-        if let directoryCreationError {
-            throw OperationReportStoreError.directoryCreationFailed(directoryCreationError)
+        // Retry on every save: the directory may have been blocked when the store was created.
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            DiagnosticsLog.uninstall.error("Failed to create operation report directory: \(error.localizedDescription, privacy: .public)")
+            throw OperationReportStoreError.directoryCreationFailed(error)
         }
 
         let encoder = JSONEncoder()

@@ -45,7 +45,7 @@ struct SearchableApplication {
         self.bundleIdentifier = Self.fold(record.bundleIdentifier)
         self.fileName = Self.fold(record.bundleURL.deletingPathExtension().lastPathComponent)
         self.category = Self.fold(record.category ?? "")
-        let words = Self.words(in: name)
+        let words = Self.words(in: Self.foldedWithWordSeams(record.displayName))
         self.words = words
         self.initials = String(words.compactMap(\.first))
 
@@ -89,5 +89,22 @@ struct SearchableApplication {
     /// the lower-to-upper transition inside a name like "FaceTime".
     static func words(in foldedText: String) -> [Substring] {
         foldedText.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+    }
+
+    /// Folds first, but puts a space at each case seam so `words` can still see
+    /// it: before an uppercase letter after a lowercase one ("FaceTime") or
+    /// ending an acronym ("NSWindow"). Lowercasing would erase those seams.
+    static func foldedWithWordSeams(_ text: String) -> String {
+        let characters = Array(text)
+        var seamed = ""
+        for (index, character) in characters.enumerated() {
+            let previous = index > 0 ? characters[index - 1] : nil
+            let next = index + 1 < characters.count ? characters[index + 1] : nil
+            let startsWord = previous?.isLowercase == true
+                || (previous?.isUppercase == true && next?.isLowercase == true)
+            if character.isUppercase, startsWord { seamed.append(" ") }
+            seamed.append(character)
+        }
+        return fold(seamed)
     }
 }

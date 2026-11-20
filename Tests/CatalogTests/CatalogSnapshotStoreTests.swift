@@ -70,6 +70,24 @@ private func makeSnapshotFixture(in root: URL, name: String = "Fixture.app") thr
     #expect(CatalogSnapshotStore.decode(Data("{\"version\":2,\"records\":[]}".utf8)) == nil)
 }
 
+@Test func duplicateSourceIDsKeepTheFirstSourceWithoutTrapping() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let otherRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: otherRoot, withIntermediateDirectories: true)
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: otherRoot)
+    }
+
+    let (record, firstSource) = try makeSnapshotFixture(in: root)
+    let duplicateSource = ApplicationSource(id: firstSource.id, rootURL: otherRoot, recursive: true, priority: 1)
+
+    // The record lives under the first source's root, so it survives only if the first source wins.
+    let valid = CatalogSnapshotStore.prune([record], sources: [firstSource, duplicateSource])
+    #expect(valid == [record])
+}
+
 @Test func benchmarkSnapshotJSON() throws {
     guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1" else { return }
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -598,7 +598,10 @@ public struct LayoutDocument: Codable, Sendable {
         folders = try container.decode([FolderID: Folder].self, forKey: .folders)
         aliases = try container.decode([StableAppIdentifier: String].self, forKey: .aliases)
         hiddenApplicationIDs = try container.decode(Set<StableAppIdentifier>.self, forKey: .hiddenApplicationIDs)
+        // Duplicate IDs would trap later in CatalogSnapshotStore; keep the first occurrence.
+        var seenCustomSourceIDs = Set<String>()
         customSources = try container.decode([CustomSourceConfig].self, forKey: .customSources)
+            .filter { seenCustomSourceIDs.insert($0.id).inserted }
         triggerSettings = try container.decode(TriggerSettings.self, forKey: .triggerSettings)
         hideDockWhileLauncherOpen = try container.decodeIfPresent(Bool.self, forKey: .hideDockWhileLauncherOpen) ?? false
         dateAddedByID = try container.decodeIfPresent([StableAppIdentifier: Date].self, forKey: .dateAddedByID) ?? [:]

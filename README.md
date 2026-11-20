@@ -12,11 +12,11 @@ A native replacement for the Launchpad that macOS 26 removed. Press a key or pin
 - **Wallpaper background** — blurred, and follows your desktop, including dynamic wallpapers.
 - English, Japanese, Chinese, Korean, German, French and Spanish.
 
-No dependencies, no installer, no tracking. MIT licensed.
+No installer, no tracking, nothing to install beyond the app. MIT licensed. The only libraries compiled in are Rust's `serde` and `serde_json`.
 
 ## Install
 
-Requires macOS 26 or later on Apple Silicon.
+Requires Apple Silicon. It is designed for macOS 26 and later, with Liquid Glass, and is tested on macOS 27. The deployment target is macOS 15.0 (`Package.swift`), where the glass surfaces fall back to plain blur; that has not been verified.
 
 1. Download `LaunchpadNative.zip` from [Releases](../../releases/latest) and unzip it.
 2. Move `LaunchpadNative.app` to `/Applications`.
@@ -31,7 +31,7 @@ It stays resident and waits for a trigger (F4 out of the box).
 
 ### Build from source
 
-Needs Xcode 27 (the macOS 27 SDK).
+Needs Xcode 27 (the macOS 27 SDK) and Rust. `Scripts/build-app.sh` builds `launchpad-core` with `cargo` (from `PATH` or `~/.cargo/bin`) before the Swift build.
 
 ```sh
 ./Scripts/build-app.sh release

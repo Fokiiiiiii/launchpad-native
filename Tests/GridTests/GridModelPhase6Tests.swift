@@ -4,7 +4,7 @@ import Persistence
 import Testing
 @testable import Grid
 
-private func record(_ name: String, id: String) -> ApplicationRecord {
+private func record(_ name: String, id: String, menuBarApp: Bool = false) -> ApplicationRecord {
     ApplicationRecord(
         id: StableAppID(bundleURL: URL(fileURLWithPath: "/tmp/\(name).app"), bundleIdentifier: id, teamIdentifier: nil),
         bundleIdentifier: id,
@@ -18,6 +18,7 @@ private func record(_ name: String, id: String) -> ApplicationRecord {
         sourceID: "test",
         isSystemProtected: false,
         isBackgroundOnly: false,
+        isMenuBarApp: menuBarApp,
         iconCacheKey: id,
         canLaunch: true,
         canOpenNewInstance: true,
@@ -62,6 +63,24 @@ private func makeModel(directory: URL) -> GridModel {
 
     model.unhideApplication(apple.id.asPersistenceIdentifier)
     #expect(model.pages[0].count == 1)
+    #expect(model.hiddenApplicationIdentifiers.isEmpty)
+}
+
+@Test @MainActor func unhidingAMenuBarAppStaysOutOfTheGridWhenMenuBarAppsAreHidden() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+
+    let menuBarApp = record("Menu", id: "m", menuBarApp: true)
+    model.setShowMenuBarApplications(true)
+    model.reconcile(with: [menuBarApp])
+    model.hideApplication(menuBarApp.id)
+    model.setShowMenuBarApplications(false)
+
+    // The unhide policy must match the grid's eligibility rule, not just clear the hidden flag.
+    model.unhideApplication(menuBarApp.id.asPersistenceIdentifier)
+    #expect(model.pages[0].isEmpty)
     #expect(model.hiddenApplicationIdentifiers.isEmpty)
 }
 

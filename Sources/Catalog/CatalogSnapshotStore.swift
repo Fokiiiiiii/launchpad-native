@@ -286,7 +286,8 @@ public enum CatalogSnapshotStore {
         _ records: [ApplicationRecord],
         sources: [ApplicationSource]
     ) -> [ApplicationRecord] {
-        let sourceByID = Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0) })
+        // Duplicate source IDs must not trap; the first source with an ID wins.
+        let sourceByID = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         // Resolve each source root once instead of once per record.
         // `resolvingSymlinksInPath()` issues a filesystem call per path
         // component, and there are only ever a handful of sources against

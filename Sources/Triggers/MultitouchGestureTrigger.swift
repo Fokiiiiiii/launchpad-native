@@ -293,6 +293,8 @@ public final class MultitouchGestureTrigger {
     /// distinguish; a device appearing or disappearing always changes it.
     @discardableResult
     public func restartIfDeviceSetChanged() -> Bool {
+        // Skip the device enumeration (and its dlopen) while the listener is not wanted.
+        guard isWanted else { return false }
         guard let count = currentDeviceCount(),
               Self.shouldReattach(isWanted: isWanted, attached: deviceHandles.count, present: count) else { return false }
         DiagnosticsLog.triggers.info(

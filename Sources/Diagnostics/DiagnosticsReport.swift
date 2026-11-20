@@ -18,6 +18,7 @@ public enum DiagnosticsReport {
         public let appBuild: String
         public let osVersion: String
         public let model: String
+        public let architecture: String
         public let generatedAt: Date
         /// How the run *before* this one ended. The single most useful line in
         /// a report about an app that "just disappears" — and it is not in the
@@ -29,6 +30,7 @@ public enum DiagnosticsReport {
             appBuild: String,
             osVersion: String,
             model: String,
+            architecture: String,
             generatedAt: Date,
             previousSession: CrashSentinel.PreviousOutcome? = nil
         ) {
@@ -36,6 +38,7 @@ public enum DiagnosticsReport {
             self.appBuild = appBuild
             self.osVersion = osVersion
             self.model = model
+            self.architecture = architecture
             self.generatedAt = generatedAt
             self.previousSession = previousSession
         }
@@ -43,22 +46,38 @@ public enum DiagnosticsReport {
         public static func current(
             bundle: Bundle = .main,
             now: Date = Date(),
-            previousSession: CrashSentinel.PreviousOutcome? = CrashSentinel.lastObservedOutcome
+            previousSession: CrashSentinel.PreviousOutcome? = CrashSentinel.lastObservedOutcome,
+            model: String = hardwareModelIdentifier(),
+            architecture: String = machineArchitecture()
         ) -> Environment {
             let info = bundle.infoDictionary
-            var systemInfo = utsname()
-            uname(&systemInfo)
-            let model = withUnsafeBytes(of: &systemInfo.machine) { raw in
-                String(cString: raw.baseAddress!.assumingMemoryBound(to: CChar.self))
-            }
             return Environment(
                 appVersion: info?["CFBundleShortVersionString"] as? String ?? "unknown",
                 appBuild: info?["CFBundleVersion"] as? String ?? "unknown",
                 osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
                 model: model,
+                architecture: architecture,
                 generatedAt: now,
                 previousSession: previousSession
             )
+        }
+
+        /// The model identifier such as `Mac16,7`, or "unknown" when sysctl refuses.
+        public static func hardwareModelIdentifier() -> String {
+            var size = 0
+            guard sysctlbyname("hw.model", nil, &size, nil, 0) == 0, size > 0 else { return "unknown" }
+            var buffer = [CChar](repeating: 0, count: size)
+            guard sysctlbyname("hw.model", &buffer, &size, nil, 0) == 0 else { return "unknown" }
+            return String(cString: buffer)
+        }
+
+        /// The CPU architecture the process runs as, such as `arm64`.
+        public static func machineArchitecture() -> String {
+            var systemInfo = utsname()
+            uname(&systemInfo)
+            return withUnsafeBytes(of: &systemInfo.machine) { raw in
+                String(cString: raw.baseAddress!.assumingMemoryBound(to: CChar.self))
+            }
         }
     }
 
@@ -72,6 +91,7 @@ public enum DiagnosticsReport {
         App: \(environment.appVersion) (\(environment.appBuild))
         macOS: \(environment.osVersion)
         Model: \(environment.model)
+        Architecture: \(environment.architecture)
         Previous session: \(describe(environment.previousSession))
 
         """
@@ -107,25 +127,34 @@ public enum DiagnosticsReport {
     }
 
     /// This process's own log entries, oldest first, capped so a long-running
-    /// session cannot produce a file nobody will read.
-    public static func recentLogLines(limit: Int = 500) -> [String] {
+    /// session cannot produce a file nobody will read. A failed read gives no
+    /// lines instead of an error, because the report is still useful without them.
+    public static func recentLogLines(
+        limit: Int = 500,
+        reader: ((Int) throws -> [String])? = nil
+    ) -> [String] {
         do {
-            let store = try OSLogStore(scope: .currentProcessIdentifier)
-            let position = store.position(timeIntervalSinceLatestBoot: 0)
-            let formatter = ISO8601DateFormatter()
-            var lines: [String] = []
-            for entry in try store.getEntries(at: position) {
-                guard let logEntry = entry as? OSLogEntryLog,
-                      logEntry.subsystem == DiagnosticsLog.subsystem else { continue }
-                lines.append(DiagnosticsArchive.clamped("\(formatter.string(from: logEntry.date)) [\(logEntry.category)] [\(logEntry.level.exportName)] \(logEntry.composedMessage)"))
-                // Only the newest `limit` are wanted; do not hold the whole run.
-                if lines.count > limit { lines.removeFirst() }
-            }
-            return lines
+            return try Array((reader ?? Self.readCurrentProcessLog)(limit).suffix(limit))
         } catch {
             DiagnosticsLog.appHost.error("Diagnostics report could not read the log store: \(error.localizedDescription, privacy: .public)")
             return []
         }
+    }
+
+    /// Reads the newest `limit` entries of this process's own log. Needs no entitlement.
+    static func readCurrentProcessLog(limit: Int) throws -> [String] {
+        let store = try OSLogStore(scope: .currentProcessIdentifier)
+        let position = store.position(timeIntervalSinceLatestBoot: 0)
+        let formatter = ISO8601DateFormatter()
+        var lines: [String] = []
+        for entry in try store.getEntries(at: position) {
+            guard let logEntry = entry as? OSLogEntryLog,
+                  logEntry.subsystem == DiagnosticsLog.subsystem else { continue }
+            lines.append(DiagnosticsArchive.clamped("\(formatter.string(from: logEntry.date)) [\(logEntry.category)] [\(logEntry.level.exportName)] \(logEntry.composedMessage)"))
+            // Only the newest `limit` are wanted; do not hold the whole run.
+            if lines.count > limit { lines.removeFirst() }
+        }
+        return lines
     }
 
     public static func current(bundle: Bundle = .main, now: Date = Date(), limit: Int = 500) -> String {

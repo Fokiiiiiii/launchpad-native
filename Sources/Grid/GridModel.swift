@@ -1058,7 +1058,8 @@ public final class GridModel {
     public func unhideApplication(_ identifier: StableAppIdentifier) {
         let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
         document.hiddenApplicationIDs.remove(identifier)
-        if recordsByIDValue[identifier.value] != nil, !allPlacedAppIdentifierValues().contains(identifier.value) {
+        if let record = recordsByIDValue[identifier.value], isEligibleForGrid(record),
+           !allPlacedAppIdentifierValues().contains(identifier.value) {
             appendToLastPage(.app(identifier))
         }
         onChange?()

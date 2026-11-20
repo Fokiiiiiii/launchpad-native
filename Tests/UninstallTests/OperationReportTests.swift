@@ -135,5 +135,10 @@ struct OperationReportTests {
         }
 
         #expect(didFailWithDirectoryError)
+
+        // Clearing the blocker must let the same instance recover without being recreated.
+        try FileManager.default.removeItem(at: blocker)
+        let url = try await store.save(report)
+        #expect(FileManager.default.fileExists(atPath: url.path))
     }
 }

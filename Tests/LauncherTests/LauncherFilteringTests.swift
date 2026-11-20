@@ -259,6 +259,14 @@ private func record(
 }
 
 /// A reading is several words; the query usually names one of them.
+@Test func caseSeamsInCamelCaseNamesStartWords() {
+    // Lowercasing erases the seam, so the split must happen before folding.
+    let faceTime = SearchableApplication(record: record("FaceTime", id: "com.apple.facetime"))
+    #expect(faceTime.initials == "ft")
+    #expect(SearchableApplication(record: record("NSWindow", id: "org.example.nswindow")).initials == "nw")
+    #expect(LauncherFiltering.filter([faceTime], query: "ft").count == 1)
+}
+
 @Test func aWordInsideTheReadingIsEnough() {
     let records = [record("Safari", id: "com.example.safari"), record("システム設定", id: "com.example.settings")]
     #expect(LauncherFiltering.filter(records, query: "settei").map(\.displayName) == ["システム設定"])

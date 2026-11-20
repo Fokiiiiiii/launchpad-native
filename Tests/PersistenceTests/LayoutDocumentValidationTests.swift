@@ -40,6 +40,31 @@ private func editingGridSettings(_ edit: @escaping (inout [String: Any]) -> Void
     }
 }
 
+@Test func duplicateCustomSourceIDsKeepTheFirstOccurrence() throws {
+    func customSource(id: String, rootPath: String) -> [String: Any] {
+        [
+            "id": id,
+            "rootPath": rootPath,
+            "recursive": true,
+            "includeGlobs": [String](),
+            "excludeGlobs": [String](),
+            "priority": 0,
+            "enabled": true,
+        ]
+    }
+
+    // A duplicate ID would trap later when CatalogSnapshotStore builds its lookup table.
+    let document = try decodedDocument { json in
+        json["customSources"] = [
+            customSource(id: "dup", rootPath: "/first"),
+            customSource(id: "dup", rootPath: "/second"),
+            customSource(id: "other", rootPath: "/third"),
+        ]
+    }
+
+    #expect(document.customSources.map(\.rootPath) == ["/first", "/third"])
+}
+
 @Test func spacingMarginsAndScaleAreHeldToSafeBounds() throws {
     let document = try decodedDocument(editing: editingGridSettings { settings in
         settings["horizontalSpacing"] = -50.0

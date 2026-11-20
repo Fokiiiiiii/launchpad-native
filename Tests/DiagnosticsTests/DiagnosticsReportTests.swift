@@ -7,6 +7,7 @@ private let environment = DiagnosticsReport.Environment(
     appBuild: "42",
     osVersion: "Version 26.5.1 (Build 25F80)",
     model: "Mac16,7",
+    architecture: "arm64",
     generatedAt: Date(timeIntervalSince1970: 1_700_000_000)
 )
 
@@ -45,11 +46,37 @@ private let environment = DiagnosticsReport.Environment(
 /// Reading this process's own log needs no entitlement, so it must work in a
 /// plain test process too — if this ever stops being true, the feature is gone
 /// and the UI offering it would be lying.
-@Test func theProcessCanReadItsOwnLog() {
-    DiagnosticsLog.appHost.notice("diagnostics report self-test marker")
-    let lines = DiagnosticsReport.recentLogLines(limit: 200)
-    // Not asserting the marker is present: the store is asynchronous and a just
-    // written entry may not be visible yet. What matters is that reading the
-    // store works at all rather than throwing.
-    #expect(lines.count >= 0)
+@Test func theProcessCanReadItsOwnLog() throws {
+    _ = try DiagnosticsReport.readCurrentProcessLog(limit: 200)
+}
+
+/// A log that cannot be read must leave the report usable, not throw or invent lines.
+@Test func aFailedLogReadYieldsNoLines() {
+    struct ReadFailure: Error {}
+    let lines = DiagnosticsReport.recentLogLines(limit: 10) { _ in throw ReadFailure() }
+    #expect(lines.isEmpty)
+}
+
+/// Only the newest lines are kept, in their original order.
+@Test func aLogReadIsCappedToTheNewestLines() {
+    let lines = DiagnosticsReport.recentLogLines(limit: 2) { _ in ["a", "b", "c"] }
+    #expect(lines == ["b", "c"])
+}
+
+/// The architecture is reported on its own line, not in place of the model.
+@Test func theReportNamesTheArchitectureSeparatelyFromTheModel() {
+    let report = DiagnosticsReport.compose(environment: environment, logLines: [])
+    #expect(report.contains("Model: Mac16,7"))
+    #expect(report.contains("Architecture: arm64"))
+}
+
+@Test func theModelIdentifierIsNeverEmpty() {
+    // Either the machine's identifier or the documented "unknown" fallback.
+    #expect(!DiagnosticsReport.Environment.hardwareModelIdentifier().isEmpty)
+}
+
+@Test func theCurrentEnvironmentUsesTheGivenHardware() {
+    let current = DiagnosticsReport.Environment.current(previousSession: nil, model: "Mac16,7", architecture: "arm64")
+    #expect(current.model == "Mac16,7")
+    #expect(current.architecture == "arm64")
 }

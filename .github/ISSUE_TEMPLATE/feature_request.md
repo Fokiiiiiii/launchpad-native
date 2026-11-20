@@ -9,17 +9,15 @@ labels: enhancement
 
 **What would you like to happen?**
 
-**Have you checked the known limitations?**
+**Have you checked the README?**
 
-Some gaps are already tracked in `README.md`'s "Known limitations" section
-or `ReverseEngineering/Contracts/open-items.md` — please check there first
-in case it's already understood and just not yet built.
+Check the README first (Features and Install sections) in case it is already covered.
 
 **Does this fit the project's constraints?**
 
-This project is deliberately: Git-clone-and-build-only OSS (no App Store,
-no signed/notarized binary release, no installer/DMG/Homebrew Cask, no
-auto-updater), AppKit-first (SwiftUI only for Settings/Glass surfaces), and
-Apple Silicon / macOS 26+ only. Feature requests that require stepping
-outside these constraints will likely be declined regardless of merit —
+This project is deliberately: MIT licensed, with no installer and no tracking.
+It ships as an unnotarized zip on Releases and can also be built from source. It requires
+Apple Silicon and is designed for macOS 26 and later (see the README's Install section).
+
+Feature requests that require stepping outside these constraints will likely be declined regardless of merit —
 worth flagging up front if you're unsure whether your idea fits.
