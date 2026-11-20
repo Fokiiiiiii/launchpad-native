@@ -24,12 +24,7 @@ pub use fs_ops::watcher::{launchpad_watch_start, launchpad_watch_stop};
 mod disk_usage;
 mod search;
 
-pub use search::launchpad_match_graphemes;
 mod catalog;
-
-pub use catalog::reconcile::launchpad_order_records;
-
-pub use catalog::reconcile::launchpad_match_moved_apps;
 
 pub use catalog::snapshot::{launchpad_catalog_encode, launchpad_catalog_decode};
 

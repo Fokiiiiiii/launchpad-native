@@ -106,9 +106,6 @@ pub mod legacy;
 #[path = "catalog_snapshot.rs"]
 pub mod snapshot;
 
-#[path = "reconcile.rs"]
-pub mod reconcile;
-
 #[cfg(test)]
 mod tests {
     use super::*;

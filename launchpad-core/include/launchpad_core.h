@@ -12,18 +12,6 @@ int32_t launchpad_receipt_lines(const char *program, void *context,
 int32_t launchpad_import_legacy(const char *path, void *context,
                                 void (*callback)(void *, int32_t, const uint8_t *, uintptr_t));
 
-int32_t launchpad_match_moved_apps(const uint8_t *bytes, uintptr_t length, void *context,
-                                   void (*callback)(void *, const uint32_t *, uintptr_t));
-
-int32_t launchpad_order_records(const uint8_t *bytes, uintptr_t length, void *context,
-                                void (*callback)(void *, const uint32_t *, uintptr_t));
-
-int32_t launchpad_unplaced_records(const uint8_t *bytes, uintptr_t length, void *context,
-                                   void (*callback)(void *, const uint32_t *, uintptr_t));
-
-int32_t launchpad_missing_dates(const uint8_t *bytes, uintptr_t length, void *context,
-                                void (*callback)(void *, const uint32_t *, uintptr_t));
-
 int32_t launchpad_catalog_encode(const uint8_t *bytes, uintptr_t length, void *context,
                                  void (*callback)(void *, const uint8_t *, uintptr_t));
 
@@ -59,7 +47,6 @@ int32_t launchpad_write_cache_atomic(const char *path, const uint8_t *bytes, uin
 
 int32_t launchpad_search_tier(const uint8_t *bytes, uintptr_t length);
 
-int32_t launchpad_match_graphemes(const uint8_t *bytes, uintptr_t length);
 
 int32_t launchpad_layout_reorder(const uintptr_t *counts, uintptr_t page_count,
                                  const uint8_t *selected, uintptr_t item_count,

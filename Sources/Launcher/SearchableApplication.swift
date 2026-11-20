@@ -11,7 +11,6 @@ struct SearchableApplication {
     let record: ApplicationRecord
     let rustFields: Data
     let rustSearchSafe: Bool
-    let rustGraphemes: [Data?]?
     /// Lowercased and diacritic-folded, so "Café" is reachable as "cafe".
     let name: String
     let originalName: String
@@ -55,14 +54,6 @@ struct SearchableApplication {
         let readingWords = Self.words(in: reading)
         self.latinReadingWords = readingWords
         self.latinReadingInitials = String(readingWords.compactMap(\.first))
-        let names = [self.name, self.originalName, self.latinReading, self.alias]
-        if names.allSatisfy({ $0.utf8.allSatisfy { $0 < 0x80 } }) {
-            rustGraphemes = nil
-        } else {
-            let primary = AppSearchMatcher.graphemeTokens(self.name)
-            let original = self.originalName == self.name ? primary : AppSearchMatcher.graphemeTokens(self.originalName)
-            rustGraphemes = [primary, original, self.latinReading.isEmpty ? nil : AppSearchMatcher.graphemeTokens(self.latinReading), self.alias.isEmpty ? nil : AppSearchMatcher.graphemeTokens(self.alias)]
-        }
         let searchSafe = [self.name, self.originalName, self.alias, self.latinReading, self.latinReadingInitials, self.initials, self.bundleIdentifier, self.fileName, self.category].allSatisfy { $0.count == $0.unicodeScalars.count }
         rustSearchSafe = searchSafe
         if searchSafe {

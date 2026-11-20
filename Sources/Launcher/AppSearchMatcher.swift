@@ -49,12 +49,12 @@ enum AppSearchMatcher {
     /// than an English name that merely contains the letters somewhere: typing
     /// "memo" means メモ, not ボイスメモ (whose bundle name is "Voice Memos").
 
-    static func tier(for query: String, in app: SearchableApplication, queryTokens: Data? = nil) -> MatchTier? {
+    static func tier(for query: String, in app: SearchableApplication) -> MatchTier? {
         guard !query.isEmpty, app.rustSearchSafe, query.count == query.unicodeScalars.count else {
-            return fallbackTier(for: query, in: app, rustMatching: true, queryTokens: queryTokens)
+            return fallbackTier(for: query, in: app)
         }
         let bytes = query.utf8
-        guard let count = UInt32(exactly: bytes.count) else { return fallbackTier(for: query, in: app, rustMatching: true, queryTokens: queryTokens) }
+        guard let count = UInt32(exactly: bytes.count) else { return fallbackTier(for: query, in: app) }
         var length = count.littleEndian
         var packed = Data()
         withUnsafeBytes(of: &length) { packed.append(contentsOf: $0) }
@@ -64,16 +64,16 @@ enum AppSearchMatcher {
             launchpad_search_tier(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count))
         }
         if tier == -2 {
-            let queryTokens = queryTokens ?? graphemeTokens(query)
-            return rustSubsequence(query, of: app.name, queryTokens: queryTokens, textTokens: app.rustGraphemes?[0])
-                || rustSubsequence(query, of: app.originalName, queryTokens: queryTokens, textTokens: app.rustGraphemes?[1])
-                || rustSubsequence(query, of: app.latinReading, queryTokens: queryTokens, textTokens: app.rustGraphemes?[2])
-                || (!app.alias.isEmpty && rustSubsequence(query, of: app.alias, queryTokens: queryTokens, textTokens: app.rustGraphemes?[3])) ? .subsequence : nil
+            // Non-ASCII names: Swift compares whole characters, canonical forms alike.
+            return isSubsequence(query, of: app.name)
+                || isSubsequence(query, of: app.originalName)
+                || isSubsequence(query, of: app.latinReading)
+                || (!app.alias.isEmpty && isSubsequence(query, of: app.alias)) ? .subsequence : nil
         }
         return MatchTier(rawValue: Int(tier))
     }
 
-    static func fallbackTier(for query: String, in app: SearchableApplication, rustMatching: Bool = false, queryTokens: Data? = nil) -> MatchTier? {
+    static func fallbackTier(for query: String, in app: SearchableApplication) -> MatchTier? {
         let hasReading = !app.latinReading.isEmpty
         let hasAlias = !app.alias.isEmpty
 
@@ -101,16 +101,10 @@ enum AppSearchMatcher {
         // through a bundle identifier matches almost anything — "memo" runs
         // through "com.apple.mobilesms" — and whatever it would have found
         // there, the substring check above already found honestly.
-        func matches(_ text: String, _ index: Int) -> Bool {
-            if rustMatching {
-                return rustSubsequence(query, of: text, queryTokens: queryTokens ?? graphemeTokens(query), textTokens: app.rustGraphemes?[index])
-            }
-            return isSubsequence(query, of: text)
-        }
-        if matches(app.name, 0)
-            || matches(app.originalName, 1)
-            || matches(app.latinReading, 2)
-            || (hasAlias && matches(app.alias, 3)) {
+        if isSubsequence(query, of: app.name)
+            || isSubsequence(query, of: app.originalName)
+            || isSubsequence(query, of: app.latinReading)
+            || (hasAlias && isSubsequence(query, of: app.alias)) {
             return .subsequence
         }
 
@@ -130,35 +124,5 @@ enum AppSearchMatcher {
             }
         }
         return false
-    }
-
-    static func rustSubsequence(_ query: String, of text: String) -> Bool {
-        rustSubsequence(query, of: text, queryTokens: graphemeTokens(query), textTokens: graphemeTokens(text))
-    }
-
-    static func graphemeTokens(_ input: String) -> Data? {
-        let characters = input.filter { $0.isLetter || $0.isNumber }
-        guard let count = UInt32(exactly: characters.count) else { return nil }
-        var packed = Data()
-        var countLE = count.littleEndian
-        withUnsafeBytes(of: &countLE) { packed.append(contentsOf: $0) }
-        for character in characters {
-            let bytes = String(character).precomposedStringWithCanonicalMapping.utf8
-            guard let size = UInt32(exactly: bytes.count) else { return nil }
-            var sizeLE = size.littleEndian
-            withUnsafeBytes(of: &sizeLE) { packed.append(contentsOf: $0) }
-            packed.append(contentsOf: bytes)
-        }
-        return packed
-    }
-
-    static func rustSubsequence(_ query: String, of text: String, queryTokens: Data?, textTokens: Data?) -> Bool {
-        guard let queryTokens, let textTokens = textTokens ?? graphemeTokens(text) else { return isSubsequence(query, of: text) }
-        var packed = queryTokens
-        packed.append(textTokens)
-        let result = packed.withUnsafeBytes { bytes in
-            launchpad_match_graphemes(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count))
-        }
-        return result < 0 ? isSubsequence(query, of: text) : result == 1
     }
 }

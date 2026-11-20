@@ -12,8 +12,6 @@ import Persistence
 
 import CLaunchpadCore
 
-private final class RustIndexBuffer { var indices: [UInt32] = []; var received = false }
-
 private final class LayoutMovePlan {
     var insertion: UInt?
     var actions: [UInt] = []
@@ -416,202 +414,8 @@ public final class GridModel {
     /// Returns catalog records in the same order the user sees them in the
     /// grid: page order, then folder position, then any not-yet-placed records.
     /// Search uses this instead of inventing a second alphabetical order.
-    nonisolated static func rustRecordOrder(recordIDs: [String], placedIDs: [String]) -> [Int]? {
-        guard let recordCount = UInt32(exactly: recordIDs.count), let placedCount = UInt32(exactly: placedIDs.count) else { return nil }
-        var wire = Data()
-        for count in [recordCount, placedCount] {
-            var little = count.littleEndian
-            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
-        }
-        for group in [recordIDs, placedIDs] {
-            for id in group {
-                let normalized = id.utf8.allSatisfy { $0 < 0x80 } ? id : id.precomposedStringWithCanonicalMapping
-                let bytes = normalized.utf8
-                guard let count = UInt32(exactly: bytes.count), count != UInt32.max else { return nil }
-                var little = count.littleEndian
-                withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
-                wire.append(contentsOf: bytes)
-            }
-        }
-        let output = RustIndexBuffer()
-        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
-            guard let context, let indices, let count = Int(exactly: count) else { return }
-            Unmanaged<RustIndexBuffer>.fromOpaque(context).takeUnretainedValue().indices = Array(UnsafeBufferPointer(start: indices, count: count))
-        }
-        let status = wire.withUnsafeBytes { bytes in
-            launchpad_order_records(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
-        }
-        guard status == 1, output.indices.count == recordIDs.count else { return nil }
-        // Validate the returned permutation without retaining a second hash table.
-        var seen = [UInt8](repeating: 0, count: recordIDs.count)
-        var result: [Int] = []
-        result.reserveCapacity(recordIDs.count)
-        for value in output.indices {
-            let index = Int(value)
-            guard recordIDs.indices.contains(index), seen[index] == 0 else { return nil }
-            seen[index] = 1
-            result.append(index)
-        }
-        return result
-    }
-
-
-    nonisolated private static func appendWireIdentifier(_ id: String, to wire: inout Data) -> Bool {
-        var normalized = id.utf8.allSatisfy { $0 < 0x80 } ? id : id.precomposedStringWithCanonicalMapping
-        return normalized.withUTF8 { bytes in
-            guard let length = UInt32(exactly: bytes.count), length != UInt32.max else { return false }
-            var little = length.littleEndian
-            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
-            wire.append(contentsOf: bytes)
-            return true
-        }
-    }
-
-    nonisolated static func rustUnplacedRecords(
-        records: [ApplicationRecord], showMenuBar: Bool, hidden: Set<String>, placed: Set<String>
-    ) -> [ApplicationRecord]? {
-        guard let recordCount = UInt32(exactly: records.count),
-              let hiddenCount = UInt32(exactly: hidden.count),
-              let placedCount = UInt32(exactly: placed.count) else { return nil }
-        var wire = Data()
-        let itemCount = records.count.addingReportingOverflow(hidden.count)
-        let totalCount = itemCount.partialValue.addingReportingOverflow(placed.count)
-        if !itemCount.overflow, !totalCount.overflow {
-            wire.reserveCapacity(12 + min(totalCount.partialValue, 10_000) * 64)
-        }
-        for count in [recordCount, hiddenCount, placedCount] {
-            var little = count.littleEndian
-            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
-        }
-        for id in hidden { guard appendWireIdentifier(id, to: &wire) else { return nil } }
-        for id in placed { guard appendWireIdentifier(id, to: &wire) else { return nil } }
-        for record in records {
-            wire.append(!record.isBackgroundOnly && (showMenuBar || !record.isMenuBarApp) ? 1 : 0)
-            guard appendWireIdentifier(record.id.value, to: &wire) else { return nil }
-        }
-        let output = RustIndexBuffer()
-        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
-            guard let context, let indices, let count = Int(exactly: count) else { return }
-            let output = Unmanaged<RustIndexBuffer>.fromOpaque(context).takeUnretainedValue()
-            output.indices = Array(UnsafeBufferPointer(start: indices, count: count))
-            output.received = true
-        }
-        let status = wire.withUnsafeBytes { bytes in
-            launchpad_unplaced_records(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
-        }
-        guard status == 1, output.received else { return nil }
-        var selected: [ApplicationRecord] = []
-        selected.reserveCapacity(output.indices.count)
-        var previous = -1
-        for raw in output.indices {
-            let index = Int(raw)
-            guard records.indices.contains(index), index > previous else { return nil }
-            let record = records[index]
-            guard !record.isBackgroundOnly, showMenuBar || !record.isMenuBarApp,
-                  !hidden.contains(record.id.value), !placed.contains(record.id.value) else { return nil }
-            selected.append(record)
-            previous = index
-        }
-        return selected
-    }
-
-    nonisolated static func rustMissingDateIndices(
-        ordered: [StableAppIdentifier], existing: [StableAppIdentifier: Date]
-    ) -> [Int]? {
-        guard let existingCount = UInt32(exactly: existing.count),
-              let candidateCount = UInt32(exactly: ordered.count) else { return nil }
-        var wire = Data()
-        let total = existing.count.addingReportingOverflow(ordered.count)
-        if !total.overflow { wire.reserveCapacity(8 + min(total.partialValue, 10_000) * 64) }
-        for count in [existingCount, candidateCount] {
-            var little = count.littleEndian
-            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
-        }
-        for id in existing.keys { guard appendWireIdentifier(id.value, to: &wire) else { return nil } }
-        for id in ordered { guard appendWireIdentifier(id.value, to: &wire) else { return nil } }
-        let output = RustIndexBuffer()
-        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
-            guard let context, let indices, let count = Int(exactly: count) else { return }
-            let output = Unmanaged<RustIndexBuffer>.fromOpaque(context).takeUnretainedValue()
-            output.indices = Array(UnsafeBufferPointer(start: indices, count: count))
-            output.received = true
-        }
-        let status = wire.withUnsafeBytes { bytes in
-            launchpad_missing_dates(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
-        }
-        guard status == 1, output.received else { return nil }
-        var result: [Int] = []
-        result.reserveCapacity(output.indices.count)
-        var previous = -1
-        for raw in output.indices {
-            let index = Int(raw)
-            guard ordered.indices.contains(index), index > previous, existing[ordered[index]] == nil else { return nil }
-            result.append(index)
-            previous = index
-        }
-        return result
-    }
-
-    nonisolated static func rustInvalidIdentifiers(valid: Set<String>, candidates: [String]) -> Set<String>? {
-        guard let candidateCount = UInt32(exactly: candidates.count),
-              let validCount = UInt32(exactly: valid.count) else { return nil }
-        var wire = Data()
-        let total = valid.count.addingReportingOverflow(candidates.count)
-        if !total.overflow { wire.reserveCapacity(12 + min(total.partialValue, 10_000) * 64) }
-        for count in [candidateCount, validCount, UInt32(0)] {
-            var little = count.littleEndian
-            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
-        }
-        for id in valid { guard appendWireIdentifier(id, to: &wire) else { return nil } }
-        for id in candidates {
-            wire.append(1)
-            guard appendWireIdentifier(id, to: &wire) else { return nil }
-        }
-        let output = RustIndexBuffer()
-        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
-            guard let context, let indices, let count = Int(exactly: count) else { return }
-            let output = Unmanaged<RustIndexBuffer>.fromOpaque(context).takeUnretainedValue()
-            output.indices = Array(UnsafeBufferPointer(start: indices, count: count))
-            output.received = true
-        }
-        let status = wire.withUnsafeBytes { bytes in
-            launchpad_unplaced_records(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
-        }
-        guard status == 1, output.received else { return nil }
-        var invalid = Set<String>()
-        var previous = -1
-        for raw in output.indices {
-            let index = Int(raw)
-            guard candidates.indices.contains(index), index > previous, !valid.contains(candidates[index]) else { return nil }
-            invalid.insert(candidates[index])
-            previous = index
-        }
-        return invalid
-    }
-
     public func orderedRecords(from records: [ApplicationRecord]) -> [ApplicationRecord] {
-        var placed: [String] = []
-        for page in pages {
-            for item in page {
-                switch item {
-                case .app(let id): placed.append(id.value)
-                case .folder(let folderID):
-                    for folderPage in folders[folderID]?.pages ?? [] {
-                        for folderItem in folderPage {
-                            if case .app(let id) = folderItem { placed.append(id.value) }
-                        }
-                    }
-                }
-            }
-        }
-        guard let indices = Self.rustRecordOrder(recordIDs: records.map { $0.id.value }, placedIDs: placed) else {
-            return orderedRecordsFallback(from: records)
-        }
-        return indices.map { records[$0] }
-    }
-
-    private func orderedRecordsFallback(from records: [ApplicationRecord]) -> [ApplicationRecord] {
-        let recordsByID = Dictionary(uniqueKeysWithValues: records.map { ($0.id.value, $0) })
+        let recordsByID = Dictionary(records.map { ($0.id.value, $0) }, uniquingKeysWith: { first, _ in first })
         var orderedIDs: [String] = []
         var seen = Set<String>()
 
@@ -679,8 +483,7 @@ public final class GridModel {
         backfillMissingDateAdded()
 
         let placedIDs = allPlacedAppIdentifierValues()
-        var newRecords = Self.rustUnplacedRecords(records: records, showMenuBar: showMenuBarApplications, hidden: hiddenIDs, placed: placedIDs)
-            ?? records.filter { isEligibleForGrid($0) && !hiddenIDs.contains($0.id.value) && !placedIDs.contains($0.id.value) }
+        var newRecords = records.filter { isEligibleForGrid($0) && !hiddenIDs.contains($0.id.value) && !placedIDs.contains($0.id.value) }
         newRecords.sort { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
 
         for record in newRecords {
@@ -741,56 +544,6 @@ public final class GridModel {
     /// same bundle identifier and signing team and there is exactly one of each.
     /// Two of either is ambiguous — which copy went where cannot be told — and is
     /// left alone, as it always was.
-    nonisolated static func rustFingerprintMatches(_ old: [KnownApplication], _ new: [KnownApplication]) -> [(Int, Int)]? {
-        guard let oldCount = UInt32(exactly: old.count), let newCount = UInt32(exactly: new.count) else { return nil }
-        var wire = Data()
-        for count in [oldCount, newCount] {
-            var little = count.littleEndian
-            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
-        }
-        func append(_ value: String?) -> Bool {
-            guard let value else {
-                var marker = UInt32.max.littleEndian
-                withUnsafeBytes(of: &marker) { wire.append(contentsOf: $0) }
-                return true
-            }
-            let normalized = value.utf8.allSatisfy { $0 < 0x80 } ? value : value.precomposedStringWithCanonicalMapping
-            let bytes = normalized.utf8
-            guard let count = UInt32(exactly: bytes.count), count != UInt32.max else { return false }
-            var little = count.littleEndian
-            withUnsafeBytes(of: &little) { wire.append(contentsOf: $0) }
-            wire.append(contentsOf: bytes)
-            return true
-        }
-        for group in [old, new] {
-            for item in group {
-                guard append(item.bundleIdentifier), append(item.teamIdentifier) else { return nil }
-            }
-        }
-        let output = RustIndexBuffer()
-        let callback: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt32>?, UInt) -> Void = { context, indices, count in
-            guard let context, let indices, let count = Int(exactly: count) else { return }
-            Unmanaged<RustIndexBuffer>.fromOpaque(context).takeUnretainedValue().indices = Array(UnsafeBufferPointer(start: indices, count: count))
-        }
-        let status = wire.withUnsafeBytes { bytes in
-            launchpad_match_moved_apps(bytes.bindMemory(to: UInt8.self).baseAddress, UInt(bytes.count), Unmanaged.passUnretained(output).toOpaque(), callback)
-        }
-        guard status == 1, output.indices.count.isMultiple(of: 2) else { return nil }
-        var result: [(Int, Int)] = []
-        var seenOld = [UInt8](repeating: 0, count: old.count)
-        var seenNew = [UInt8](repeating: 0, count: new.count)
-        for index in stride(from: 0, to: output.indices.count, by: 2) {
-            let oldIndex = Int(output.indices[index])
-            let newIndex = Int(output.indices[index + 1])
-            guard old.indices.contains(oldIndex), new.indices.contains(newIndex), old[oldIndex] == new[newIndex],
-                  seenOld[oldIndex] == 0, seenNew[newIndex] == 0 else { return nil }
-            seenOld[oldIndex] = 1
-            seenNew[newIndex] = 1
-            result.append((oldIndex, newIndex))
-        }
-        return result
-    }
-
     private func migrateMovedApplications(previousRecords: [String: ApplicationRecord]) {
         let referenced = referencedIdentifierValues()
         let orphans = referenced.filter { recordsByIDValue[$0] == nil }.compactMap { id -> (String, KnownApplication)? in
@@ -800,15 +553,6 @@ public final class GridModel {
         guard !orphans.isEmpty else { return }
         let newcomers = recordsByIDValue.values.filter { !referenced.contains($0.id.value) }
         guard !newcomers.isEmpty else { return }
-        let oldFingerprints = orphans.map(\.1)
-        let newFingerprints = newcomers.map(fingerprint(of:))
-        if let pairs = Self.rustFingerprintMatches(oldFingerprints, newFingerprints) {
-            for (old, new) in pairs {
-                remapIdentifier(from: StableAppIdentifier(value: orphans[old].0), to: newcomers[new].id.asPersistenceIdentifier)
-            }
-            return
-        }
-        // Preserve the existing layout if the Rust boundary rejects its input.
         var orphansByApp: [KnownApplication: [String]] = [:]
         for (id, known) in orphans { orphansByApp[known, default: []].append(id) }
         var newcomersByApp: [KnownApplication: [ApplicationRecord]] = [:]
@@ -851,19 +595,10 @@ public final class GridModel {
                 for case .app(let id) in page { ordered.append(id) }
             }
         }
-        guard ordered.contains(where: { document.dateAddedByID[$0] == nil }) else { return }
-        if let indices = Self.rustMissingDateIndices(ordered: ordered, existing: document.dateAddedByID) {
-            var position = 0
-            for index in indices where document.dateAddedByID[ordered[index]] == nil {
-                document.dateAddedByID[ordered[index]] = Date(timeIntervalSince1970: TimeInterval(position))
-                position += 1
-            }
-        } else {
-            var position = 0
-            for id in ordered where document.dateAddedByID[id] == nil {
-                document.dateAddedByID[id] = Date(timeIntervalSince1970: TimeInterval(position))
-                position += 1
-            }
+        var position = 0
+        for id in ordered where document.dateAddedByID[id] == nil {
+            document.dateAddedByID[id] = Date(timeIntervalSince1970: TimeInterval(position))
+            position += 1
         }
     }
 
@@ -904,26 +639,7 @@ public final class GridModel {
         let emptyPage = pages.isEmpty || pages.contains(where: \.isEmpty)
         let emptyFolder = folders.values.contains { $0.pages.allSatisfy(\.isEmpty) }
         guard needsPruning || emptyPage || emptyFolder else { return }
-        var invalid: Set<String>?
-        if needsPruning {
-            var candidates: [String] = []
-            for page in pages {
-                for case .app(let id) in page { candidates.append(id.value) }
-            }
-            for folder in folders.values {
-                for page in folder.pages {
-                    for case .app(let id) in page { candidates.append(id.value) }
-                }
-            }
-            invalid = Self.rustInvalidIdentifiers(valid: validIDs, candidates: candidates)
-            if invalid?.isEmpty == true { invalid = nil }
-        } else {
-            invalid = []
-        }
-        func isValid(_ id: String) -> Bool {
-            if let invalid { return !invalid.contains(id) }
-            return validIDs.contains(id)
-        }
+        func isValid(_ id: String) -> Bool { validIDs.contains(id) }
         for pageIndex in pages.indices {
             let before = pages[pageIndex]
             pages[pageIndex] = before.filter { item in

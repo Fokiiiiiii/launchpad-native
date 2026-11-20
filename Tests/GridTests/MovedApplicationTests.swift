@@ -235,55 +235,6 @@ private func temporaryDirectory() -> URL {
     #expect(model.alias(for: lookalike.id) == nil)
 }
 
-@Test func rustFingerprintMatchingPreservesAmbiguityAndNormalization() throws {
-    let old = [
-        KnownApplication(bundleIdentifier: "org.example.é", teamIdentifier: nil),
-        KnownApplication(bundleIdentifier: "org.example.copy", teamIdentifier: "team"),
-        KnownApplication(bundleIdentifier: "org.example.copy", teamIdentifier: "team"),
-        KnownApplication(bundleIdentifier: "org.example.other", teamIdentifier: ""),
-    ]
-    let new = [
-        KnownApplication(bundleIdentifier: "org.example.e\u{301}", teamIdentifier: nil),
-        KnownApplication(bundleIdentifier: "org.example.copy", teamIdentifier: "team"),
-        KnownApplication(bundleIdentifier: "org.example.other", teamIdentifier: nil),
-    ]
-    let matches = try #require(GridModel.rustFingerprintMatches(old, new))
-    #expect(matches.map { "\($0.0):\($0.1)" } == ["0:0"])
-}
-
-@Test func benchmarkMovedFingerprintMemory() throws {
-    guard ProcessInfo.processInfo.environment["LAUNCHPAD_BENCHMARK"] == "1",
-          let mode = ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_MODE"] else { return }
-    let count = Int(ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_ITEMS"] ?? "1000") ?? 1000
-    guard (1...10_000).contains(count) else { return }
-    let old = (0..<count).map { KnownApplication(bundleIdentifier: "org.example.\($0)", teamIdentifier: $0.isMultiple(of: 2) ? "TEAM" : nil) }
-    let new = Array(old.reversed())
-    func peak() -> Int {
-        var usage = rusage()
-        _ = getrusage(RUSAGE_SELF, &usage)
-        return usage.ru_maxrss
-    }
-    let baseline = peak()
-    let start = DispatchTime.now().uptimeNanoseconds
-    var checksum = 0
-    for _ in 0..<5 {
-        if mode == "match-rust" {
-            checksum += try #require(GridModel.rustFingerprintMatches(old, new)).count
-        } else if mode == "match-swift" {
-            var oldGroups: [KnownApplication: [Int]] = [:]
-            var newGroups: [KnownApplication: [Int]] = [:]
-            for (index, key) in old.enumerated() { oldGroups[key, default: []].append(index) }
-            for (index, key) in new.enumerated() { newGroups[key, default: []].append(index) }
-            checksum += oldGroups.reduce(into: 0) { total, entry in
-                if entry.value.count == 1, newGroups[entry.key]?.count == 1 { total += 1 }
-            }
-        } else { return }
-    }
-    let elapsed = DispatchTime.now().uptimeNanoseconds - start
-    #expect(checksum == count * 5)
-    print("MEMORY_BENCH scenario=moved-match mode=\(mode) items=\(count) baseline_bytes=\(baseline) peak_bytes=\(peak()) elapsed_ns=\(elapsed)")
-}
-
 @Test @MainActor func movedFingerprintMatchesCanonicalUnicode() async throws {
     let dir = temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }

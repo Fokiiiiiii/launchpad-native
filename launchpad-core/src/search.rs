@@ -47,43 +47,6 @@ pub unsafe extern "C" fn launchpad_search_tier(bytes: *const u8, length: usize) 
     -2
 }
 
-/// Matches canonical grapheme tokens provided by the platform text layer.
-#[no_mangle]
-pub unsafe extern "C" fn launchpad_match_graphemes(bytes: *const u8, length: usize) -> i32 {
-    if bytes.is_null() { return -1; }
-    let mut input = std::slice::from_raw_parts(bytes, length);
-    fn read_u32(input: &mut &[u8]) -> Option<usize> {
-        let (head, tail) = input.split_at_checked(4)?;
-        *input = tail;
-        Some(u32::from_le_bytes(head.try_into().ok()?) as usize)
-    }
-    fn tokens<'a>(input: &mut &'a [u8]) -> Option<Vec<&'a [u8]>> {
-        let count = read_u32(input)?;
-        if count > input.len() / 4 { return None; }
-        let mut result = Vec::with_capacity(count);
-        for _ in 0..count {
-            let length = read_u32(input)?;
-            if length == 0 { return None; }
-            let (token, rest) = input.split_at_checked(length)?;
-            *input = rest;
-            result.push(token);
-        }
-        Some(result)
-    }
-    let Some(query) = tokens(&mut input) else { return -1 };
-    let Some(text) = tokens(&mut input) else { return -1 };
-    if !input.is_empty() { return -1; }
-    if query.is_empty() { return 0; }
-    let mut index = 0;
-    for token in text {
-        if token == query[index] {
-            index += 1;
-            if index == query.len() { return 1; }
-        }
-    }
-    0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,20 +71,5 @@ mod tests {
         fields[0] = "め";
         fields[1] = "メモ";
         assert_eq!(run(fields), -2);
-    }
-
-    #[test]
-    fn grapheme_tokens_are_validated_and_matched() {
-        fn pack(parts: &[&str], out: &mut Vec<u8>) {
-            out.extend_from_slice(&(parts.len() as u32).to_le_bytes());
-            for part in parts { out.extend_from_slice(&(part.len() as u32).to_le_bytes()); out.extend_from_slice(part.as_bytes()); }
-        }
-        let mut data = Vec::new();
-        pack(&["日", "語"], &mut data);
-        pack(&["日", "本", "語"], &mut data);
-        assert_eq!(unsafe { launchpad_match_graphemes(data.as_ptr(), data.len()) }, 1);
-        assert_eq!(unsafe { launchpad_match_graphemes(data.as_ptr(), data.len() - 1) }, -1);
-        data.push(0);
-        assert_eq!(unsafe { launchpad_match_graphemes(data.as_ptr(), data.len()) }, -1);
     }
 }

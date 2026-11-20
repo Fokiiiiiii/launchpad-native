@@ -24,9 +24,8 @@ enum LauncherFiltering {
         )
         guard !trimmed.isEmpty else { return candidates.map(\.record) }
 
-        let queryTokens = AppSearchMatcher.graphemeTokens(trimmed)
         let matches = candidates.enumerated().compactMap { offset, app -> (ApplicationRecord, MatchTier, Date, Int)? in
-            guard let tier = AppSearchMatcher.tier(for: trimmed, in: app, queryTokens: queryTokens) else { return nil }
+            guard let tier = AppSearchMatcher.tier(for: trimmed, in: app) else { return nil }
             return (app.record, tier, lastLaunchDates[app.record.id.value] ?? .distantPast, offset)
         }
 
