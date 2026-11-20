@@ -4,6 +4,18 @@ import Persistence
 import Testing
 @testable import Settings
 
+/// Waits for work the view model scheduled on the main actor. The other tests
+/// share that actor, so a fixed count of yields could run out before the work
+/// got a turn: run together in a release build, a trigger edit was still
+/// waiting after twenty.
+@MainActor
+private func waitUntil(_ condition: () -> Bool) async {
+    let deadline = ContinuousClock.now + .seconds(5)
+    while !condition(), ContinuousClock.now < deadline {
+        try? await Task.sleep(for: .milliseconds(1))
+    }
+}
+
 @Test @MainActor func layoutSpacingControlsUpdateTheGridImmediately() {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("launchpad-settings-layout-test-\(UUID().uuidString)", isDirectory: true)
@@ -82,9 +94,7 @@ import Testing
     viewModel.multitouchEnabled = !previous.multitouchGestureEnabled
     viewModel.gestureConflictPreventionEnabled = !previous.gestureConflictPreventionEnabled
 
-    for _ in 0..<20 {
-        await Task.yield()
-    }
+    await waitUntil { callbackCount > 0 && viewModel.f4Enabled == previous.f4Enabled }
 
     #expect(callbackCount == 1)
     #expect(viewModel.f4Enabled == previous.f4Enabled)
@@ -120,16 +130,12 @@ import Testing
     )
 
     viewModel.refreshF4Status()
-    for _ in 0..<20 where !refreshEntered {
-        await Task.yield()
-    }
+    await waitUntil { refreshEntered }
     #expect(refreshEntered)
 
     viewModel.f4Enabled = !previous.f4Enabled
     releaseRefresh = true
-    for _ in 0..<80 {
-        await Task.yield()
-    }
+    await waitUntil { callbackCount == 2 }
 
     #expect(callbackCount == 2)
     #expect(model.triggerSettings == previous)
@@ -163,7 +169,7 @@ import Testing
     )
 
     viewModel.f4Enabled = !previous.f4Enabled
-    for _ in 0..<40 where applied.isEmpty { await Task.yield() }
+    await waitUntil { !applied.isEmpty }
     #expect(applied.count == 1)
 
     viewModel.hotkeyEnabled = !previous.hotkeyEnabled
@@ -171,7 +177,7 @@ import Testing
     #expect(viewModel.hotkeyEnabled == !previous.hotkeyEnabled, "refresh overwrote an edit that had not been applied yet")
 
     releaseFirst = true
-    for _ in 0..<120 { await Task.yield() }
+    await waitUntil { applied.last?.hotkeyEnabled == !previous.hotkeyEnabled }
     #expect(applied.last?.hotkeyEnabled == !previous.hotkeyEnabled, "the queued edit never reached the apply callback")
     #expect(viewModel.hotkeyEnabled == !previous.hotkeyEnabled)
 }
@@ -197,7 +203,7 @@ import Testing
     #expect(viewModel.hotkeyActive)
 
     viewModel.hotkeyEnabled = !model.triggerSettings.hotkeyEnabled
-    for _ in 0..<60 { await Task.yield() }
+    await waitUntil { !viewModel.hotkeyActive }
 
     #expect(!viewModel.hotkeyActive)
 }
@@ -223,9 +229,7 @@ import Testing
     )
 
     viewModel.refreshF4Status()
-    for _ in 0..<20 where !viewModel.multitouchActive {
-        await Task.yield()
-    }
+    await waitUntil { viewModel.multitouchActive }
 
     #expect(viewModel.multitouchActive)
     #expect(!viewModel.multitouchEventArbitrationActive)
