@@ -323,6 +323,7 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         }
         let direction: CGFloat = clamped > currentFolderPage ? -1 : 1
         currentFolderPage = clamped
+        pageChangesInFlight += 1
 
         let exit = GridSpring.animation(
             keyPath: "transform.translation.x",
@@ -338,6 +339,7 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
             host.animator().alphaValue = 0
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated {
+                self?.pageChangesInFlight -= 1
                 guard let self, let host = self.gridHost, let layer = host.layer else { return }
                 // Rebuilt while invisible, so the swap itself is never on screen
                 // — the same ordering the main grid's page change relies on.
@@ -362,6 +364,12 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
         }
     }
 
+    /// Page changes whose fade has not finished. Until it has, `currentFolderPage`
+    /// is the new page while the tiles and the selection are still the old one's,
+    /// so keys that act on the selection are ignored rather than applied to a page
+    /// that is leaving.
+    private var pageChangesInFlight = 0
+
     private func goToAdjacentPage(_ delta: Int) {
         goToPage(currentFolderPage + delta)
     }
@@ -378,6 +386,9 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
             goToAdjacentPage(delta)
             return true
         }
+        // Paging above works from `currentFolderPage`, so it can repeat at once;
+        // walking the selection needs the tiles of the page now showing.
+        guard pageChangesInFlight == 0 else { return true }
         let next = index + delta
         if gridModel.tiles.indices.contains(next) {
             gridModel.selectedID = gridModel.tiles[next].id
@@ -397,6 +408,7 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     /// first tile when there is none yet — the only way to get a selection
     /// with the keyboard alone.
     func handleVerticalArrowKey(delta: Int) -> Bool {
+        guard pageChangesInFlight == 0 else { return true }
         guard !gridModel.tiles.isEmpty else { return false }
         guard let index = selectedTileIndex() else {
             gridModel.selectedID = gridModel.tiles.first?.id
@@ -413,6 +425,7 @@ final class FolderContentsViewController: NSViewController, NSTextFieldDelegate 
     /// unhandled Return still falls through with no selection.
     @discardableResult
     func activateSelection() -> Bool {
+        guard pageChangesInFlight == 0 else { return true }
         guard let id = gridModel.selectedID,
               let tile = gridModel.tiles.first(where: { $0.id == id }) else { return false }
         tile.onLaunch()

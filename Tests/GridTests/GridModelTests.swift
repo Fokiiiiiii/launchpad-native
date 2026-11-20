@@ -866,12 +866,13 @@ private func makeModel(directory: URL) -> GridModel {
     defer { try? FileManager.default.removeItem(at: dir) }
     let store = LayoutStore(directory: dir)
 
+    // The layout has to name the records by their real identifiers. With made-up
+    // ones nothing matches, every app is stamped as new with `Date()`, and in a
+    // release build three stamps taken back to back can be equal, so the sort
+    // below depended on timing instead of on the backfill.
+    let records = [record("Apple", id: "a"), record("Banana", id: "b"), record("Cherry", id: "c")]
     var document = LayoutDocument.empty
-    document.pages = [[
-        LayoutItem.app(StableAppIdentifier(value: "a")),
-        LayoutItem.app(StableAppIdentifier(value: "b")),
-        LayoutItem.app(StableAppIdentifier(value: "c"))
-    ]]
+    document.pages = [records.map { LayoutItem.app($0.id.asPersistenceIdentifier) }]
     #expect(document.dateAddedByID.isEmpty, "sanity check: no dateAdded metadata exists yet")
     try await store.save(document)
 
@@ -879,7 +880,7 @@ private func makeModel(directory: URL) -> GridModel {
     await model.loadDocument()
     // None of these are "new" (all already placed) — this exercises only
     // the backfill path, not the genuinely-new-record stamping path.
-    model.reconcile(with: [record("Apple", id: "a"), record("Banana", id: "b"), record("Cherry", id: "c")])
+    model.reconcile(with: records)
 
     model.applySortMode(.dateAdded)
     let order = model.pages[0].compactMap { item -> String? in

@@ -60,6 +60,11 @@ public enum RemovalPlanner {
         }
 
         let hasOtherCopy = hasOtherInstalledCopy(of: record, in: siblingRecords)
+        // Another installed app whose identifier extends this one's, such as
+        // `com.vendor.editor.tools` beside `com.vendor.editor`, owns the files
+        // named for it. The dotted-child rule used to collect them as this
+        // app's own helpers.
+        let childAppIdentifiers = siblingRecords.map(\.bundleIdentifier).filter { $0.hasPrefix(record.bundleIdentifier + ".") }
         let needsNestedCheck = !hasOtherCopy && evidence.relatedPaths.contains { related in
             guard related.exists else { return false }
             if case .groupContainers = related.category { return false }
@@ -74,7 +79,10 @@ public enum RemovalPlanner {
         var items: [RemovalItem] = []
 
         for related in evidence.relatedPaths where related.exists {
-            let classification = classify(related, hasOtherCopy: hasOtherCopy, siblings: siblings, encoded: encoded)
+            var classification = classify(related, hasOtherCopy: hasOtherCopy, siblings: siblings, encoded: encoded)
+            if case .preferencesByHost = related.category, belongsToChildApp(related.url, childAppIdentifiers) {
+                classification = .sharedRisk
+            }
             items.append(RemovalItem(path: related.url, classification: classification, requiresPrivilegedHelper: false))
         }
 
@@ -83,7 +91,7 @@ public enum RemovalPlanner {
         for agent in evidence.userLaunchAgents {
             items.append(RemovalItem(
                 path: agent,
-                classification: hasOtherCopy ? .sharedRisk : .owned,
+                classification: hasOtherCopy || belongsToChildApp(agent, childAppIdentifiers) ? .sharedRisk : .owned,
                 requiresPrivilegedHelper: false
             ))
         }
@@ -113,6 +121,13 @@ public enum RemovalPlanner {
         return siblingRecords.contains {
             $0.bundleIdentifier == record.bundleIdentifier && $0.bundleURL.standardizedFileURL != own
         }
+    }
+
+    /// Whether a file named after an installed app's identifier, with the
+    /// extension and any trailing host UUID ignored, belongs to one of `childAppIdentifiers`.
+    private static func belongsToChildApp(_ url: URL, _ childAppIdentifiers: [String]) -> Bool {
+        let name = url.deletingPathExtension().lastPathComponent
+        return childAppIdentifiers.contains { OwnershipEvidenceCollector.isOwnName(name, bundleID: $0) }
     }
 
     private static func encodeSiblingNames(_ siblings: [String]) -> Data? {

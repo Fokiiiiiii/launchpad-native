@@ -798,10 +798,18 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         guard let window = notification.object as? LauncherWindow else { return }
         guard window.isVisible else { return }
         setLauncherPresentation(active: true)
+        applyFramePolicy(to: window, reason: "windowDidBecomeKey")
+    }
+
+    /// The frame and Dock level the launcher takes on its screen. Windowed mode
+    /// keeps the Dock and the visible area; becoming key used to apply the
+    /// full-screen policy regardless and put the window back to the whole display.
+    private func applyFramePolicy(to window: LauncherWindow, reason: String) {
+        let windowed = gridModel.gridSettings.windowed
         window.applyDockVisibilityPreference(
-            hideDock: gridModel.hideDockWhileLauncherOpen,
-            reason: "windowDidBecomeKey",
-            screenFrame: window.screen?.frame
+            hideDock: gridModel.hideDockWhileLauncherOpen && !windowed,
+            reason: reason,
+            screenFrame: window.screen.map { Self.launcherFrame(screenFrame: $0.frame, visibleFrame: $0.visibleFrame, windowed: windowed) }
         )
     }
 
@@ -809,11 +817,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         guard let window = notification.object as? LauncherWindow else { return }
         guard window.isVisible else { return }
         setLauncherPresentation(active: true)
-        window.applyDockVisibilityPreference(
-            hideDock: gridModel.hideDockWhileLauncherOpen && !gridModel.gridSettings.windowed,
-            reason: "windowDidChangeScreen",
-            screenFrame: window.screen.map { Self.launcherFrame(screenFrame: $0.frame, visibleFrame: $0.visibleFrame, windowed: gridModel.gridSettings.windowed) }
-        )
+        applyFramePolicy(to: window, reason: "windowDidChangeScreen")
         refreshOverlayLayout(reason: "did change screen")
     }
 }

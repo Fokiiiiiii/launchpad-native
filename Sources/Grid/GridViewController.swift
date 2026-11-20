@@ -542,10 +542,18 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             Task { @MainActor in
                 guard let self, self.pageTransitionGeneration == generation else { return }
 
+                // The model can lose pages while the exit animation runs (a
+                // catalog update removes an emptied one), and `reload()` does not
+                // end the transition, so the target is checked again here. A page
+                // that no longer exists lands on the last one, with no selection
+                // carried over from the page that was meant.
+                let target = min(index, max(self.model.pages.count - 1, 0))
+                if target != index { self.pendingEdgeSelection = nil }
+
                 // Prepare the new page while it is still off the visible
                 // side. Keeping the layout settings and reload in this
                 // order prevents one frame of the previous icon size.
-                self.currentPage = index
+                self.currentPage = target
                 self.layout.settings = self.model.gridSettings
                 self.layout.invalidateLayout()
                 self.collectionView.collectionViewLayout?.invalidateLayout()
@@ -554,11 +562,11 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
                 self.collectionView.displayIfNeeded()
                 self.collectionView.alphaValue = 1
                 self.resetScrollPosition()
-                self.pageControl.currentPage = index
+                self.pageControl.currentPage = target
                 self.prefetchAdjacentPageIcons()
                 if let edge = self.pendingEdgeSelection {
                     self.pendingEdgeSelection = nil
-                    let count = self.model.pages[index].count
+                    let count = self.model.pages.indices.contains(target) ? self.model.pages[target].count : 0
                     let columns = max(self.model.gridSettings.columns, 1)
                     let item: Int
                     switch edge {

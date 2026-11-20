@@ -327,6 +327,51 @@ struct RemovalPlannerTests {
         #expect(plan.map(\.classification) == [.owned])
     }
 
+    /// `com.vendor.editor.tools` is its own app, not a helper of `com.vendor.editor`,
+    /// and the files named for it are not this app's to offer.
+    @Test("files named for another installed app that extends the identifier are not owned")
+    func childAppFilesAreSharedRisk() {
+        let record = makeRecord(bundleIdentifier: "com.vendor.editor", teamIdentifier: nil)
+        let child = makeRecord(bundleIdentifier: "com.vendor.editor.tools", teamIdentifier: nil)
+        let evidence = OwnershipEvidence(
+            bundleURL: record.bundleURL,
+            relatedPaths: [
+                RelatedPath(url: URL(fileURLWithPath: "/tmp/ByHost/com.vendor.editor.ABCD-1234.plist"), category: .preferencesByHost, exists: true),
+                RelatedPath(url: URL(fileURLWithPath: "/tmp/ByHost/com.vendor.editor.tools.ABCD-1234.plist"), category: .preferencesByHost, exists: true),
+            ],
+            userLaunchAgents: [
+                URL(fileURLWithPath: "/tmp/com.vendor.editor.helper.plist"),
+                URL(fileURLWithPath: "/tmp/com.vendor.editor.tools.plist"),
+            ],
+            systemLaunchItems: [],
+            receiptPackageIDs: [],
+            systemExtensionIdentifiers: []
+        )
+
+        let plan = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: [child])
+        let byName = Dictionary(uniqueKeysWithValues: plan.map { ($0.path.lastPathComponent, $0.classification) })
+
+        #expect(byName["com.vendor.editor.ABCD-1234.plist"] == .owned)
+        #expect(byName["com.vendor.editor.tools.ABCD-1234.plist"] == .sharedRisk)
+        #expect(byName["com.vendor.editor.helper.plist"] == .owned)
+        #expect(byName["com.vendor.editor.tools.plist"] == .sharedRisk)
+    }
+
+    @Test("a child identifier that is not installed leaves its dotted files with this app")
+    func uninstalledChildLeavesDottedFilesOwned() {
+        let record = makeRecord(bundleIdentifier: "com.vendor.editor", teamIdentifier: nil)
+        let evidence = OwnershipEvidence(
+            bundleURL: record.bundleURL,
+            relatedPaths: [],
+            userLaunchAgents: [URL(fileURLWithPath: "/tmp/com.vendor.editor.tools.plist")],
+            systemLaunchItems: [],
+            receiptPackageIDs: [],
+            systemExtensionIdentifiers: []
+        )
+
+        #expect(RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: []).map(\.classification) == [.owned])
+    }
+
     @Test("nonexistent related paths are excluded from the plan")
     func nonexistentPathsExcluded() {
         let record = makeRecord(bundleIdentifier: "com.example.solo", teamIdentifier: nil)

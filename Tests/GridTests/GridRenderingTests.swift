@@ -632,6 +632,40 @@ private func accessibilityDescendants(of root: Any) -> [Any] {
     #expect(visible == appKeys(onPage: 0, of: harness.model))
 }
 
+/// The page turn picks its target when it starts and acts on it a moment later.
+/// A catalog update that removes the emptied last page in between left the turn
+/// reading `model.pages[1]` from a model with one page, which ended the process.
+@Test @MainActor func aPageTurnWhosePageDisappearsMidTurnLandsOnTheLastPage() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let capacity = GridSettings.default.columns * GridSettings.default.rows
+    let appCount = capacity + 1
+    let harness = await GridHarness(appCount: appCount, directory: dir)
+    defer { harness.teardown() }
+    try await harness.waitForIcons(1)
+    try #require(harness.model.pages.count == 2 && harness.model.pages[1].count == 1)
+
+    let columns = harness.model.gridSettings.columns
+    harness.controller.moveSelection(deltaColumns: 0, deltaRows: 0)
+    harness.controller.moveSelection(deltaColumns: columns - 1, deltaRows: 0)
+    harness.controller.moveSelection(deltaColumns: 1, deltaRows: 0)
+
+    // The only app on page two is uninstalled while the turn is still in flight.
+    guard case .app(let lastOne) = harness.model.pages[1][0],
+          let leaving = harness.model.record(for: lastOne)?.bundleIdentifier
+    else { throw GridTestError.unexpectedLayout }
+    harness.model.reconcile(with: (1...appCount).map { gridRecord("app\($0)") }.filter { $0.bundleIdentifier != leaving })
+    try #require(harness.model.pages.count == 1)
+    try await Task.sleep(for: .milliseconds(600))
+
+    let scroll = try #require(harness.controller.view.subviews.compactMap { $0 as? NSScrollView }.first)
+    let grid = try #require(scroll.documentView as? NSCollectionView)
+    let visible = (0..<grid.numberOfItems(inSection: 0)).compactMap {
+        (grid.item(at: IndexPath(item: $0, section: 0)) as? GridCellItem)?.currentRequestKey
+    }
+    #expect(visible == appKeys(onPage: 0, of: harness.model))
+}
+
 private enum GridTestError: Error { case unexpectedLayout }
 
 /// Left and right stay on their row. At the end of it they turn the page and land

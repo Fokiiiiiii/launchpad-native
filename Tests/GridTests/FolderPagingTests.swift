@@ -49,7 +49,12 @@ private func modelWithFolder(itemCount count: Int, directory: URL) async -> (Gri
 }
 
 @MainActor
-private func makePanel(model: GridModel, folderID: FolderID, columns: Int = 3) -> FolderContentsViewController {
+private func makePanel(
+    model: GridModel,
+    folderID: FolderID,
+    columns: Int = 3,
+    onLaunch: @escaping (ApplicationRecord) -> Void = { _ in }
+) -> FolderContentsViewController {
     let panel = FolderContentsViewController(
         model: model,
         folderID: folderID,
@@ -58,7 +63,7 @@ private func makePanel(model: GridModel, folderID: FolderID, columns: Int = 3) -
         columns: columns,
         panelWidth: 600,
         maximumHeight: 800,
-        onLaunch: { _ in },
+        onLaunch: onLaunch,
         onItemDraggedOut: { _, _ in }
     )
     panel.loadViewIfNeeded()
@@ -110,6 +115,28 @@ private func makePanel(model: GridModel, folderID: FolderID, columns: Int = 3) -
     #expect(panel.currentPageForTesting == 0)
     _ = panel.handleArrowKey(delta: -1)
     #expect(panel.currentPageForTesting == 0)
+}
+
+/// Between pressing the arrow that crosses to the next page and the fade
+/// finishing, the selection still belongs to the page that is leaving. Return
+/// then opened that page's last app instead of anything on the new page.
+@Test @MainActor func returnWhileThePageIsChangingLaunchesNothing() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let (model, folderID) = await modelWithFolder(itemCount: 14, directory: dir)
+    var launched: [String] = []
+    let panel = makePanel(model: model, folderID: folderID, onLaunch: { launched.append($0.bundleIdentifier) })
+
+    #expect(panel.handleVerticalArrowKey(delta: 1) == true)
+    for _ in 0..<8 { _ = panel.handleArrowKey(delta: 1) }
+    #expect(panel.selectedTileIDForTesting != nil)
+    #expect(panel.currentPageForTesting == 0)
+
+    // The ninth arrow is off the end of the page: it crosses, with the fade pending.
+    #expect(panel.handleArrowKey(delta: 1) == true)
+    #expect(panel.currentPageForTesting == 1)
+    #expect(panel.activateSelection() == true)
+    #expect(launched.isEmpty)
 }
 
 /// The card is sized from the fullest page, so paging onto a half-empty last
