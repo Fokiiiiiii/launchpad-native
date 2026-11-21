@@ -239,9 +239,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Reconcile the live catalog after the first frame. The scan runs
             // on the Catalog actor from a utility task, so Bundle metadata and
             // code-signing inspection never block the launcher window.
-            Task.detached(priority: .utility) { [scanner, configuredSources] in
+            Task.detached(priority: .utility) { [scanner, configuredSources, weak self] in
                 let snapshot = await scanner.performFullScan()
                 CatalogSnapshotStore.save(records: snapshot.records, sources: configuredSources)
+                // The first complete scan is applied as the authoritative catalog
+                // whether or not it differs from the cache. The update stream
+                // reports only a change, so a scan that agreed with the cache
+                // never told the launcher it was complete: an empty layout was
+                // not filled, and an app removed while the app was off kept its
+                // place. Applying it twice is harmless; the second finds nothing
+                // to change.
+                await MainActor.run { self?.launcherWindowController.updateRecords(snapshot.records) }
                 DiagnosticsLog.appHost.info(
                     "Catalog ready: \(snapshot.records.count, privacy: .public) applications"
                 )
@@ -360,6 +368,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyCurrentTriggerSettings(_ requested: TriggerSettings) async -> TriggerSettingsApplyResult {
         let model = launcherWindowController.model
         let previous = model.triggerSettings
+        if TriggerSettingsPolicy.isSensitivityOnlyChange(from: previous, to: requested) {
+            return applySensitivityOnly(requested, previous: previous)
+        }
+        // This path saves, and what it saves already holds the latest sensitivity.
+        sensitivitySaveTask?.cancel()
         let runtimeSettings = normalizedTriggerSettings(requested)
         let isFingerSwitch = isGestureConflictFingerSwitch(
             from: previous,
@@ -469,6 +482,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return .failed
         }
         return result
+    }
+
+    private var sensitivitySaveTask: Task<Void, Never>?
+
+    /// A slider step takes effect on the running listener at once and is saved
+    /// shortly after the last one, instead of stopping and registering every
+    /// trigger again, and saving a restore point around it, for each step.
+    private func applySensitivityOnly(_ requested: TriggerSettings, previous: TriggerSettings) -> TriggerSettingsApplyResult {
+        let model = launcherWindowController.model
+        triggerCoordinator.updateSensitivity(requested.multitouchSensitivity)
+        model.updateTriggerSettings(requested)
+        sensitivitySaveTask?.cancel()
+        sensitivitySaveTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            await model.save()
+        }
+        let report = triggerCoordinator.currentActivationReport
+        return TriggerSettingsApplyResult(
+            f4Active: report.f4Active,
+            hotkeyActive: report.hotkeyRegistered || !requested.hotkeyEnabled,
+            multitouchActive: report.multitouchActive,
+            multitouchEventArbitrationActive: report.multitouchEventArbitrationActive,
+            gestureConflictStatus: .unchanged,
+            gestureConflictBackup: previous.gestureConflictBackup
+        )
     }
 
     private func isGestureConflictFingerSwitch(

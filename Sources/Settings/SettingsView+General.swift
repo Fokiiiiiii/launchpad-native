@@ -3,6 +3,7 @@ import DesignSystem
 import Diagnostics
 import Localization
 import Persistence
+import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -16,8 +17,20 @@ extension SettingsView {
                     SettingsSectionHeader(L10n.tabTriggers, systemImage: "hand.tap.fill", tint: .orange)
                 SettingsCard {
                     SettingsCardRow {
-                        Toggle(isOn: $viewModel.launchAtLoginEnabled) {
-                            Text(L10n.launchAtLoginToggleLabel)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Toggle(isOn: $viewModel.launchAtLoginEnabled) {
+                                Text(L10n.launchAtLoginToggleLabel)
+                            }
+                            if viewModel.launchAtLoginNeedsApproval {
+                                Text(L10n.launchAtLoginNeedsApprovalNotice)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Button(L10n.openLoginItemsButton) {
+                                    SMAppService.openSystemSettingsLoginItems()
+                                }
+                                .buttonStyle(.link)
+                            }
                         }
                     }
                     SettingsCardDivider()

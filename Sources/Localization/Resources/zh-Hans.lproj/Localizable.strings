@@ -134,6 +134,8 @@
 "onboarding.next" = "下一步";
 "onboarding.getstarted" = "开始使用";
 "settings.general.launchatlogin" = "登录时启动";
+"settings.general.launchatlogin.needsapproval" = "正在等待你在“系统设置”中批准，因此暂时不会在登录时启动。";
+"settings.general.launchatlogin.openitems" = "打开登录项…";
 "settings.general.appearance" = "外观";
 "settings.general.showmenubaricon" = "显示菜单栏图标";
 "settings.apps.showmenubarapplications" = "显示菜单栏应用";

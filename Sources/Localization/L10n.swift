@@ -295,6 +295,10 @@ public enum L10n {
     // MARK: Settings — new items (Round 20)
 
     public static var launchAtLoginToggleLabel: String { string("settings.general.launchatlogin", "Launch at Login") }
+    public static var launchAtLoginNeedsApprovalNotice: String {
+        string("settings.general.launchatlogin.needsapproval", "Waiting for your approval in System Settings, so it will not start at login yet.")
+    }
+    public static var openLoginItemsButton: String { string("settings.general.launchatlogin.openitems", "Open Login Items…") }
     public static var appearanceSectionHeader: String { string("settings.general.appearance", "Appearance") }
     public static var showMenuBarIconToggleLabel: String { string("settings.general.showmenubaricon", "Show Menu Bar Icon") }
     public static var showMenuBarApplicationsToggleLabel: String { string("settings.apps.showmenubarapplications", "Show Menu Bar Applications") }

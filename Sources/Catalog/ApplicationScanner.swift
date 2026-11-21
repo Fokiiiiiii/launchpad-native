@@ -194,10 +194,15 @@ public actor ApplicationScanner {
 
     /// What the current snapshot — restored from disk at launch, or left by
     /// an earlier scan — already knows about each bundle's code signature.
-    private func knownSignatures() -> [String: ApplicationBundleReader.KnownSignature] {
+    ///
+    /// A bundle that a file-system event says changed inside is left out: its own
+    /// modification time is not a reliable sign of "unchanged" when a file within
+    /// it was rewritten, and a signature kept on that basis went stale.
+    func knownSignatures(excluding changedPaths: [String] = []) -> [String: ApplicationBundleReader.KnownSignature] {
         var known: [String: ApplicationBundleReader.KnownSignature] = [:]
         known.reserveCapacity(snapshot.recordsByID.count)
         for record in snapshot.recordsByID.values {
+            if changedPaths.contains(where: { isPath($0, inside: record.bundleURL) }) { continue }
             known[ApplicationBundleReader.signatureCacheKey(for: record.bundleURL)] =
                 ApplicationBundleReader.KnownSignature(
                     modificationDate: record.lastSeenModificationDate,
@@ -233,18 +238,23 @@ public actor ApplicationScanner {
     }
 
     /// Replaces the configured roots after a Settings change. Existing
-    /// watchers are torn down before the first scan so removed folders cannot
-    /// continue emitting stale events; subscribers receive the rebuilt
-    /// snapshot through the normal update stream.
+    /// watchers are torn down first so removed folders cannot continue emitting
+    /// stale events; subscribers receive the rebuilt snapshot through the
+    /// normal update stream.
+    ///
+    /// The watcher for the new roots starts before the scan, not after it. A
+    /// scan reads one source after another, so a change made to one it has
+    /// already read was in neither the scan nor a watcher that had not started.
+    /// Events during the scan are held and handled once it ends.
     public func replaceSources(_ newSources: [ApplicationSource]) async {
         let wasWatching = watcher != nil
         stopWatching()
         hasCompletedFullScan = false
         sources = newSources
-        _ = await performFullScan()
         if wasWatching {
             startWatching()
         }
+        _ = await performFullScan()
     }
 
     /// Subscribe to catalog snapshots. Yields immediately with the current
@@ -332,7 +342,7 @@ public actor ApplicationScanner {
         }
         nextScanToken += 1
         let token = nextScanToken
-        let known = knownSignatures()
+        let known = knownSignatures(excluding: changedPaths)
         var reports: [(source: ApplicationSource, report: ApplicationBundleReader.ScanReport)] = []
         for source in currentSources {
             reports.append((source, await scanReport(source, known)))

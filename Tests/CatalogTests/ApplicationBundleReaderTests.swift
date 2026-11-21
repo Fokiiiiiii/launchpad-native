@@ -207,3 +207,29 @@ private func makeFixtureApp(
     let fresh = try #require(ApplicationBundleReader.record(for: bundleURL, sourceID: "s"))
     #expect(fresh.id == rescanned.id)
 }
+
+
+/// Rewriting a file inside a bundle does not move the bundle folder's own
+/// modification time, so a key made from that alone gave the same icon back after
+/// the app's icon had changed.
+@Test func theIconKeyChangesWhenOnlyTheInfoPlistIsRewritten() throws {
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDir) }
+
+    let bundleURL = try makeFixtureApp(named: "FixtureApp", bundleIdentifier: "com.example.fixture", in: tempDir)
+    let before = try #require(ApplicationBundleReader.record(for: bundleURL, sourceID: "s"))
+
+    let infoPlist = bundleURL.appendingPathComponent("Contents/Info.plist")
+    let bundleDate = try #require(
+        (try? bundleURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    )
+    try FileManager.default.setAttributes(
+        [.modificationDate: Date(timeIntervalSince1970: 1_700_000_000)],
+        ofItemAtPath: infoPlist.path
+    )
+    let after = try #require(ApplicationBundleReader.record(for: bundleURL, sourceID: "s"))
+
+    #expect(after.lastSeenModificationDate == bundleDate, "the bundle folder's own date should not have moved")
+    #expect(after.iconCacheKey != before.iconCacheKey)
+}

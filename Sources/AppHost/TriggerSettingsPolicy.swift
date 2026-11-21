@@ -48,6 +48,19 @@ public enum TriggerSettingsPolicy {
         return previousBackup.fingerCount != candidate.multitouchFingerCount
     }
 
+    /// Whether `candidate` differs from `previous` in nothing but the multitouch
+    /// sensitivity, which is what dragging the slider produces. That needs no
+    /// trigger to be stopped and registered again, and no restore point.
+    public static func isSensitivityOnlyChange(
+        from previous: TriggerSettings,
+        to candidate: TriggerSettings
+    ) -> Bool {
+        guard candidate.multitouchSensitivity != previous.multitouchSensitivity else { return false }
+        var probe = candidate
+        probe.multitouchSensitivity = previous.multitouchSensitivity
+        return normalized(probe) == normalized(previous)
+    }
+
     /// What to persist when rolling back to `previous` after a failure.
     ///
     /// The whole point is the failed case: never erase the only restore point

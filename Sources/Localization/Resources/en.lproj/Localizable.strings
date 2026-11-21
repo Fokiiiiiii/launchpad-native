@@ -134,6 +134,8 @@
 "onboarding.next" = "Next";
 "onboarding.getstarted" = "Get Started";
 "settings.general.launchatlogin" = "Launch at Login";
+"settings.general.launchatlogin.needsapproval" = "Waiting for your approval in System Settings, so it will not start at login yet.";
+"settings.general.launchatlogin.openitems" = "Open Login Items…";
 "settings.general.appearance" = "Appearance";
 "settings.general.showmenubaricon" = "Show Menu Bar Icon";
 "settings.apps.showmenubarapplications" = "Show Menu Bar Applications";

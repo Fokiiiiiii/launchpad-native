@@ -134,6 +134,8 @@
 "onboarding.next" = "次へ";
 "onboarding.getstarted" = "始める";
 "settings.general.launchatlogin" = "ログイン時に起動";
+"settings.general.launchatlogin.needsapproval" = "システム設定での承認待ちです。承認するまで、ログイン時には起動しません。";
+"settings.general.launchatlogin.openitems" = "ログイン項目を開く…";
 "settings.general.appearance" = "外観";
 "settings.general.showmenubaricon" = "メニューバーアイコンを表示";
 "settings.apps.showmenubarapplications" = "メニューバーアプリを表示";

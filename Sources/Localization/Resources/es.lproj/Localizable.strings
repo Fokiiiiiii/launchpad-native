@@ -134,6 +134,8 @@
 "onboarding.next" = "Siguiente";
 "onboarding.getstarted" = "Empezar";
 "settings.general.launchatlogin" = "Abrir al iniciar sesión";
+"settings.general.launchatlogin.needsapproval" = "Esperando tu aprobación en Ajustes del Sistema, por lo que aún no se abrirá al iniciar sesión.";
+"settings.general.launchatlogin.openitems" = "Abrir Ítems de inicio de sesión…";
 "settings.general.appearance" = "Aspecto";
 "settings.general.showmenubaricon" = "Mostrar icono en la barra de menús";
 "settings.apps.showmenubarapplications" = "Mostrar apps de la barra de menús";

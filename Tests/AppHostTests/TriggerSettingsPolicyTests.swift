@@ -21,6 +21,45 @@ private func backup(fingerCount: Int) -> GestureConflictBackup {
     GestureConflictBackup(fingerCount: fingerCount, values: [:])
 }
 
+// MARK: sensitivity
+
+/// Dragging the sensitivity slider used to stop and register every trigger again
+/// and save twice for each step. A change that is only the sensitivity is told
+/// apart so it can take effect on the running listener.
+@Test func aChangeOfOnlyTheSensitivityIsRecognised() {
+    var previous = settings(multitouch: true, backup: backup(fingerCount: 4))
+    previous.multitouchSensitivity = 0.4
+    var candidate = previous
+    candidate.multitouchSensitivity = 0.7
+
+    #expect(TriggerSettingsPolicy.isSensitivityOnlyChange(from: previous, to: candidate))
+}
+
+@Test func anythingBesideTheSensitivityIsNotASensitivityOnlyChange() {
+    var previous = settings(multitouch: true, backup: backup(fingerCount: 4))
+    previous.multitouchSensitivity = 0.4
+
+    var withFingers = previous
+    withFingers.multitouchSensitivity = 0.7
+    withFingers.multitouchFingerCount = 5
+    #expect(!TriggerSettingsPolicy.isSensitivityOnlyChange(from: previous, to: withFingers))
+
+    var withHotkey = previous
+    withHotkey.multitouchSensitivity = 0.7
+    withHotkey.f4Enabled.toggle()
+    #expect(!TriggerSettingsPolicy.isSensitivityOnlyChange(from: previous, to: withHotkey))
+
+    var withTheGestureOff = previous
+    withTheGestureOff.multitouchSensitivity = 0.7
+    withTheGestureOff.multitouchGestureEnabled = false
+    #expect(!TriggerSettingsPolicy.isSensitivityOnlyChange(from: previous, to: withTheGestureOff))
+}
+
+@Test func theSameSensitivityIsNotAChange() {
+    let previous = settings(multitouch: true)
+    #expect(!TriggerSettingsPolicy.isSensitivityOnlyChange(from: previous, to: previous))
+}
+
 // MARK: normalization
 
 /// The conflict policy is not an independent preference: the raw multitouch

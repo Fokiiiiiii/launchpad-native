@@ -16,6 +16,16 @@ private func waitUntil(_ condition: () -> Bool) async {
     }
 }
 
+/// A login item that is registered but waiting for approval does not start at
+/// login. It is shown on, with a notice, and does not flip off the next time the
+/// window is opened.
+@Test @MainActor func aLoginItemWaitingForApprovalIsShownOnWithANotice() {
+    #expect(SettingsViewModel.launchAtLoginState(for: .enabled) == (true, false))
+    #expect(SettingsViewModel.launchAtLoginState(for: .requiresApproval) == (true, true))
+    #expect(SettingsViewModel.launchAtLoginState(for: .notRegistered) == (false, false))
+    #expect(SettingsViewModel.launchAtLoginState(for: .notFound) == (false, false))
+}
+
 @Test @MainActor func layoutSpacingControlsUpdateTheGridImmediately() {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("launchpad-settings-layout-test-\(UUID().uuidString)", isDirectory: true)

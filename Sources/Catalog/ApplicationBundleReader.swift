@@ -166,6 +166,12 @@ enum ApplicationBundleReader {
         let modDate = (try? bundleURL.resourceValues(forKeys: [.contentModificationDateKey]))?
             .contentModificationDate ?? Date(timeIntervalSince1970: 0)
 
+        // The icon is drawn from files inside the bundle, and rewriting one of them
+        // does not move the bundle folder's own modification time, so the time of
+        // Info.plist is part of the icon's cache key too.
+        let infoModDate = (try? bundleURL.appendingPathComponent("Contents/Info.plist")
+            .resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? modDate
+
         let known = knownSignatures[signatureCacheKey(for: bundleURL)]
         let teamIdentifier = known?.modificationDate == modDate
             ? known?.teamIdentifier
@@ -200,7 +206,7 @@ enum ApplicationBundleReader {
             // The identifier alone is shared by every copy of an app, and so was
             // the picture — two copies with the same modification second drew
             // each other's icon. The path-derived part tells them apart.
-            iconCacheKey: "\(bundleIdentifier)-\(Int(modDate.timeIntervalSince1970))-\(id.value.prefix(12))",
+            iconCacheKey: "\(bundleIdentifier)-\(Int(modDate.timeIntervalSince1970))-\(Int(infoModDate.timeIntervalSince1970))-\(id.value.prefix(12))",
             canLaunch: canLaunch,
             canOpenNewInstance: canOpenNewInstance,
             lastSeenModificationDate: modDate

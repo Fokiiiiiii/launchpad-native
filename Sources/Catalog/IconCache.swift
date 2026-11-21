@@ -37,6 +37,8 @@ public final class IconCache: @unchecked Sendable {
     }
     private struct InFlight {
         let generation: UUID
+        /// The queued load for this generation, cancelled once no waiter is left.
+        let operation: Operation
         var waiters: [Waiter]
     }
     private let requestLock = NSLock()
@@ -45,6 +47,9 @@ public final class IconCache: @unchecked Sendable {
     private let maxInFlightKeys = 256
     private let maxWaitersPerKey = 32
     private let maxCancelledRequestIDs = 256
+    #if DEBUG
+    private var loadStarts = 0
+    #endif
 
     private let writeStateLock = NSLock()
     private var pendingWriteCount = 0
@@ -129,6 +134,13 @@ public final class IconCache: @unchecked Sendable {
 
 #if DEBUG
     func setIconLoadsSuspendedForTesting(_ suspended: Bool) { queue.isSuspended = suspended }
+    func queuedOperationCountForTesting() -> Int { queue.operationCount }
+    /// How many loads actually started, as opposed to being dropped from the queue.
+    func loadStartCountForTesting() -> Int {
+        requestLock.lock()
+        defer { requestLock.unlock() }
+        return loadStarts
+    }
     func inFlightCountForTesting() -> Int {
         requestLock.lock()
         defer { requestLock.unlock() }
@@ -167,21 +179,19 @@ public final class IconCache: @unchecked Sendable {
             continuation.resume(returning: Self.placeholder(size: size))
             return
         }
-        let generation: UUID?
+        var newOperation: Operation?
         if var work = inFlight[key] {
             work.waiters.append(Waiter(id: requestID, continuation: continuation))
             inFlight[key] = work
-            generation = nil
         } else {
             let id = UUID()
-            inFlight[key] = InFlight(generation: id, waiters: [Waiter(id: requestID, continuation: continuation)])
-            generation = id
+            let operation = makeLoadOperation(record: record, size: size, key: key, generation: id)
+            inFlight[key] = InFlight(generation: id, operation: operation, waiters: [Waiter(id: requestID, continuation: continuation)])
+            newOperation = operation
         }
         requestLock.unlock()
-        if let generation {
-            queue.addOperation { [self] in
-                load(record: record, size: size, key: key, generation: generation)
-            }
+        if let newOperation {
+            queue.addOperation(newOperation)
         }
     }
 
@@ -194,13 +204,34 @@ public final class IconCache: @unchecked Sendable {
             return
         }
         let waiter = work.waiters.remove(at: index)
-        if work.waiters.isEmpty { inFlight.removeValue(forKey: key) }
-        else { inFlight[key] = work }
-        requestLock.unlock()
+        if work.waiters.isEmpty {
+            inFlight.removeValue(forKey: key)
+            requestLock.unlock()
+            // Drop the queued load too, so an unstarted icon no longer holds a queue slot.
+            work.operation.cancel()
+        } else {
+            inFlight[key] = work
+            requestLock.unlock()
+        }
         waiter.continuation.resume(returning: Self.placeholder(size: size))
     }
 
+    private func makeLoadOperation(record: ApplicationRecord, size: CGFloat, key: String, generation: UUID) -> Operation {
+        let operation = BlockOperation()
+        // Cancelled before it starts, a block operation never runs its block, so a
+        // load nobody waits for does not reach the disk or NSWorkspace.
+        operation.addExecutionBlock { [self] in
+            load(record: record, size: size, key: key, generation: generation)
+        }
+        return operation
+    }
+
     private func load(record: ApplicationRecord, size: CGFloat, key: String, generation: UUID) {
+        #if DEBUG
+        requestLock.lock()
+        loadStarts += 1
+        requestLock.unlock()
+        #endif
         guard hasWaiters(for: key, generation: generation) else { return }
         if let cached = readMemory(key) {
             finish(key: key, generation: generation, image: cached)

@@ -225,6 +225,18 @@ public final class SettingsViewModel: ObservableObject {
     /// State lives in `SMAppService.mainApp.status`, not `LayoutDocument` —
     /// same "OS is the source of truth, this property just reflects it"
     /// pattern as `f4Active` below, not a persisted preference of our own.
+    /// Registered, but macOS is waiting for the user to approve it in System
+    /// Settings. Until they do it will not start at login, which the toggle alone
+    /// cannot say.
+    @Published public private(set) var launchAtLoginNeedsApproval = false
+
+    /// How the login item's status reads in the toggle: waiting for approval is
+    /// shown on, with the notice, rather than off, so it does not flip back the
+    /// next time the window is opened.
+    static func launchAtLoginState(for status: SMAppService.Status) -> (isOn: Bool, needsApproval: Bool) {
+        (status == .enabled || status == .requiresApproval, status == .requiresApproval)
+    }
+
     @Published public var launchAtLoginEnabled: Bool {
         didSet {
             guard !isRollingBackLaunchAtLogin, launchAtLoginEnabled != oldValue else { return }
@@ -235,6 +247,7 @@ public final class SettingsViewModel: ObservableObject {
                 } else {
                     try SMAppService.mainApp.unregister()
                 }
+                launchAtLoginNeedsApproval = Self.launchAtLoginState(for: SMAppService.mainApp.status).needsApproval
             } catch {
                 DiagnosticsLog.settings.error("SMAppService \(self.launchAtLoginEnabled ? "register" : "unregister", privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                 // ServiceManagement is the source of truth. If the OS rejects
@@ -460,7 +473,9 @@ public final class SettingsViewModel: ObservableObject {
         screenTarget = model.screenTarget
         appIconStyle = model.appIconStyle
         menuIconVisibility = model.menuIconVisibility
-        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+        let loginItem = Self.launchAtLoginState(for: SMAppService.mainApp.status)
+        launchAtLoginEnabled = loginItem.isOn
+        launchAtLoginNeedsApproval = loginItem.needsApproval
         showsMenuBarIcon = model.showsMenuBarIcon
         showMenuBarApplications = model.showMenuBarApplications
         showsHiddenAppsInSearch = model.showsHiddenAppsInSearch
@@ -777,7 +792,9 @@ public final class SettingsViewModel: ObservableObject {
         screenTarget = model.screenTarget
         appIconStyle = model.appIconStyle
         menuIconVisibility = model.menuIconVisibility
-        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+        let loginItem = Self.launchAtLoginState(for: SMAppService.mainApp.status)
+        launchAtLoginEnabled = loginItem.isOn
+        launchAtLoginNeedsApproval = loginItem.needsApproval
         showsMenuBarIcon = model.showsMenuBarIcon
         showMenuBarApplications = model.showMenuBarApplications
         showsHiddenAppsInSearch = model.showsHiddenAppsInSearch

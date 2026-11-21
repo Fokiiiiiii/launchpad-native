@@ -204,6 +204,32 @@ private func bitmapIcon() throws -> NSImage {
     #expect(!image.representations.isEmpty)
     #expect(cache.cachedIconIfAvailable(for: app) === image)
 }
+
+@Test func cancelledQueuedLoadsAreRemovedFromTheOperationQueue() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let cache = IconCache(cacheDirectory: dir)
+    cache.setIconLoadsSuspendedForTesting(true)
+    defer { cache.setIconLoadsSuspendedForTesting(false) }
+    let records = (0..<64).map { record("Queued\($0)", id: "queued.\($0)") }
+    let tasks = records.map { item in Task { await cache.icon(for: item) } }
+    for _ in 0..<500 {
+        if cache.queuedOperationCountForTesting() == 64 { break }
+        try await Task.sleep(for: .milliseconds(2))
+    }
+    #expect(cache.queuedOperationCountForTesting() == 64)
+    for task in tasks { task.cancel() }
+    for task in tasks { _ = await task.value }
+    #expect(cache.inFlightCountForTesting() == 0)
+    cache.setIconLoadsSuspendedForTesting(false)
+    for _ in 0..<500 {
+        if cache.queuedOperationCountForTesting() == 0 { break }
+        try await Task.sleep(for: .milliseconds(2))
+    }
+    #expect(cache.queuedOperationCountForTesting() == 0, "cancelled loads stayed queued")
+    // Dropped from the queue, not run and returned early: nothing started.
+    #expect(cache.loadStartCountForTesting() == 0, "a load nobody was waiting for still started")
+}
 #endif
 
 @Test func iconMemoryCacheEnforcesCostAndRecentUse() {

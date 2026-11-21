@@ -369,6 +369,17 @@ public final class TriggerCoordinator {
     /// the common case, and the launcher check covers a trackpad paired while
     /// the machine was awake, where the user's first move is to open the
     /// launcher some other way and wonder why the gesture stopped working.
+    /// Applies a new sensitivity to the running listener without touching anything
+    /// else. A slider drag used to go through `apply`, which stops and registers
+    /// every trigger again for each step.
+    public func updateSensitivity(_ sensitivity: Double) {
+        multitouch.updateSensitivity(Float(sensitivity))
+    }
+
+    /// What the last `apply` found, for a caller that changed something it did not
+    /// need to apply again.
+    public var currentActivationReport: TriggerActivationReport { lastActivationReport }
+
     public func refreshMultitouchDevices() {
         multitouch.restartIfDeviceSetChanged()
     }

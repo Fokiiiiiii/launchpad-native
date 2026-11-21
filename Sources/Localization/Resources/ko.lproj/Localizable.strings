@@ -134,6 +134,8 @@
 "onboarding.next" = "다음";
 "onboarding.getstarted" = "시작하기";
 "settings.general.launchatlogin" = "로그인 시 실행";
+"settings.general.launchatlogin.needsapproval" = "시스템 설정에서 승인을 기다리는 중이라 아직 로그인 시 실행되지 않습니다.";
+"settings.general.launchatlogin.openitems" = "로그인 항목 열기…";
 "settings.general.appearance" = "외관";
 "settings.general.showmenubaricon" = "메뉴 막대 아이콘 표시";
 "settings.apps.showmenubarapplications" = "메뉴 막대 앱 표시";

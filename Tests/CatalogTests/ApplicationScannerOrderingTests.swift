@@ -336,6 +336,65 @@ private func ids(_ scanner: ApplicationScanner) async -> Set<StableAppID> {
     #expect(Set(ApplicationSource.standardSources.map(\.id)).count == ApplicationSource.standardSources.count)
 }
 
+/// Replacing the sources scans first and used to start watching only afterwards,
+/// so an app that appeared in a source the scan had already read was in neither.
+@Test func anAppAddedWhileTheSourcesAreBeingReplacedIsStillPickedUp() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let old = root.appendingPathComponent("Old", isDirectory: true)
+    let fresh = root.appendingPathComponent("Fresh", isDirectory: true)
+    try FileManager.default.createDirectory(at: old, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: fresh, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let gate = Gate()
+    let scanner = ApplicationScanner(sources: [ApplicationSource(id: "old", rootURL: old, recursive: true, priority: 0)], scanReport: { source, known in
+        let read = await ApplicationBundleReader.scanReport(source: source, knownSignatures: known)
+        // Held after the source has been read, so what happens next is not in it.
+        if source.id == "fresh", await gate.nextCall() == 1 { await gate.wait() }
+        return read
+    })
+    _ = await scanner.performFullScan()
+    await scanner.startWatching()
+    try await Task.sleep(for: .seconds(1))
+    defer { Task { await scanner.stopWatching() } }
+
+    let replacing = Task {
+        await scanner.replaceSources([ApplicationSource(id: "fresh", rootURL: fresh, recursive: true, priority: 0)])
+    }
+    try await untilWaiting(gate)
+    let contents = fresh.appendingPathComponent("Added.app/Contents", isDirectory: true)
+    try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+    let plist: [String: Any] = ["CFBundleIdentifier": "example.added", "CFBundleName": "Added", "CFBundlePackageType": "APPL"]
+    try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        .write(to: contents.appendingPathComponent("Info.plist"))
+    try await Task.sleep(for: .seconds(1))
+    await gate.open()
+    await replacing.value
+
+    for _ in 0..<80 {
+        if await scanner.currentSnapshot().records.contains(where: { $0.bundleIdentifier == "example.added" }) { break }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(await scanner.currentSnapshot().records.contains { $0.bundleIdentifier == "example.added" })
+}
+
+/// A bundle's own modification time does not move when a file inside it is
+/// rewritten, so a signature kept because "the date has not changed" went stale.
+/// A rescan prompted by a change inside a bundle does not start from its signature.
+@Test func aBundleThatChangedInsideIsLeftOutOfTheKnownSignatures() async {
+    let changed = makeRecord("Changed", in: "apps")
+    let untouched = makeRecord("Untouched", in: "apps")
+    let scanner = ApplicationScanner(sources: [source("apps")], scanReport: { _, _ in report([]) })
+    await scanner.restoreCachedRecords([changed, untouched])
+
+    let known = await scanner.knownSignatures(
+        excluding: [changed.bundleURL.appendingPathComponent("Contents/Info.plist").path]
+    )
+
+    #expect(known[ApplicationBundleReader.signatureCacheKey(for: changed.bundleURL)] == nil)
+    #expect(known[ApplicationBundleReader.signatureCacheKey(for: untouched.bundleURL)] != nil)
+}
+
 @Test func aNewAppIsDetectedWithoutRescanningItsSource() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let apps = root.appendingPathComponent("Apps", isDirectory: true)

@@ -134,6 +134,8 @@
 "onboarding.next" = "Suivant";
 "onboarding.getstarted" = "Commencer";
 "settings.general.launchatlogin" = "Ouvrir à la session";
+"settings.general.launchatlogin.needsapproval" = "En attente de ton approbation dans Réglages Système : l’app ne se lancera pas encore à l’ouverture de session.";
+"settings.general.launchatlogin.openitems" = "Ouvrir les éléments de connexion…";
 "settings.general.appearance" = "Apparence";
 "settings.general.showmenubaricon" = "Afficher l'icône dans la barre des menus";
 "settings.apps.showmenubarapplications" = "Afficher les apps de la barre des menus";

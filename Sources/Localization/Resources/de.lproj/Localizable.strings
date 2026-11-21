@@ -134,6 +134,8 @@
 "onboarding.next" = "Weiter";
 "onboarding.getstarted" = "Los geht's";
 "settings.general.launchatlogin" = "Bei der Anmeldung öffnen";
+"settings.general.launchatlogin.needsapproval" = "Wartet auf deine Bestätigung in den Systemeinstellungen. Bis dahin startet die App nicht bei der Anmeldung.";
+"settings.general.launchatlogin.openitems" = "Anmeldeobjekte öffnen …";
 "settings.general.appearance" = "Erscheinungsbild";
 "settings.general.showmenubaricon" = "Symbol in der Menüleiste zeigen";
 "settings.apps.showmenubarapplications" = "Menüleisten-Apps anzeigen";
