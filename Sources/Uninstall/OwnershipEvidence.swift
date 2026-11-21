@@ -48,22 +48,19 @@ public struct OwnershipEvidence: Sendable {
     public let userLaunchAgents: [URL]
     public let systemLaunchItems: [URL]
     public let receiptPackageIDs: [String]
-    public let systemExtensionIdentifiers: [String]
 
     public init(
         bundleURL: URL,
         relatedPaths: [RelatedPath],
         userLaunchAgents: [URL],
         systemLaunchItems: [URL],
-        receiptPackageIDs: [String],
-        systemExtensionIdentifiers: [String]
+        receiptPackageIDs: [String]
     ) {
         self.bundleURL = bundleURL
         self.relatedPaths = relatedPaths
         self.userLaunchAgents = userLaunchAgents
         self.systemLaunchItems = systemLaunchItems
         self.receiptPackageIDs = receiptPackageIDs
-        self.systemExtensionIdentifiers = systemExtensionIdentifiers
     }
 }
 
@@ -109,8 +106,7 @@ public enum OwnershipEvidenceCollector {
                 relatedPaths: [],
                 userLaunchAgents: [],
                 systemLaunchItems: [],
-                receiptPackageIDs: [],
-                systemExtensionIdentifiers: []
+                receiptPackageIDs: []
             )
         }
 
@@ -154,15 +150,13 @@ public enum OwnershipEvidenceCollector {
             + launchItems(in: URL(fileURLWithPath: "/Library/LaunchDaemons"), matchingBundleID: bundleID, verifyingLabel: false)
 
         let receiptPackageIDs = receipts(matchingBundleID: bundleID)
-        let systemExtensionIdentifiers = extensionIdentifiers(in: record.bundleURL)
 
         return OwnershipEvidence(
             bundleURL: record.bundleURL,
             relatedPaths: relatedPaths,
             userLaunchAgents: userLaunchAgents,
             systemLaunchItems: systemLaunchItems,
-            receiptPackageIDs: receiptPackageIDs,
-            systemExtensionIdentifiers: systemExtensionIdentifiers
+            receiptPackageIDs: receiptPackageIDs
         )
     }
 
@@ -260,21 +254,6 @@ public enum OwnershipEvidenceCollector {
             return []
         }
         return selection.entries
-    }
-
-    /// Extensions are declared in a bundle's own Info.plist under the
-    /// `NSExtension` key; this only reads the plist already on disk — it
-    /// does not query `systemextensionsctl` or check activation state
-    /// (that belongs to the execution step, not evidence collection).
-    private static func extensionIdentifiers(in bundleURL: URL) -> [String] {
-        guard let bundle = Bundle(url: bundleURL) else { return [] }
-        var identifiers: [String] = []
-        if let identifier = bundle.bundleIdentifier {
-            if bundle.infoDictionary?["NSExtension"] != nil {
-                identifiers.append(identifier)
-            }
-        }
-        return identifiers
     }
 
 }

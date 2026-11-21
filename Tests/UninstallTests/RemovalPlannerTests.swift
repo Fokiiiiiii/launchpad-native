@@ -41,8 +41,7 @@ struct RemovalPlannerTests {
             relatedPaths: [RelatedPath(url: URL(fileURLWithPath: "/tmp/whatever"), category: .applicationSupport, exists: true)],
             userLaunchAgents: [],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
         let plan = RemovalPlanner.plan(for: record, evidence: evidence)
         #expect(plan.count == 1)
@@ -59,8 +58,7 @@ struct RemovalPlannerTests {
             relatedPaths: [RelatedPath(url: path, category: .applicationSupport, exists: true)],
             userLaunchAgents: [],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
         let plan = RemovalPlanner.plan(for: record, evidence: evidence)
         #expect(plan.count == 1)
@@ -85,8 +83,7 @@ struct RemovalPlannerTests {
             relatedPaths: [RelatedPath(url: ownedPath, category: .applicationSupport, exists: true)],
             userLaunchAgents: [],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
         let plan = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: [sibling])
         #expect(plan.count == 1)
@@ -109,8 +106,7 @@ struct RemovalPlannerTests {
             relatedPaths: [RelatedPath(url: ownedPath, category: .applicationSupport, exists: true)],
             userLaunchAgents: [],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
         let plan = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: [sibling])
         #expect(plan.count == 1)
@@ -137,8 +133,7 @@ struct RemovalPlannerTests {
             relatedPaths: [RelatedPath(url: root, category: .applicationSupport, exists: true)],
             userLaunchAgents: [],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
         for name in ["com.example.existing", "com.example.link", "com.example.broken", "com.example.loop", "com.example.missing", "日本語", "../outside", "com.example.%"] {
             let sibling = makeRecord(bundleIdentifier: name, teamIdentifier: "TEAM")
@@ -166,7 +161,7 @@ struct RemovalPlannerTests {
             try FileManager.default.createDirectory(at: path, withIntermediateDirectories: false)
             return RelatedPath(url: path, category: .applicationSupport, exists: true)
         }
-        let evidence = OwnershipEvidence(bundleURL: record.bundleURL, relatedPaths: related, userLaunchAgents: [], systemLaunchItems: [], receiptPackageIDs: [], systemExtensionIdentifiers: [])
+        let evidence = OwnershipEvidence(bundleURL: record.bundleURL, relatedPaths: related, userLaunchAgents: [], systemLaunchItems: [], receiptPackageIDs: [])
         let useRust = ProcessInfo.processInfo.environment["LAUNCHPAD_MEMORY_MODE"] == "ownership-rust"
         func peak() -> Int {
             var usage = rusage()
@@ -200,8 +195,7 @@ struct RemovalPlannerTests {
             relatedPaths: [],
             userLaunchAgents: [agentURL],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
         let plan = RemovalPlanner.plan(for: record, evidence: evidence)
         #expect(plan.count == 1)
@@ -218,8 +212,7 @@ struct RemovalPlannerTests {
             relatedPaths: [],
             userLaunchAgents: [],
             systemLaunchItems: [daemonURL],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
         let plan = RemovalPlanner.plan(for: record, evidence: evidence)
         #expect(plan.count == 1)
@@ -235,8 +228,7 @@ struct RemovalPlannerTests {
             relatedPaths: [],
             userLaunchAgents: [],
             systemLaunchItems: [],
-            receiptPackageIDs: ["com.example.solo.pkg"],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: ["com.example.solo.pkg"]
         )
         let plan = RemovalPlanner.plan(for: record, evidence: evidence)
         #expect(plan.count == 1)
@@ -257,8 +249,7 @@ struct RemovalPlannerTests {
             relatedPaths: [RelatedPath(url: groupPath, category: .groupContainers, exists: true)],
             userLaunchAgents: [],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
         let plan = RemovalPlanner.plan(for: record, evidence: evidence)
         #expect(plan.count == 1)
@@ -300,8 +291,7 @@ struct RemovalPlannerTests {
             relatedPaths: [RelatedPath(url: URL(fileURLWithPath: "/tmp/com.example.twice"), category: .applicationSupport, exists: true)],
             userLaunchAgents: [URL(fileURLWithPath: "/tmp/com.example.twice.helper.plist")],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
 
         let plan = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: [other])
@@ -318,8 +308,7 @@ struct RemovalPlannerTests {
             relatedPaths: [RelatedPath(url: URL(fileURLWithPath: "/tmp/com.example.once"), category: .applicationSupport, exists: true)],
             userLaunchAgents: [],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
 
         let plan = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: [record])
@@ -344,8 +333,7 @@ struct RemovalPlannerTests {
                 URL(fileURLWithPath: "/tmp/com.vendor.editor.tools.plist"),
             ],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
 
         let plan = RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: [child])
@@ -365,8 +353,7 @@ struct RemovalPlannerTests {
             relatedPaths: [],
             userLaunchAgents: [URL(fileURLWithPath: "/tmp/com.vendor.editor.tools.plist")],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
 
         #expect(RemovalPlanner.plan(for: record, evidence: evidence, siblingRecords: []).map(\.classification) == [.owned])
@@ -380,8 +367,7 @@ struct RemovalPlannerTests {
             relatedPaths: [RelatedPath(url: URL(fileURLWithPath: "/tmp/missing"), category: .preferences, exists: false)],
             userLaunchAgents: [],
             systemLaunchItems: [],
-            receiptPackageIDs: [],
-            systemExtensionIdentifiers: []
+            receiptPackageIDs: []
         )
         let plan = RemovalPlanner.plan(for: record, evidence: evidence)
         #expect(plan.isEmpty)
