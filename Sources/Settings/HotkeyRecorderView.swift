@@ -49,14 +49,45 @@ final class HotkeyRecorderNSView: NSView {
         isRecording = true
     }
 
+    enum KeyAction: Equatable {
+        case capture
+        case cancel
+        case startRecording
+        case passThrough
+    }
+
+    /// What a key press means to the recorder. Escape while recording cancels it,
+    /// where it used to be recorded as the shortcut. Return and Space start a
+    /// recording, so the control can be used without the mouse.
+    static func keyAction(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, isRecording: Bool) -> KeyAction {
+        let plain = modifiers.intersection([.command, .option, .control, .shift]).isEmpty
+        if isRecording { return keyCode == 53 && plain ? .cancel : .capture }
+        return plain && [36, 49, 76].contains(keyCode) ? .startRecording : .passThrough
+    }
+
     override func keyDown(with event: NSEvent) {
-        guard isRecording else {
+        switch Self.keyAction(keyCode: event.keyCode, modifiers: event.modifierFlags, isRecording: isRecording) {
+        case .capture:
+            isRecording = false
+            let carbonModifiers = Self.carbonModifiers(from: event.modifierFlags)
+            onCapture?(event.keyCode, carbonModifiers)
+        case .cancel:
+            isRecording = false
+        case .startRecording:
+            isRecording = true
+        case .passThrough:
             super.keyDown(with: event)
-            return
         }
-        isRecording = false
-        let carbonModifiers = Self.carbonModifiers(from: event.modifierFlags)
-        onCapture?(event.keyCode, carbonModifiers)
+    }
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityLabel() -> String? { L10n.globalHotkeyToggleLabel }
+    override func accessibilityValue() -> Any? { isRecording ? L10n.hotkeyPressCombo : displayText }
+    override func accessibilityPerformPress() -> Bool {
+        window?.makeFirstResponder(self)
+        isRecording = true
+        return true
     }
 
     override func resignFirstResponder() -> Bool {

@@ -104,6 +104,13 @@ public enum AppIconStyleApplier {
     }
 
     private static let appliedBundleStyleKey = "AppliedBundleIconStyle"
+
+    /// What was applied is remembered per bundle: copies of the app share one
+    /// preferences domain, and a single value for all of them skipped the update
+    /// on a copy whose icon was written for another style.
+    static func markerKey(for bundleURL: URL) -> String {
+        "\(appliedBundleStyleKey).\(bundleURL.standardizedFileURL.path)"
+    }
     /// Bumped when the picture drawn for the bundle changes, so an icon written
     /// by an older version is written again.
     private static let bundleIconRendering = 2
@@ -120,8 +127,9 @@ public enum AppIconStyleApplier {
         guard FileManager.default.fileExists(atPath: variants.path) else { return }
         let bundlePath = bundleURL.path
         let marker = "\(style.rawValue)#\(bundleIconRendering)"
+        let markerKey = Self.markerKey(for: bundleURL)
         let hasCustomIcon = FileManager.default.fileExists(atPath: bundleURL.appendingPathComponent("Icon\r").path)
-        guard !hasCustomIcon || defaults.string(forKey: appliedBundleStyleKey) != marker else { return }
+        guard !hasCustomIcon || defaults.string(forKey: markerKey) != marker else { return }
         guard let picture = NSImage(contentsOf: variants.appendingPathComponent("\(style.rawValue).png")),
               let icon = paddedForIconGrid(picture),
               NSWorkspace.shared.setIcon(icon, forFile: bundlePath, options: [])
@@ -129,7 +137,7 @@ public enum AppIconStyleApplier {
             DiagnosticsLog.settings.error("Could not set the \(style.rawValue, privacy: .public) icon on the app bundle")
             return
         }
-        defaults.set(marker, forKey: appliedBundleStyleKey)
+        defaults.set(marker, forKey: markerKey)
         NSWorkspace.shared.noteFileSystemChanged(bundlePath)
     }
 }

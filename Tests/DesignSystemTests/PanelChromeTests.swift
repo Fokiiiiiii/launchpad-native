@@ -41,6 +41,30 @@ private func keyEvent(characters: String, modifiers: NSEvent.ModifierFlags) -> N
     )!
 }
 
+@MainActor
+private func plainWindow() -> NSWindow {
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 80, height: 60), styleMask: [.borderless], backing: .buffered, defer: true)
+    window.isReleasedWhenClosed = false
+    return window
+}
+
+/// A click outside the panel dismisses it, except while a modal panel is up: that
+/// panel is its own window, so it counted as outside, and the first click in it
+/// closed Settings behind it and never reached it.
+@Test @MainActor func aClickOutsideDismissesButNotWhileAModalPanelIsUp() {
+    let panel = plainWindow()
+    let elsewhere = plainWindow()
+    let child = plainWindow()
+    panel.addChildWindow(child, ordered: .above)
+    defer { panel.removeChildWindow(child) }
+
+    #expect(OutsideClickDismissMonitor.shouldDismiss(eventWindow: elsewhere, panel: panel, modalWindow: nil))
+    #expect(!OutsideClickDismissMonitor.shouldDismiss(eventWindow: elsewhere, panel: panel, modalWindow: elsewhere))
+    #expect(!OutsideClickDismissMonitor.shouldDismiss(eventWindow: panel, panel: panel, modalWindow: nil))
+    #expect(!OutsideClickDismissMonitor.shouldDismiss(eventWindow: child, panel: panel, modalWindow: nil))
+    #expect(!OutsideClickDismissMonitor.shouldDismiss(eventWindow: nil, panel: panel, modalWindow: nil))
+}
+
 @Test @MainActor func escapeClosesThePanel() {
     let (window, cancels) = makePanel()
     defer { window.orderOut(nil) }

@@ -337,6 +337,10 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         gridViewController.setGridContentHidden(false)
     }
 
+    func closeOpenFolder() {
+        gridViewController.closeFolderIfOpen()
+    }
+
     func focusSearch() {
         view.window?.makeFirstResponder(searchField)
     }

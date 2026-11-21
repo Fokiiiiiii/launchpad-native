@@ -116,6 +116,10 @@ public final class UninstallPanelWindowController: NSObject, NSWindowDelegate {
         // already use).
         window.isOpaque = false
         window.backgroundColor = .clear
+        // Dark like Settings: this panel's text and glass are made for a dark card,
+        // and in the light appearance the labels read as dark on it, or white on a
+        // light glass.
+        window.appearance = NSAppearance(named: .darkAqua)
         window.hasShadow = false
         window.setContentSize(NSSize(width: 586, height: 500))
         window.isReleasedWhenClosed = false

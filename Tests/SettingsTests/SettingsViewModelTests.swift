@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Grid
 import Persistence
@@ -24,6 +25,19 @@ private func waitUntil(_ condition: () -> Bool) async {
     #expect(SettingsViewModel.launchAtLoginState(for: .requiresApproval) == (true, true))
     #expect(SettingsViewModel.launchAtLoginState(for: .notRegistered) == (false, false))
     #expect(SettingsViewModel.launchAtLoginState(for: .notFound) == (false, false))
+}
+
+/// Escape while recording a shortcut cancels it. It used to be recorded as the
+/// shortcut itself. Return and Space start a recording without the mouse.
+@Test @MainActor func theRecorderTreatsEscapeAsCancelAndReturnOrSpaceAsStart() {
+    let plain = NSEvent.ModifierFlags()
+    #expect(HotkeyRecorderNSView.keyAction(keyCode: 53, modifiers: plain, isRecording: true) == .cancel)
+    #expect(HotkeyRecorderNSView.keyAction(keyCode: 53, modifiers: .command, isRecording: true) == .capture)
+    #expect(HotkeyRecorderNSView.keyAction(keyCode: 49, modifiers: .option, isRecording: true) == .capture)
+    #expect(HotkeyRecorderNSView.keyAction(keyCode: 49, modifiers: plain, isRecording: false) == .startRecording)
+    #expect(HotkeyRecorderNSView.keyAction(keyCode: 36, modifiers: plain, isRecording: false) == .startRecording)
+    #expect(HotkeyRecorderNSView.keyAction(keyCode: 0, modifiers: plain, isRecording: false) == .passThrough)
+    #expect(HotkeyRecorderNSView.keyAction(keyCode: 49, modifiers: .command, isRecording: false) == .passThrough)
 }
 
 @Test @MainActor func layoutSpacingControlsUpdateTheGridImmediately() {

@@ -67,7 +67,7 @@ public final class OutsideClickDismissMonitor {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self, let panelWindow = self.panelWindow, panelWindow.isVisible else { return event }
-            guard let eventWindow = event.window, !self.isInside(eventWindow, of: panelWindow) else { return event }
+            guard Self.shouldDismiss(eventWindow: event.window, panel: panelWindow, modalWindow: NSApp.modalWindow) else { return event }
             self.onDismiss()
             return nil // consume — must never reach the launcher's background click catcher
         }
@@ -78,10 +78,20 @@ public final class OutsideClickDismissMonitor {
         monitor = nil
     }
 
+    /// Whether a click that landed in `eventWindow` dismisses `panel`.
+    ///
+    /// Never while a modal session is running: an open or save panel run with
+    /// `runModal` is its own window, neither a sheet nor a child of this one, and
+    /// its first click used to close the panel behind it and be swallowed.
+    static func shouldDismiss(eventWindow: NSWindow?, panel: NSWindow, modalWindow: NSWindow?) -> Bool {
+        guard modalWindow == nil, let eventWindow else { return false }
+        return !isInside(eventWindow, of: panel)
+    }
+
     /// A panel's own sheets — an `NSAlert` or `NSOpenPanel` it presented —
     /// count as inside, so interacting with one never dismisses the panel
     /// underneath mid-interaction.
-    private func isInside(_ window: NSWindow, of panelWindow: NSWindow) -> Bool {
+    private static func isInside(_ window: NSWindow, of panelWindow: NSWindow) -> Bool {
         if window === panelWindow { return true }
         if window.sheetParent === panelWindow { return true }
         var parent = window.parent

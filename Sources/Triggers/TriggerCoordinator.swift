@@ -384,6 +384,12 @@ public final class TriggerCoordinator {
         multitouch.restartIfDeviceSetChanged()
     }
 
+    /// After a sleep the listener is attached again unconditionally: the system may
+    /// have recreated the devices under the same identifiers.
+    func reattachMultitouchAfterWake() {
+        multitouch.reattach()
+    }
+
     private func observeWake() {
         guard wakeObserver == nil else { return }
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -392,7 +398,7 @@ public final class TriggerCoordinator {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.refreshMultitouchDevices()
+                self?.reattachMultitouchAfterWake()
             }
         }
     }

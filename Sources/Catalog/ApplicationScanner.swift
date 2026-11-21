@@ -262,7 +262,9 @@ public actor ApplicationScanner {
     public func updates() -> AsyncStream<Snapshot> {
         let id = UUID()
         let current = snapshot
-        return AsyncStream { continuation in
+        // Each snapshot is the whole catalog, so a subscriber that has fallen behind
+        // needs only the latest; older ones queued for it were held for nothing.
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             continuation.yield(current)
             continuations[id] = continuation
             continuation.onTermination = { [weak self] _ in

@@ -95,6 +95,10 @@ struct GestureDeviceRouter {
 @MainActor
 public final class MultitouchGestureTrigger {
     private var deviceHandles: [UnsafeMutableRawPointer] = []
+    /// What `start()` attached to, by `MTDeviceGetDeviceID`. The pointers in the
+    /// framework's list are handed out again differently on every call, so they
+    /// cannot tell one trackpad from another; the identifiers stay the same.
+    private var attachedDeviceIDs: Set<UInt64> = []
     /// Set by `start()`, cleared by `stop()`. A listener that is wanted but holds
     /// no devices — it started with none, or a re-attach failed — still has to
     /// try again when one appears; keying that on the handles alone meant a
@@ -262,6 +266,7 @@ public final class MultitouchGestureTrigger {
             return MultitouchActivationReport(rawListenerActive: false, eventArbitrationActive: false)
         }
         deviceHandles = startedDevices
+        attachedDeviceIDs = Self.deviceIdentifiers(of: startedDevices, framework: handle)
         isActive = !deviceHandles.isEmpty
         isEventArbitrationActive = gestureEventTap.start(fingerCount: selectedFingerCount)
         if !isEventArbitrationActive {
@@ -287,19 +292,29 @@ public final class MultitouchGestureTrigger {
     /// the trigger as on. Calling `start()` again does not help by itself: it
     /// returns early while any handles are still held.
     ///
-    /// Counting is the whole test. Comparing the handles themselves would be
-    /// stricter, but the pointers come from the private framework's own array
-    /// and a swap that keeps the count identical is not something this can
-    /// distinguish; a device appearing or disappearing always changes it.
+    /// The test is the set of device identifiers, not their number: one trackpad
+    /// swapped for another leaves the count as it was. The framework's pointers
+    /// are no use for this, as they are handed out again differently each time.
     @discardableResult
     public func restartIfDeviceSetChanged() -> Bool {
         // Skip the device enumeration (and its dlopen) while the listener is not wanted.
         guard isWanted else { return false }
-        guard let count = currentDeviceCount(),
-              Self.shouldReattach(isWanted: isWanted, attached: deviceHandles.count, present: count) else { return false }
+        guard let present = currentDeviceIdentifiers(),
+              Self.shouldReattach(isWanted: isWanted, attached: attachedDeviceIDs, present: present) else { return false }
         DiagnosticsLog.triggers.info(
-            "Multitouch devices changed (\(self.deviceHandles.count, privacy: .public) -> \(count, privacy: .public)); re-attaching the listener"
+            "Multitouch devices changed (\(self.attachedDeviceIDs.count, privacy: .public) -> \(present.count, privacy: .public)); re-attaching the listener"
         )
+        stop()
+        start()
+        return true
+    }
+
+    /// Attaches again whatever the devices look like. After a sleep the system
+    /// may have recreated the device objects under the same identifiers, which
+    /// no comparison can see, and a listener left on the old ones hears nothing.
+    @discardableResult
+    public func reattach() -> Bool {
+        guard isWanted else { return false }
         stop()
         start()
         return true
@@ -310,18 +325,37 @@ public final class MultitouchGestureTrigger {
     /// A listener that is wanted attaches when it holds nothing and there is
     /// something to hold, and again whenever the count moves. One that is not
     /// wanted never does.
-    nonisolated static func shouldReattach(isWanted: Bool, attached: Int, present: Int) -> Bool {
+    nonisolated static func shouldReattach(isWanted: Bool, attached: Set<UInt64>, present: Set<UInt64>) -> Bool {
         guard isWanted else { return false }
-        return attached == 0 ? present > 0 : present != attached
+        return attached.isEmpty ? !present.isEmpty : present != attached
     }
 
-    private func currentDeviceCount() -> Int? {
+    /// Identifiers of the given devices from `MTDeviceGetDeviceID`. Without that
+    /// symbol, or for a device it gives none for, the position stands in, which
+    /// is the same as comparing counts.
+    private static func deviceIdentifiers(of devices: [UnsafeMutableRawPointer], framework handle: UnsafeMutableRawPointer) -> Set<UInt64> {
+        typealias MTDeviceGetDeviceIDFn = @convention(c) (UnsafeMutableRawPointer, UnsafeMutablePointer<UInt64>) -> Int32
+        guard let symbol = dlsym(handle, "MTDeviceGetDeviceID") else {
+            return Set(devices.indices.map { UInt64($0) })
+        }
+        let deviceID = unsafeBitCast(symbol, to: MTDeviceGetDeviceIDFn.self)
+        return Set(devices.enumerated().map { index, device in
+            var identifier: UInt64 = 0
+            _ = deviceID(device, &identifier)
+            return identifier != 0 ? identifier : UInt64(index)
+        })
+    }
+
+    private func currentDeviceIdentifiers() -> Set<UInt64>? {
         typealias MTDeviceCreateListFn = @convention(c) () -> Unmanaged<CFArray>?
         guard let handle = frameworkHandle ?? dlopen("/System/Library/PrivateFrameworks/MultitouchSupport.framework/MultitouchSupport", RTLD_NOW),
               let createListSym = dlsym(handle, "MTDeviceCreateList") else { return nil }
         let createList = unsafeBitCast(createListSym, to: MTDeviceCreateListFn.self)
-        guard let list = createList()?.takeRetainedValue() else { return 0 }
-        return CFArrayGetCount(list)
+        guard let list = createList()?.takeRetainedValue() else { return [] }
+        let devices = (0..<CFArrayGetCount(list)).compactMap { index in
+            CFArrayGetValueAtIndex(list, index).map { UnsafeMutableRawPointer(mutating: $0) }
+        }
+        return Self.deviceIdentifiers(of: devices, framework: handle)
     }
 
     public func stop() {
@@ -340,6 +374,7 @@ public final class MultitouchGestureTrigger {
             }
         }
         deviceHandles.removeAll()
+        attachedDeviceIDs = []
         deviceList = nil
         lock.lock()
         deviceRouter.reset()
@@ -382,7 +417,13 @@ public final class MultitouchGestureTrigger {
         return true
     }
 
-    private static let frameCallback: MTContactCallbackFunction = { deviceID, rawData, nFingers, _, _ in
+    /// The framework calls this on a thread of its own. It is `nonisolated`, as
+    /// `F4Trigger.tapCallback` and `handleFrame` are, so that does not rest on how
+    /// the compiler isolates a closure written in a main-actor class. Called from
+    /// another thread it did not trap without this either, on the toolchain used
+    /// when this was checked, which `theFrameCallbackRunsOnAThreadOfTheFrameworksOwn`
+    /// keeps checking.
+    nonisolated static let frameCallback: MTContactCallbackFunction = { deviceID, rawData, nFingers, _, _ in
         guard nFingers >= 0, let trigger = current else { return 0 }
         var samples: [TouchSample] = []
         if let rawData, nFingers > 0 {

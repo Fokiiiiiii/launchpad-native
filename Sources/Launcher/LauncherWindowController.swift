@@ -353,6 +353,11 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         }
 
         if gridModel.reconcile(with: records, prunesMissingItems: isAuthoritative) {
+            // An open folder's tiles remember where each app sat when it was drawn.
+            // A change that came from outside, an app removed or added, leaves
+            // them pointing at other apps, and "take out" or a reorder then acts on
+            // the wrong one. Closing it is the cheap way to never get there.
+            viewController?.closeOpenFolder()
             Task { await gridModel.save() }
         }
         // Reconcile first so search follows the same current page/folder order

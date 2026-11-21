@@ -81,6 +81,29 @@ private func pixelWidth(of image: NSImage) -> Int? {
     #expect(FileManager.default.fileExists(atPath: bundle.appendingPathComponent("Icon\r").path))
 }
 
+/// Copies of the app share one preferences domain. The icon written to one copy
+/// is remembered for that copy, so another copy's choice does not stand in for it.
+@Test @MainActor func whatWasAppliedIsRememberedPerBundle() throws {
+    let monochrome = try variantsDirectory(with: .monochrome)
+    let solid = try variantsDirectory(with: .solid)
+    let first = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).app")
+    let second = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).app")
+    for bundle in [first, second] { try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true) }
+    let suite = "AppIconStyleApplierTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer {
+        for url in [monochrome, solid, first, second] { try? FileManager.default.removeItem(at: url) }
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    AppIconStyleApplier.applyToBundle(.monochrome, bundleURL: first, variants: monochrome, defaults: defaults)
+    AppIconStyleApplier.applyToBundle(.solid, bundleURL: second, variants: solid, defaults: defaults)
+
+    #expect(AppIconStyleApplier.markerKey(for: first) != AppIconStyleApplier.markerKey(for: second))
+    #expect(defaults.string(forKey: AppIconStyleApplier.markerKey(for: first))?.hasPrefix("monochrome") == true)
+    #expect(defaults.string(forKey: AppIconStyleApplier.markerKey(for: second))?.hasPrefix("solid") == true)
+}
+
 /// An icon drawn edge to edge came out about a quarter larger than every other
 /// icon in the Dock. The picture is put on a transparent canvas at Apple's icon
 /// grid, 824 of 1024.
