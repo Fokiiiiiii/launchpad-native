@@ -128,8 +128,6 @@
 "onboarding.triggers.footnote" = "Tout cela peut être modifié à tout moment depuis le menu ••• situé à côté du champ de recherche.";
 "onboarding.permissions.title" = "Une autorisation facultative";
 "onboarding.permissions.body" = "La touche F4/Spotlight et le geste du trackpad nécessitent les autorisations « Accessibilité » et « Surveillance de la saisie ». Tout le reste fonctionne sans.";
-"onboarding.done.title" = "Tout est prêt";
-"onboarding.done.body" = "Ouvrez les réglages à tout moment depuis le menu ••• à côté du champ de recherche.";
 "onboarding.back" = "Retour";
 "onboarding.next" = "Suivant";
 "onboarding.getstarted" = "Commencer";
@@ -164,11 +162,6 @@
 "settings.grid.layoutbackup.confirm" = "Remplacer la disposition actuelle ?";
 "settings.grid.layoutbackup.confirm.message" = "Les pages, les dossiers et les apps masquées seront remplacés. Les réglages des déclencheurs et du système sont conservés.";
 "settings.grid.layoutbackup.failed" = "La sauvegarde a échoué";
-"settings.screen.background.material.ultrathin" = "Ultra fin";
-"settings.screen.background.material.thin" = "Fin";
-"settings.screen.background.material.regular" = "Normal";
-"settings.screen.background.material.thick" = "Épais";
-"settings.screen.background.material.ultrathick" = "Ultra épais";
 "settings.grid.shownames" = "Afficher le nom des icônes";
 "settings.screen.windowed" = "Affichage en fenêtre";
 "settings.grid.closeonbackgroundclick" = "Fermer en cliquant sur un espace vide";

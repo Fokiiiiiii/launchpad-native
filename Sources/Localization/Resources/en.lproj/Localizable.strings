@@ -128,8 +128,6 @@
 "onboarding.triggers.footnote" = "All of these can be changed anytime from the ••• menu next to the search bar.";
 "onboarding.permissions.title" = "One optional permission";
 "onboarding.permissions.body" = "The F4/Spotlight-key and trackpad gesture need Accessibility and Input Monitoring permission. Everything else works without it.";
-"onboarding.done.title" = "You're all set";
-"onboarding.done.body" = "Open Settings anytime from the ••• menu next to the search bar.";
 "onboarding.back" = "Back";
 "onboarding.next" = "Next";
 "onboarding.getstarted" = "Get Started";
@@ -164,11 +162,6 @@
 "settings.grid.layoutbackup.confirm" = "Replace the current layout?";
 "settings.grid.layoutbackup.confirm.message" = "Pages, folders and hidden apps will be replaced. Trigger and system settings are kept.";
 "settings.grid.layoutbackup.failed" = "Backup operation failed";
-"settings.screen.background.material.ultrathin" = "Ultra Thin";
-"settings.screen.background.material.thin" = "Thin";
-"settings.screen.background.material.regular" = "Regular";
-"settings.screen.background.material.thick" = "Thick";
-"settings.screen.background.material.ultrathick" = "Ultra Thick";
 "settings.grid.shownames" = "Show icon names";
 "settings.screen.windowed" = "Windowed display";
 "settings.grid.closeonbackgroundclick" = "Close when clicking empty space";

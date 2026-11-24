@@ -40,12 +40,6 @@ public enum L10n {
     public static var layoutBackupConfirmMessage: String { string("settings.grid.layoutbackup.confirm.message", "Pages, folders and hidden apps will be replaced. Trigger and system settings are kept.") }
     public static var layoutBackupFailed: String { string("settings.grid.layoutbackup.failed", "Backup operation failed") }
 
-    public static var glassUltraThin: String { string("settings.screen.background.material.ultrathin", "Ultra Thin") }
-    public static var glassThin: String { string("settings.screen.background.material.thin", "Thin") }
-    public static var glassRegular: String { string("settings.screen.background.material.regular", "Regular") }
-    public static var glassThick: String { string("settings.screen.background.material.thick", "Thick") }
-    public static var glassUltraThick: String { string("settings.screen.background.material.ultrathick", "Ultra Thick") }
-
     public static var showIconNamesLabel: String { string("settings.grid.shownames", "Show icon names") }
 
     public static var windowedLabel: String { string("settings.screen.windowed", "Windowed display") }
@@ -172,10 +166,6 @@ public enum L10n {
     public static var onboardingPermissionsTitle: String { string("onboarding.permissions.title", "One optional permission") }
     public static var onboardingPermissionsBody: String {
         string("onboarding.permissions.body", "The F4/Spotlight-key and trackpad gesture need Accessibility and Input Monitoring permission. Everything else works without it.")
-    }
-    public static var onboardingDoneTitle: String { string("onboarding.done.title", "You're all set") }
-    public static var onboardingDoneBody: String {
-        string("onboarding.done.body", "Open Settings anytime from the gear icon next to the search bar.")
     }
     public static var onboardingBackButton: String { string("onboarding.back", "Back") }
     public static var onboardingNextButton: String { string("onboarding.next", "Next") }

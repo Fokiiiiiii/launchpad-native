@@ -185,7 +185,7 @@ extension SettingsView {
             let alert = NSAlert()
             alert.messageText = L10n.diagnosticsSaveFailed
             alert.informativeText = error.localizedDescription
-            alert.addButton(withTitle: L10n.cancelButton)
+            alert.addButton(withTitle: L10n.okButton)
             alert.runModal()
         }
     }

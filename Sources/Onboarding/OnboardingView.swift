@@ -17,7 +17,7 @@ struct OnboardingView: View {
     @State private var pageIndex = 0
     @State private var movingForward = true
 
-    private let pageCount = 4
+    private let pageCount = 3
 
     var body: some View {
         ZStack {
@@ -27,8 +27,7 @@ struct OnboardingView: View {
                     switch pageIndex {
                     case 0: WelcomePage()
                     case 1: TriggersPage()
-                    case 2: PermissionsPage()
-                    default: DonePage()
+                    default: PermissionsPage()
                     }
                 }
                 .id(pageIndex)
@@ -166,27 +165,6 @@ private struct PermissionsPage: View {
                     NSWorkspace.shared.open(url)
                 }
             }
-            Spacer()
-        }
-        .padding(32)
-    }
-}
-
-private struct DonePage: View {
-    var body: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 40))
-                .foregroundStyle(.green)
-            Text(L10n.onboardingDoneTitle)
-                .font(.title2)
-                .fontWeight(.semibold)
-            Text(L10n.onboardingDoneBody)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
             Spacer()
         }
         .padding(32)

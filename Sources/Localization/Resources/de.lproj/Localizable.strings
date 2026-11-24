@@ -128,8 +128,6 @@
 "onboarding.triggers.footnote" = "Alles davon lässt sich jederzeit im •••-Menü neben dem Suchfeld ändern.";
 "onboarding.permissions.title" = "Eine optionale Berechtigung";
 "onboarding.permissions.body" = "F4/Spotlight-Taste und Trackpad-Geste benötigen die Berechtigungen „Bedienungshilfen“ und „Eingabeüberwachung“. Alles andere funktioniert auch ohne.";
-"onboarding.done.title" = "Alles bereit";
-"onboarding.done.body" = "Die Einstellungen erreichst du jederzeit über das •••-Menü neben dem Suchfeld.";
 "onboarding.back" = "Zurück";
 "onboarding.next" = "Weiter";
 "onboarding.getstarted" = "Los geht's";
@@ -164,11 +162,6 @@
 "settings.grid.layoutbackup.confirm" = "Aktuelles Layout ersetzen?";
 "settings.grid.layoutbackup.confirm.message" = "Seiten, Ordner und ausgeblendete Apps werden ersetzt. Auslöser- und Systemeinstellungen bleiben erhalten.";
 "settings.grid.layoutbackup.failed" = "Sicherung fehlgeschlagen";
-"settings.screen.background.material.ultrathin" = "Extra dünn";
-"settings.screen.background.material.thin" = "Dünn";
-"settings.screen.background.material.regular" = "Standard";
-"settings.screen.background.material.thick" = "Dick";
-"settings.screen.background.material.ultrathick" = "Extra dick";
 "settings.grid.shownames" = "Iconnamen anzeigen";
 "settings.screen.windowed" = "Fensteranzeige";
 "settings.grid.closeonbackgroundclick" = "Schließen bei Klick auf leere Fläche";

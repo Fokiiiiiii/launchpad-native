@@ -128,8 +128,6 @@
 "onboarding.triggers.footnote" = "以上均可随时在搜索栏旁的 ••• 菜单中更改。";
 "onboarding.permissions.title" = "一项可选权限";
 "onboarding.permissions.body" = "F4／聚焦键和触控板手势需要「辅助功能」和「输入监控」权限。其他功能无需权限即可使用。";
-"onboarding.done.title" = "设置完成";
-"onboarding.done.body" = "随时可从搜索栏旁的 ••• 菜单打开设置。";
 "onboarding.back" = "上一步";
 "onboarding.next" = "下一步";
 "onboarding.getstarted" = "开始使用";
@@ -164,11 +162,6 @@
 "settings.grid.layoutbackup.confirm" = "替换当前布局？";
 "settings.grid.layoutbackup.confirm.message" = "页面、文件夹和隐藏的应用将被替换。触发方式和系统设置会保留。";
 "settings.grid.layoutbackup.failed" = "备份操作失败";
-"settings.screen.background.material.ultrathin" = "超薄";
-"settings.screen.background.material.thin" = "薄";
-"settings.screen.background.material.regular" = "标准";
-"settings.screen.background.material.thick" = "厚";
-"settings.screen.background.material.ultrathick" = "超厚";
 "settings.grid.shownames" = "显示图标名称";
 "settings.screen.windowed" = "窗口化显示";
 "settings.grid.closeonbackgroundclick" = "点击空白处时关闭";

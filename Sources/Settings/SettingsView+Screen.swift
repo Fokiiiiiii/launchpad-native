@@ -137,7 +137,6 @@ extension SettingsView {
                     SettingsCardDivider()
                     SettingsCardRow(minHeight: 34) {
                         HStack {
-                            Text(L10n.reorganizeButton)
                             Spacer()
                             Button(L10n.reorganizeButton) {
                                 viewModel.reorganizePages()
@@ -203,24 +202,6 @@ extension SettingsView {
                     if viewModel.backgroundMode == .glass {
                         SettingsCardDivider()
                         SettingsCardRow(minHeight: 34) {
-                            Picker(L10n.glassMaterialLabel, selection: Binding(
-                                get: {
-                                    let preset = Int((viewModel.glassMaterialIntensity * 4).rounded())
-                                    return abs(viewModel.glassMaterialIntensity - Double(preset) / 4) < 0.001 ? preset : -1
-                                },
-                                set: { if (0...4).contains($0) { viewModel.glassMaterialIntensity = Double($0) / 4 } }
-                            )) {
-                                Text(L10n.iconScalePresetCustom).tag(-1)
-                                Text(L10n.glassUltraThin).tag(0)
-                                Text(L10n.glassThin).tag(1)
-                                Text(L10n.glassRegular).tag(2)
-                                Text(L10n.glassThick).tag(3)
-                                Text(L10n.glassUltraThick).tag(4)
-                            }
-                            .pickerStyle(.menu)
-                        }
-                        SettingsCardDivider()
-                        SettingsCardRow(minHeight: 34) {
                             HStack(spacing: 10) {
                                 Text(L10n.glassMaterialLabel)
                                 Slider(
@@ -246,9 +227,6 @@ extension SettingsView {
                             SettingsCardDivider()
                             SettingsCardRow(minHeight: 44) {
                                 HStack(spacing: 10) {
-                                    Text(L10n.blurWallpaperToggleLabel)
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.8)
                                     Slider(value: $viewModel.wallpaperBlurRadius, in: 0...40, step: 1,
                                            onEditingChanged: viewModel.setWallpaperBlurEditing)
                                         .accessibilityLabel(Text(L10n.blurWallpaperToggleLabel))
@@ -280,6 +258,14 @@ extension SettingsView {
         }
     }
 
+    private static var previewGradient: LinearGradient {
+        LinearGradient(
+            colors: [Color(red: 63 / 255, green: 95 / 255, blue: 158 / 255), Color(red: 106 / 255, green: 74 / 255, blue: 146 / 255)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
     private func iconScalePresetButton(_ preset: GridIconScalePreset) -> some View {
         let selected = viewModel.iconScalePreset == preset
         return Button {
@@ -291,11 +277,7 @@ extension SettingsView {
                     .frame(width: 44, height: 26)
                     .foregroundStyle(.white.opacity(0.82))
                     .background(
-                        LinearGradient(
-                            colors: [Color(red: 63 / 255, green: 95 / 255, blue: 158 / 255), Color(red: 106 / 255, green: 74 / 255, blue: 146 / 255)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
+                        Self.previewGradient,
                         in: RoundedRectangle(cornerRadius: 6, style: .continuous)
                     )
                 Text(iconScalePresetName(preset))
@@ -370,16 +352,7 @@ extension SettingsView {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(
                             mode == .wallpaper
-                                ? AnyShapeStyle(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 63 / 255, green: 95 / 255, blue: 158 / 255),
-                                            Color(red: 106 / 255, green: 74 / 255, blue: 146 / 255)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
+                                ? AnyShapeStyle(Self.previewGradient)
                                 : AnyShapeStyle(Color.white.opacity(0.10))
                         )
                     if mode == .wallpaper {

@@ -128,8 +128,6 @@
 "onboarding.triggers.footnote" = "모두 검색 필드 옆 ••• 메뉴에서 언제든지 변경할 수 있습니다.";
 "onboarding.permissions.title" = "선택 권한 하나";
 "onboarding.permissions.body" = "F4/Spotlight 키와 트랙패드 제스처에는 손쉬운 사용과 입력 모니터링 권한이 필요합니다. 나머지 기능은 권한 없이도 작동합니다.";
-"onboarding.done.title" = "준비 완료";
-"onboarding.done.body" = "검색 필드 옆 ••• 메뉴에서 언제든지 설정을 열 수 있습니다.";
 "onboarding.back" = "뒤로";
 "onboarding.next" = "다음";
 "onboarding.getstarted" = "시작하기";
@@ -164,11 +162,6 @@
 "settings.grid.layoutbackup.confirm" = "현재 레이아웃을 바꿀까요?";
 "settings.grid.layoutbackup.confirm.message" = "페이지, 폴더, 숨긴 앱이 바뀝니다. 트리거와 시스템 설정은 유지됩니다.";
 "settings.grid.layoutbackup.failed" = "백업 작업에 실패했습니다";
-"settings.screen.background.material.ultrathin" = "매우 얇게";
-"settings.screen.background.material.thin" = "얇게";
-"settings.screen.background.material.regular" = "보통";
-"settings.screen.background.material.thick" = "두껍게";
-"settings.screen.background.material.ultrathick" = "매우 두껍게";
 "settings.grid.shownames" = "아이콘 이름 표시";
 "settings.screen.windowed" = "창 모드로 표시";
 "settings.grid.closeonbackgroundclick" = "빈 공간을 클릭하면 닫기";
