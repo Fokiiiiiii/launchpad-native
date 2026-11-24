@@ -81,6 +81,41 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         prefetchTask?.cancel()
     }
 
+    private var displayedLayoutMode: LayoutMode?
+    private lazy var verticalGrid = VerticalGridViewController(
+        model: model, iconCache: iconCache,
+        onActivate: { [weak self] item in self?.activateItem(item) },
+        onContext: { [weak self] item, anchor in self?.verticalContextMenu(item, anchor: anchor) },
+        onBackground: { [weak self] in self?.onBackgroundClick() },
+        getSelection: { [weak self] in self?.itemDrag.groupSelection ?? [] },
+        setSelection: { [weak self] selection in self?.itemDrag.setGroupSelection(selection) }
+    )
+
+    private func location(of item: LayoutItem) -> (page: Int, index: Int)? {
+        for (page, items) in model.pages.enumerated() {
+            if let index = items.firstIndex(of: item) { return (page, index) }
+        }
+        return nil
+    }
+
+    private func activateItem(_ item: LayoutItem) {
+        switch item {
+        case .app(let id):
+            guard let record = model.record(for: id) else { return }
+            onLaunch(record)
+        case .folder(let id):
+            guard let position = location(of: item) else { return }
+            currentPage = position.page
+            openFolder(id)
+        }
+    }
+
+    private func verticalContextMenu(_ item: LayoutItem, anchor: NSView?) -> NSMenu? {
+        guard let position = location(of: item) else { return nil }
+        currentPage = position.page
+        return contextMenu(for: IndexPath(item: position.index, section: 0), anchorView: anchor)
+    }
+
     public override func loadView() {
         let root = NSView()
         root.wantsLayer = true
@@ -102,24 +137,34 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         // drag's edge peek is already using. Dragging to a page edge is the
         // supported way to change pages mid-drag.
         collectionView.onSwipePage = { [weak self] delta in
-            guard let self, !self.itemDrag.isDragging else { return }
+            guard let self, !self.itemDrag.isDragging, !self.collectionView.isMarqueeActive else { return }
             self.jumpToAdjacentPage(delta: delta)
         }
         collectionView.onSwipeBegan = { [weak self] in
-            guard let self, !self.itemDrag.isDragging else { return }
+            guard let self, !self.itemDrag.isDragging, !self.collectionView.isMarqueeActive else { return }
             self.beginPageDrag()
         }
         collectionView.onSwipeChanged = { [weak self] delta in
-            guard let self, !self.itemDrag.isDragging else { return }
+            guard let self, !self.itemDrag.isDragging, !self.collectionView.isMarqueeActive else { return }
             self.updatePageDrag(deltaX: delta)
         }
         collectionView.onSwipeEnded = { [weak self] delta, velocity in
-            guard let self, !self.itemDrag.isDragging else { return }
+            guard let self, !self.itemDrag.isDragging, !self.collectionView.isMarqueeActive else { return }
             self.endPageDrag(deltaX: delta, velocity: velocity)
         }
         collectionView.onItemMouseDown = { [weak self] indexPath, event in self?.itemDrag.handleItemMouseDown(indexPath: indexPath, event: event) }
         collectionView.onItemMouseDragged = { [weak self] event in self?.itemDrag.handleItemMouseDragged(event: event) }
         collectionView.onItemMouseUp = { [weak self] event in self?.itemDrag.handleItemMouseUp(event: event) }
+        collectionView.onMarqueeBegin = { [weak self] additive in
+            guard let self else { return }
+            self.resetDragStateIfNeeded()
+            self.itemDrag.cancelItemDragIfNeeded()
+            self.clearKeyboardSelection()
+            self.marqueeBase = additive ? self.itemDrag.groupSelection : []
+            self.itemDrag.setGroupSelection(self.marqueeBase)
+        }
+        collectionView.onMarqueeChange = { [weak self] rect in self?.updateMarqueeSelection(in: rect) }
+        collectionView.onMarqueeEnd = { [weak self] in self?.marqueeBase.removeAll() }
         collectionView.onBackgroundClick = { [weak self] in
             // Extra safety-net opportunity for the page-drag machinery (see
             // `resetDragStateIfNeeded`'s doc comment) — harmless no-op if
@@ -144,6 +189,9 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         pageControl.onNext = { [weak self] in self?.jumpToAdjacentPage(delta: 1) }
 
         root.addSubview(scrollView)
+        addChild(verticalGrid)
+        verticalGrid.view.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(verticalGrid.view)
         root.addSubview(pageControl)
         let pageControlBottom = pageControl.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -24)
         self.pageControlBottomConstraint = pageControlBottom
@@ -152,6 +200,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: pageControl.topAnchor, constant: -8),
+            verticalGrid.view.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            verticalGrid.view.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            verticalGrid.view.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            verticalGrid.view.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
 
             pageControl.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             pageControlBottom,
@@ -161,6 +213,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
         view = root
         model.onChange = { [weak self] in self?.reload() }
+        reload()
     }
 
     public override func viewDidLayout() {
@@ -244,6 +297,23 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     public func reload() {
+        if displayedLayoutMode != model.layoutMode {
+            if displayedLayoutMode == .verticalScroll, model.layoutMode == .paged, let page = verticalGrid.visiblePage {
+                currentPage = page
+            }
+            displayedLayoutMode = model.layoutMode
+            pageTransitionGeneration &+= 1
+            pendingEdgeSelection = nil
+            forceResetPageDrag()
+            collectionView.cancelMarquee()
+            itemDrag.cancelItemDragIfNeeded()
+            verticalGrid.cancelDrag()
+        }
+        let vertical = model.layoutMode == .verticalScroll
+        scrollView.isHidden = vertical
+        pageControl.isHidden = vertical
+        verticalGrid.view.isHidden = !vertical
+        if vertical { verticalGrid.reload() }
         layout.settings = model.gridSettings
         if currentPage >= model.pages.count {
             currentPage = max(model.pages.count - 1, 0)
@@ -373,6 +443,10 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
 
 
     public func moveSelection(deltaColumns: Int, deltaRows: Int) {
+        if model.layoutMode == .verticalScroll {
+            verticalGrid.moveSelection(columns: deltaColumns, rows: deltaRows)
+            return
+        }
         guard pendingEdgeSelection == nil else { return }
         guard let current = collectionView.selectionIndexPaths.first else {
             select(IndexPath(item: 0, section: 0))
@@ -412,6 +486,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     public func launchSelection() {
+        if model.layoutMode == .verticalScroll { verticalGrid.launchSelection(); return }
         guard pendingEdgeSelection == nil, let indexPath = collectionView.selectionIndexPaths.first else { return }
         activate(at: indexPath)
     }
@@ -504,7 +579,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         guard model.pages.indices.contains(index), index != currentPage || collectionView.numberOfSections == 0 else { return }
         // Page dots and the arrow keys reach here too, and mid-drag they have
         // the same problem as a swipe — see the swipe wiring in `loadView`.
-        guard !itemDrag.isDragging else { return }
+        guard !itemDrag.isDragging, !collectionView.isMarqueeActive else { return }
         let start = DispatchTime.now()
         pageTransitionGeneration &+= 1
         let generation = pageTransitionGeneration
@@ -830,6 +905,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         pageTransitionGeneration &+= 1
         pendingEdgeSelection = nil
         currentPage = 0
+        verticalGrid.resetToTop()
         forceResetPageDrag()
         pageControl.numberOfPages = model.pages.count
         prefetchAdjacentPageIcons()
@@ -1236,12 +1312,38 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         folderOverlay.close(animated: false)
     }
 
+    private var marqueeBase: Set<LayoutItem> = []
+
+    private func updateMarqueeSelection(in rect: NSRect) {
+        guard model.pages.indices.contains(currentPage) else { return }
+        var selected = marqueeBase
+        for (index, item) in model.pages[currentPage].enumerated() {
+            let path = IndexPath(item: index, section: 0)
+            guard let attributes = collectionView.layoutAttributesForItem(at: path) else { continue }
+            let hitFrame: NSRect
+            if let cell = collectionView.item(at: path) as? GridCellItem {
+                hitFrame = collectionView.convert(cell.contentHitTestFrame, from: cell.view)
+            } else {
+                hitFrame = attributes.frame
+            }
+            if rect.intersects(hitFrame) { selected.insert(item) }
+        }
+        itemDrag.setGroupSelection(selected)
+    }
+
+    public func selectAllItems() -> Bool {
+        guard !folderOverlay.isOpen else { return false }
+        if model.layoutMode == .verticalScroll { return verticalGrid.selectAllItems() }
+        return itemDrag.selectAllItems()
+    }
+
     public func setGridContentHidden(_ hidden: Bool) {
         let target: CGFloat = hidden ? 0 : 1
-        guard abs(collectionView.alphaValue - target) > 0.001 else { return }
+        guard abs(collectionView.alphaValue - target) > 0.001 || abs(verticalGrid.view.alphaValue - target) > 0.001 else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.16
             collectionView.animator().alphaValue = target
+            verticalGrid.view.animator().alphaValue = target
             pageControl.animator().alphaValue = target
         }
     }
@@ -1260,11 +1362,95 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .maxY)
     }
 
-    private func contextMenu(for indexPath: IndexPath) -> NSMenu? {
+    private func contextMenu(for indexPath: IndexPath, anchorView: NSView? = nil) -> NSMenu? {
         guard model.pages.indices.contains(currentPage),
               model.pages[currentPage].indices.contains(indexPath.item) else { return nil }
         let item = model.pages[currentPage][indexPath.item]
-
+        let selected = itemDrag.groupSelection
+        if selected.count > 1, selected.contains(item) {
+            let menu = NSMenu()
+            let move = NSMenuItem(title: L10n.moveToPage, action: nil, keyEquivalent: "")
+            let submenu = NSMenu()
+            for page in model.pages.indices {
+                let destination = ClosureMenuItem(title: L10n.pageNumberAccessibilityLabel(page + 1), action: #selector(ClosureMenuItem.invoke), keyEquivalent: "")
+                destination.target = destination
+                destination.actionClosure = { [weak self] in
+                    guard let self, self.model.pages.indices.contains(page),
+                          let result = self.model.moveItems(selected, leader: item, toPage: page, toIndex: self.model.pages[page].count) else { return }
+                    self.itemDrag.clearGroupSelection()
+                    self.verticalGrid.refreshSelection()
+                    self.jumpToPage(result)
+                    Task { await self.model.save() }
+                }
+                submenu.addItem(destination)
+            }
+            move.submenu = submenu
+            menu.addItem(move)
+            let records = model.pages.flatMap { $0 }.filter { selected.contains($0) }.compactMap { selectedItem -> ApplicationRecord? in
+                guard case .app(let id) = selectedItem else { return nil }
+                return model.record(for: id)
+            }
+            if records.count == selected.count {
+                let folders = NSMenu()
+                for (page, items) in model.pages.enumerated() {
+                    for target in items {
+                        guard case .folder(let id) = target, !selected.contains(target),
+                              let folder = model.folders[id] else { continue }
+                        let destination = ClosureMenuItem(title: folder.name, action: #selector(ClosureMenuItem.invoke), keyEquivalent: "")
+                        destination.target = destination
+                        destination.actionClosure = { [weak self] in
+                            guard let self, self.model.pages.indices.contains(page),
+                                  let result = self.model.moveItems(selected, leader: item, toPage: page, toIndex: 0, folderTarget: target) else { return }
+                            self.itemDrag.clearGroupSelection()
+                            self.verticalGrid.refreshSelection()
+                            self.jumpToPage(result)
+                            Task { await self.model.save() }
+                        }
+                        folders.addItem(destination)
+                    }
+                }
+                if !folders.items.isEmpty {
+                    let moveToFolder = NSMenuItem(title: L10n.moveToFolder, action: nil, keyEquivalent: "")
+                    moveToFolder.submenu = folders
+                    menu.addItem(moveToFolder)
+                }
+                let group = ClosureMenuItem(title: L10n.groupInNewFolder, action: #selector(ClosureMenuItem.invoke), keyEquivalent: "")
+                group.target = group
+                group.actionClosure = { [weak self] in
+                    guard let self else { return }
+                    let ordered = self.model.pages.flatMap { $0 }.filter { selected.contains($0) }
+                    guard ordered.count == selected.count, let anchor = ordered.first,
+                          let leader = ordered.dropFirst().first,
+                          let page = self.model.pages.firstIndex(where: { $0.contains(anchor) }),
+                          let result = self.model.moveItems(selected.subtracting([anchor]), leader: leader, toPage: page, toIndex: 0, folderTarget: anchor) else { return }
+                    self.itemDrag.clearGroupSelection()
+                    self.verticalGrid.refreshSelection()
+                    self.jumpToPage(result)
+                    Task { await self.model.save() }
+                }
+                menu.addItem(group)
+                let open = ClosureMenuItem(title: L10n.menuOpen, action: #selector(ClosureMenuItem.invoke), keyEquivalent: "")
+                open.target = open
+                open.actionClosure = { [weak self] in
+                    guard let self, selected.isSubset(of: Set(self.model.pages.flatMap { $0 })) else { return }
+                    self.itemDrag.clearGroupSelection()
+                    self.verticalGrid.refreshSelection()
+                    for record in records { self.onLaunch(record) }
+                }
+                menu.addItem(open)
+                let hide = ClosureMenuItem(title: L10n.menuHide, action: #selector(ClosureMenuItem.invoke), keyEquivalent: "")
+                hide.target = hide
+                hide.actionClosure = { [weak self] in
+                    guard let self, selected.isSubset(of: Set(self.model.pages.flatMap { $0 })) else { return }
+                    self.itemDrag.clearGroupSelection()
+                    self.verticalGrid.refreshSelection()
+                    self.model.hideApplications(records.map(\.id))
+                    Task { await self.model.save() }
+                }
+                menu.addItem(hide)
+            }
+            return menu
+        }
         switch item {
         case .folder(let folderID):
             return ContextMenuBuilder.folderMenu(
@@ -1279,7 +1465,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             )
         case .app(let id):
             guard let record = model.record(for: id) else { return nil }
-            return contextMenu(for: record, anchorView: collectionView.item(at: indexPath)?.view)
+            return contextMenu(for: record, anchorView: anchorView ?? collectionView.item(at: indexPath)?.view)
         }
     }
 
@@ -1295,6 +1481,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         if let anchorView {
             showWindows = { [weak self] in self?.showWindows(for: record, anchorView: anchorView) }
         }
+        let running = runningApplications(for: record)
         let actions = ContextMenuBuilder.Actions(
             open: { [weak self] in self?.onLaunch(record) },
             openNewInstance: record.canOpenNewInstance ? { [weak self] in
@@ -1305,12 +1492,51 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
             showInFinder: { NSWorkspace.shared.activateFileViewerSelecting([record.bundleURL]) },
             rename: { [weak self] in self?.promptRenameApp(record: record) },
             hide: { [weak self] in self?.hideApp(record) },
+            getInfo: { [weak self] in self?.showInfo(for: record) },
             showWindows: showWindows,
             // The record itself, not its bundle identifier: two copies of an app share
             // one, and the request has to name the one that was chosen.
-            uninstall: { [weak self] in self?.onRequestUninstall(record) }
+            uninstall: { [weak self] in self?.onRequestUninstall(record) },
+            quit: running.isEmpty ? nil : { [weak self] in self?.quitApplications(running, record: record, force: false) },
+            forceQuit: running.isEmpty ? nil : { [weak self] in self?.quitApplications(running, record: record, force: true) }
         )
         return ContextMenuBuilder.menu(for: record, actions: actions, iconVisibility: model.menuIconVisibility)
+    }
+
+
+    private func showInfo(for record: ApplicationRecord) {
+        guard !FinderInfoAction.show(record.bundleURL) else { return }
+        let alert = NSAlert()
+        alert.messageText = L10n.finderInfoFailed
+        alert.runModal()
+    }
+
+    private func runningApplications(for record: ApplicationRecord) -> [NSRunningApplication] {
+        let expected = record.bundleURL.resolvingSymlinksInPath().standardizedFileURL
+        return NSWorkspace.shared.runningApplications.filter { app in
+            !app.isTerminated && app.bundleURL?.resolvingSymlinksInPath().standardizedFileURL == expected
+        }
+    }
+
+    private func quitApplications(_ applications: [NSRunningApplication], record: ApplicationRecord, force: Bool) {
+        let active = applications.filter { !$0.isTerminated }
+        guard !active.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = L10n.quitConfirmation(model.displayName(for: record))
+        if force { alert.informativeText = L10n.forceQuitWarning }
+        alert.addButton(withTitle: force ? L10n.menuForceQuit : L10n.menuBarQuitItem)
+        alert.addButton(withTitle: L10n.cancelButton)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        var failed = false
+        for app in active where !app.isTerminated {
+            let accepted = force ? app.forceTerminate() : app.terminate()
+            if !accepted && !app.isTerminated { failed = true }
+        }
+        if failed {
+            let error = NSAlert()
+            error.messageText = L10n.quitRequestFailed
+            error.runModal()
+        }
     }
 
     private func promptRenameFolder(at indexPath: IndexPath) {
@@ -1360,7 +1586,15 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// arrangement. Called when the launcher is shown so a drag left hanging
     /// by a previous session can never carry into the next one.
     public func cancelItemDragIfNeeded() {
+        verticalGrid.cancelDrag()
+        collectionView.cancelMarquee()
         itemDrag.cancelItemDragIfNeeded()
+    }
+
+    public func clearItemSelection() {
+        clearKeyboardSelection()
+        itemDrag.clearGroupSelection()
+        verticalGrid.clearSelection()
     }
 
     /// Swaps the grid to `targetPage` mid-drag.
@@ -1397,6 +1631,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     /// Returned together, not as two properties: every caller needs both, and
     /// two properties meant deriving the same metrics twice per cell.
     public var currentIconLayoutMetrics: (baseSize: Double, visualScale: Double) {
+        if model.layoutMode == .verticalScroll { return verticalGrid.iconMetrics }
         let cellSize = layout.currentCellSize
         guard cellSize.width > 0, cellSize.height > 0 else { return (96, 1) }
 
@@ -1416,7 +1651,7 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
     }
 
     public var currentCellSize: NSSize {
-        layout.currentCellSize
+        model.layoutMode == .verticalScroll ? verticalGrid.cellSize : layout.currentCellSize
     }
 
     // MARK: NSCollectionViewDataSource
@@ -1507,4 +1742,469 @@ public final class GridViewController: NSViewController, NSCollectionViewDataSou
         return cell
     }
 
+}
+
+@MainActor
+final class VerticalGridViewController: NSViewController, NSCollectionViewDataSource {
+    private let model: GridModel
+    private let iconCache: IconCache
+    private let onActivate: (LayoutItem) -> Void
+    private let onContext: (LayoutItem, NSView?) -> NSMenu?
+    private let onBackground: () -> Void
+    private let getSelection: () -> Set<LayoutItem>
+    private let setSelection: (Set<LayoutItem>) -> Void
+    private let collection = GridCollectionView()
+    private let scroll = NSScrollView()
+    private let flow = NSCollectionViewFlowLayout()
+    private let cellIdentifier = NSUserInterfaceItemIdentifier("VerticalGridCell")
+    private var pending: (item: LayoutItem, start: NSPoint, event: NSEvent)?
+    private var dragging = false
+    private var dragView: NSImageView?
+    private var marqueeBase: Set<LayoutItem> = []
+    private var keyboardSelection: LayoutItem?
+    private var items: [LayoutItem] = []
+
+    init(model: GridModel, iconCache: IconCache, onActivate: @escaping (LayoutItem) -> Void,
+         onContext: @escaping (LayoutItem, NSView?) -> NSMenu?, onBackground: @escaping () -> Void,
+         getSelection: @escaping () -> Set<LayoutItem>, setSelection: @escaping (Set<LayoutItem>) -> Void) {
+        self.model = model
+        self.iconCache = iconCache
+        self.onActivate = onActivate
+        self.onContext = onContext
+        self.onBackground = onBackground
+        self.getSelection = getSelection
+        self.setSelection = setSelection
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    deinit { dragMonitor?.remove() }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("unavailable") }
+
+    override func loadView() {
+        flow.scrollDirection = .vertical
+        collection.collectionViewLayout = flow
+        collection.dataSource = self
+        collection.isSelectable = true
+        collection.backgroundColors = [.clear]
+        collection.scrollsVertically = true
+        collection.register(GridCellItem.self, forItemWithIdentifier: cellIdentifier)
+        collection.menuProvider = { [weak self] path in
+            guard let self, self.items.indices.contains(path.item) else { return nil }
+            return self.onContext(self.items[path.item], self.collection.item(at: path)?.view)
+        }
+        collection.onItemMouseDown = { [weak self] path, event in self?.mouseDown(path, event: event) }
+        collection.onItemMouseDragged = { [weak self] event in self?.handleVerticalDrag(event) }
+        collection.onItemMouseUp = { [weak self] event in self?.handleVerticalUp(event) }
+        collection.onBackgroundClick = { [weak self] in
+            guard let self else { return }
+            self.keyboardSelection = nil
+            self.setSelection([])
+            self.refreshSelection()
+            self.onBackground()
+        }
+        collection.onMarqueeBegin = { [weak self] additive in
+            guard let self else { return }
+            self.resetItemDrag()
+            self.keyboardSelection = nil
+            self.marqueeBase = additive ? self.getSelection() : []
+            self.setSelection(self.marqueeBase)
+            self.refreshSelection()
+        }
+        collection.onMarqueeChange = { [weak self] rect in self?.select(in: rect) }
+        collection.onMarqueePointer = { [weak self] point in self?.scrollNearEdge(point) }
+        collection.onMarqueeEnd = { [weak self] in self?.marqueeBase.removeAll() }
+        scroll.documentView = collection
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.hasHorizontalScroller = false
+        scroll.horizontalScrollElasticity = .none
+        view = scroll
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        updateMetrics()
+    }
+
+    private func updateMetrics(force: Bool = false) {
+        var needsPrepare = force
+        let settings = model.gridSettings
+        let columns = max(settings.columns, 1)
+        let rows = max(settings.rows, 1)
+        let width = max(scroll.contentSize.width, 1)
+        let height = max(scroll.contentSize.height, 1)
+        let margin = CGFloat(settings.pageMargins)
+        let horizontal = CGFloat(settings.horizontalSpacing)
+        let vertical = CGFloat(settings.verticalSpacing)
+        let size = NSSize(width: max((width - 2 * margin - horizontal * CGFloat(columns - 1)) / CGFloat(columns), 1),
+                          height: max((height - 2 * margin - vertical * CGFloat(rows - 1)) / CGFloat(rows), 1))
+        let insets = NSEdgeInsets(top: margin, left: margin, bottom: margin, right: margin)
+        if flow.itemSize != size || flow.minimumInteritemSpacing != horizontal || flow.minimumLineSpacing != vertical ||
+            flow.sectionInset.top != margin || flow.sectionInset.left != margin || flow.sectionInset.bottom != margin || flow.sectionInset.right != margin {
+            needsPrepare = true
+            flow.itemSize = size
+            flow.minimumInteritemSpacing = horizontal
+            flow.minimumLineSpacing = vertical
+            flow.sectionInset = insets
+            flow.invalidateLayout()
+        }
+        if width > 1, height > 1 {
+            if abs(collection.frame.width - width) > 0.5 {
+                collection.setFrameSize(NSSize(width: width, height: collection.frame.height))
+                flow.invalidateLayout()
+                needsPrepare = true
+            }
+            if needsPrepare {
+                flow.prepare()
+                let contentHeight = max(height, flow.collectionViewContentSize.height)
+                if abs(collection.frame.height - contentHeight) > 0.5 {
+                    collection.setFrameSize(NSSize(width: width, height: contentHeight))
+                }
+            }
+        }
+        let metrics = iconMetrics
+        var changed = false
+        for case let cell as GridCellItem in collection.visibleItems() {
+            if cell.refreshIconSize(metrics.baseSize, visualScale: metrics.visualScale) { changed = true }
+        }
+        if changed { collection.layoutSubtreeIfNeeded() }
+    }
+
+    var iconMetrics: (baseSize: Double, visualScale: Double) {
+        let size = flow.itemSize
+        guard size.width > 0, size.height > 0 else { return (96, 1) }
+        let settings = model.gridSettings
+        let metrics = GridIconLayoutPolicy.iconMetrics(cellSize: size, labelAllowance: settings.labelVisible ? 23 : 8,
+            requestedScale: settings.iconScale, gap: min(CGFloat(settings.horizontalSpacing), CGFloat(settings.verticalSpacing)))
+        return (Double(metrics.baseSize), Double(metrics.visualScale))
+    }
+
+    func reload() {
+        guard isViewLoaded else { return }
+        items = model.pages.flatMap { $0 }
+        let valid = Set(items)
+        if let keyboardSelection, !valid.contains(keyboardSelection) { self.keyboardSelection = nil }
+        let selected = getSelection()
+        let retained = selected.intersection(valid)
+        if selected != retained { setSelection(retained) }
+        collection.reloadData()
+        updateMetrics(force: true)
+    }
+
+    var cellSize: NSSize { flow.itemSize }
+
+    func resetToTop() {
+        guard isViewLoaded else { return }
+        scroll.contentView.scroll(to: .zero)
+        scroll.reflectScrolledClipView(scroll.contentView)
+        keyboardSelection = nil
+        refreshSelection()
+    }
+
+    var visiblePage: Int? {
+        guard isViewLoaded else { return nil }
+        let visible = scroll.contentView.bounds
+        guard let index = flow.layoutAttributesForElements(in: visible).compactMap({ $0.indexPath?.item }).min() else { return nil }
+        var offset = 0
+        for (page, entries) in model.pages.enumerated() {
+            if index < offset + entries.count { return page }
+            offset += entries.count
+        }
+        return nil
+    }
+
+    private var dragGeneration: UInt = 0
+    private var dragMonitor: VerticalDragMonitor?
+    private var dockFrames: [CGRect] = []
+    private var lastDockCheck: CFTimeInterval = 0
+
+    func cancelDrag() {
+        resetItemDrag()
+        collection.cancelMarquee()
+    }
+
+    private func resetItemDrag() {
+        dragGeneration &+= 1
+        dragMonitor?.remove()
+        dragMonitor = nil
+        pending = nil
+        dragging = false
+        dragView?.removeFromSuperview()
+        dragView = nil
+    }
+
+    func selectAllItems() -> Bool {
+        let all = items
+        guard !all.isEmpty, !dragging else { return false }
+        keyboardSelection = nil
+        setSelection(Set(all))
+        refreshSelection()
+        return true
+    }
+
+    func clearSelection() {
+        keyboardSelection = nil
+        setSelection([])
+        refreshSelection()
+    }
+
+    func moveSelection(columns: Int, rows: Int) {
+        let all = items
+        guard !all.isEmpty else { return }
+        let delta = columns + rows * max(model.gridSettings.columns, 1)
+        let index = keyboardSelection.flatMap { all.firstIndex(of: $0) }.map { min(max($0 + delta, 0), all.count - 1) } ?? 0
+        keyboardSelection = all[index]
+        setSelection([])
+        refreshSelection()
+        let path = IndexPath(item: index, section: 0)
+        if let frame = collection.layoutAttributesForItem(at: path)?.frame {
+            let visible = scroll.contentView.bounds
+            var origin = visible.origin
+            if frame.minY < visible.minY { origin.y = frame.minY }
+            else if frame.maxY > visible.maxY { origin.y = frame.maxY - visible.height }
+            origin.y = min(max(origin.y, 0), max(0, collection.bounds.height - visible.height))
+            if origin != visible.origin {
+                scroll.contentView.scroll(to: origin)
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+        }
+        (collection.item(at: path) as? GridCellItem)?.applySelection(true)
+    }
+
+    func launchSelection() {
+        guard let keyboardSelection, items.contains(keyboardSelection) else { return }
+        onActivate(keyboardSelection)
+    }
+
+    func refreshSelection() {
+        let selected = getSelection()
+        let all = items
+        for cell in collection.visibleItems() {
+            guard let path = collection.indexPath(for: cell), all.indices.contains(path.item) else { continue }
+            (cell as? GridCellItem)?.applySelection(selected.contains(all[path.item]) || keyboardSelection == all[path.item])
+        }
+    }
+
+    private func select(in rect: NSRect) {
+        let all = items
+        var selected = marqueeBase
+        for attributes in flow.layoutAttributesForElements(in: rect) {
+            guard let path = attributes.indexPath, all.indices.contains(path.item) else { continue }
+            let frame = (collection.item(at: path) as? GridCellItem).map { collection.convert($0.contentHitTestFrame, from: $0.view) } ?? attributes.frame
+            if rect.intersects(frame) { selected.insert(all[path.item]) }
+        }
+        setSelection(selected)
+        refreshSelection()
+    }
+
+    private func mouseDown(_ path: IndexPath, event: NSEvent) {
+        resetItemDrag()
+        let all = items
+        guard all.indices.contains(path.item) else { return }
+        let item = all[path.item]
+        keyboardSelection = nil
+        if event.modifierFlags.contains(.command) {
+            var selected = getSelection()
+            if !selected.insert(item).inserted { selected.remove(item) }
+            setSelection(selected)
+            refreshSelection()
+            return
+        }
+        if !getSelection().contains(item) { setSelection([]); refreshSelection() }
+        pending = (item, collection.convert(event.locationInWindow, from: nil), event)
+    }
+
+    private func handleVerticalDrag(_ event: NSEvent) {
+        guard let pending else { return }
+        let point = collection.convert(event.locationInWindow, from: nil)
+        if !dragging {
+            guard hypot(point.x - pending.start.x, point.y - pending.start.y) >= 4 else { return }
+            dragging = true
+            armDragSafety()
+            if let index = items.firstIndex(of: pending.item),
+               let cell = collection.item(at: IndexPath(item: index, section: 0)),
+               let bitmap = cell.view.bitmapImageRepForCachingDisplay(in: cell.view.bounds) {
+                cell.view.cacheDisplay(in: cell.view.bounds, to: bitmap)
+                let image = NSImage(size: cell.view.bounds.size)
+                image.addRepresentation(bitmap)
+                let preview = NSImageView(frame: cell.view.frame)
+                preview.image = image
+                preview.alphaValue = 0.85
+                collection.addSubview(preview)
+                dragView = preview
+            }
+        }
+        if handoffToDock(item: pending.item, downEvent: pending.event, dragEvent: event) { return }
+        if let dragView { dragView.frame.origin = NSPoint(x: point.x - dragView.frame.width / 2, y: point.y - dragView.frame.height / 2) }
+        scrollNearEdge(point)
+    }
+
+    private func scrollNearEdge(_ point: NSPoint) {
+        let visible = scroll.contentView.bounds
+        let edge: CGFloat = 36
+        var origin = visible.origin
+        if point.y < visible.minY + edge { origin.y = max(0, origin.y - 12) }
+        if point.y > visible.maxY - edge { origin.y = min(max(0, collection.bounds.height - visible.height), origin.y + 12) }
+        if origin != visible.origin { scroll.contentView.scroll(to: origin); scroll.reflectScrolledClipView(scroll.contentView) }
+    }
+
+    private func armDragSafety() {
+        dragGeneration &+= 1
+        let generation = dragGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + ItemDrag.itemDragSafetyNetTimeout) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.dragging, self.dragGeneration == generation else { return }
+                self.cancelDrag()
+            }
+        }
+        guard collection.window != nil else { return }
+        if let token = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp], handler: { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.dragging, self.dragGeneration == generation else { return }
+                self.cancelDrag()
+            }
+        }) { dragMonitor = VerticalDragMonitor(token) }
+    }
+
+    private func handoffToDock(item: LayoutItem, downEvent: NSEvent, dragEvent: NSEvent) -> Bool {
+        guard case .app = item, let window = collection.window, let screen = window.screen else { return false }
+        let point = window.convertPoint(toScreen: dragEvent.locationInWindow)
+        let frame = screen.frame
+        guard point.y <= frame.minY + frame.height * 0.25 || point.x <= frame.minX + frame.width * 0.25 || point.x >= frame.maxX - frame.width * 0.25 else { return false }
+        let now = CACurrentMediaTime()
+        if now - lastDockCheck >= 0.15 {
+            dockFrames = DockSafeArea.visibleDockFrames(on: screen)
+            lastDockCheck = now
+        }
+        let orientation = UserDefaults(suiteName: "com.apple.dock")?.string(forKey: "orientation") ?? "bottom"
+        let nearBottom = DockSafeArea.isHiddenBottomDockEdge(point: point, screenFrame: frame, orientation: orientation, canReveal: true)
+        guard nearBottom || DockSafeArea.containsDock(point: point, screenFrame: frame, dockFrames: dockFrames) else { return false }
+        let all = items
+        guard let index = all.firstIndex(of: item), let attributes = collection.layoutAttributesForItem(at: IndexPath(item: index, section: 0)) else { return false }
+        let selected = getSelection()
+        let group: Set<LayoutItem> = selected.contains(item) && selected.count > 1 ? selected : [item]
+        let records = all.filter { group.contains($0) }.compactMap { entry -> ApplicationRecord? in
+            guard case .app(let id) = entry else { return nil }
+            return model.record(for: id)
+        }
+        guard records.count == group.count else { return false }
+        let draggingItems = records.map { record in
+            DockDragSource.item(url: record.bundleURL, image: NSWorkspace.shared.icon(forFile: record.bundleURL.path), frame: attributes.frame)
+        }
+        let sourceView = collection.item(at: IndexPath(item: index, section: 0))?.view
+        setSelection([])
+        refreshSelection()
+        cancelDrag()
+        DockDragSource.shared.prepare(window: window, sourceView: sourceView)
+        collection.beginDraggingSession(with: draggingItems, event: downEvent, source: DockDragSource.shared)
+        return true
+    }
+
+    private func handleVerticalUp(_ event: NSEvent) {
+        guard let pending else { return }
+        let didDrag = dragging
+        let point = collection.convert(event.locationInWindow, from: nil)
+        resetItemDrag()
+        if !didDrag { setSelection([]); refreshSelection(); onActivate(pending.item); return }
+        guard scroll.contentView.bounds.contains(point) else { return }
+        let all = items
+        guard let source = all.firstIndex(of: pending.item), !all.isEmpty else { return }
+        guard let index = collection.indexPathForItem(at: point)?.item ?? nearestItem(at: point), all.indices.contains(index) else { return }
+        let target = all[index]
+        var selection = getSelection()
+        if !selection.contains(pending.item) { selection = [pending.item] }
+        guard !selection.contains(target) else { return }
+        var offset = 0
+        for page in model.pages.indices {
+            let count = model.pages[page].count
+            if index < offset + count {
+                let local = index - offset
+                let path = IndexPath(item: index, section: 0)
+                let frame = collection.layoutAttributesForItem(at: path)?.frame ?? .zero
+                let center = frame.insetBy(dx: frame.width * 0.3, dy: frame.height * 0.3)
+                let folderTarget: LayoutItem? = center.contains(point) && selection.allSatisfy { if case .app = $0 { return true }; return false } ? target : nil
+                let after = point.y > frame.maxY || (point.y >= frame.minY && point.x > frame.midX)
+                var insertion = local + (after ? 1 : 0)
+                if source >= offset, source < offset + count, source - offset < insertion { insertion -= 1 }
+                if model.moveItems(selection, leader: pending.item, toPage: page, toIndex: insertion, folderTarget: folderTarget) != nil {
+                    setSelection([])
+                    Task { await model.save() }
+                }
+                return
+            }
+            offset += count
+        }
+    }
+
+    private func nearestItem(at point: NSPoint) -> Int? {
+        let count = items.count
+        return flow.layoutAttributesForElements(in: scroll.contentView.bounds).compactMap { attributes -> (Int, CGFloat)? in
+            guard let index = attributes.indexPath?.item, index >= 0, index < count else { return nil }
+            let frame = attributes.frame
+            let dx = max(max(frame.minX - point.x, point.x - frame.maxX), 0)
+            let dy = max(max(frame.minY - point.y, point.y - frame.maxY), 0)
+            return (index, dx * dx + dy * dy)
+        }.min { lhs, rhs in lhs.1 == rhs.1 ? lhs.0 < rhs.0 : lhs.1 < rhs.1 }?.0
+    }
+
+    func numberOfSections(in collectionView: NSCollectionView) -> Int { 1 }
+    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int { items.count }
+    func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
+        guard let cell = collectionView.makeItem(withIdentifier: cellIdentifier, for: indexPath) as? GridCellItem,
+              items.indices.contains(indexPath.item) else { return NSCollectionViewItem() }
+        let item = items[indexPath.item]
+        let metrics = iconMetrics
+        let selected = getSelection().contains(item) || keyboardSelection == item
+        cell.setPressAction { [weak self] in self?.onActivate(item) }
+        switch item {
+        case .app(let id):
+            guard let record = model.record(for: id) else { return cell }
+            let cache = iconCache
+            let key = record.iconCacheKey
+            let cached = cache.cachedIconIfAvailable(for: record)
+            cell.configureAsApp(record: record, icon: cached ?? GridCellItem.loadingIcon,
+                isSelected: selected, iconSize: metrics.baseSize, visualScale: metrics.visualScale,
+                displayName: model.displayName(for: record), showsLabel: model.gridSettings.labelVisible)
+            if cached == nil {
+                cell.setIconLoadTask(Task { @MainActor [weak cell] in
+                    let icon = await cache.icon(for: record)
+                    guard !Task.isCancelled, let cell, cell.currentRequestKey == key else { return }
+                    cell.setIcon(icon)
+                })
+            }
+        case .folder(let id):
+            let folder = model.folders[id]
+            let key = "folder:" + id.value
+            let records = folder?.pages.flatMap { $0 }.compactMap { item -> ApplicationRecord? in
+                guard case .app(let id) = item else { return nil }
+                return model.record(for: id)
+            }.prefix(9).map { $0 } ?? []
+            let cache = iconCache
+            let icons = records.compactMap { cache.cachedIconIfAvailable(for: $0) }
+            cell.configureAsFolder(name: folder?.name ?? L10n.defaultFolderName, isSelected: selected,
+                iconSize: metrics.baseSize, visualScale: metrics.visualScale, icons: icons, requestKey: key,
+                showsLabel: model.gridSettings.labelVisible)
+            if icons.count < records.count {
+                cell.setIconLoadTask(Task { @MainActor [weak cell] in
+                    var loaded: [NSImage] = []
+                    for record in records {
+                        guard !Task.isCancelled else { return }
+                        loaded.append(await cache.icon(for: record))
+                    }
+                    guard !Task.isCancelled, let cell, cell.currentRequestKey == key else { return }
+                    cell.setFolderIcons(loaded)
+                })
+            }
+        }
+        return cell
+    }
+}
+
+private final class VerticalDragMonitor: @unchecked Sendable {
+    private let token: Any
+    init(_ token: Any) { self.token = token }
+    func remove() { NSEvent.removeMonitor(token) }
 }

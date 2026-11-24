@@ -296,6 +296,15 @@ private func pair(spread: Float) -> [TouchSample] {
     #expect(!blocked(30, 0, 12.1))
 }
 
+@Test func gestureWithoutTouchCountIsBlockedDuringSelectedContactSequence() {
+    var state = GestureEventTapCoordinator.ContactState()
+    #expect(!state.shouldSuppress(eventType: 29, eventTouchCount: 0, selected: 4, now: 10))
+    state.record(deviceID: 1, count: 4, valid: true, selected: 4, now: 10)
+    #expect(state.shouldSuppress(eventType: 29, eventTouchCount: 0, selected: 4, now: 10))
+    #expect(!state.shouldSuppress(eventType: 29, eventTouchCount: 2, selected: 4, now: 10))
+    #expect(!state.shouldSuppress(eventType: 29, eventTouchCount: 0, selected: 4, now: 12))
+}
+
 /// The multitouch framework can report a frame whose contacts share an
 /// identifier — a device hiccup, or two devices' frames interleaved. Four
 /// contacts that are really two fingers say nothing about how far apart four

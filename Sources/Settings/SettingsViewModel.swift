@@ -161,12 +161,32 @@ public final class SettingsViewModel: ObservableObject {
             persist()
         }
     }
+    @Published public var usageSortFailed = false
+
     @Published public var sortMode: SortMode {
         didSet {
             guard sortMode != oldValue else { return }
             guard !isRefreshing else { return }
-            model.applySortMode(sortMode)
-            persist()
+            if sortMode == .usage {
+                let revision = model.sortRevision
+                Task { [weak self] in
+                    guard let self, self.sortMode == .usage, self.model.sortRevision == revision else { return }
+                    do {
+                        try await self.model.sortByUsage()
+                        self.persist()
+                    } catch {
+                        guard self.sortMode == .usage else { return }
+                        let wasRefreshing = self.isRefreshing
+                        self.isRefreshing = true
+                        self.sortMode = self.model.gridSettings.sortMode
+                        self.isRefreshing = wasRefreshing
+                        if !(error is CancellationError) { self.usageSortFailed = true }
+                    }
+                }
+            } else {
+                model.applySortMode(sortMode)
+                persist()
+            }
         }
     }
 
@@ -462,10 +482,7 @@ public final class SettingsViewModel: ObservableObject {
         pageMargins = grid.pageMargins
         iconScale = grid.iconScale
         iconScalePreset = GridIconScalePreset.matching(grid)
-        layoutMode = model.layoutMode == .verticalScroll ? .paged : model.layoutMode
-        if model.layoutMode == .verticalScroll {
-            model.setLayoutMode(.paged)
-        }
+        layoutMode = model.layoutMode
         sortMode = grid.sortMode
         hideDockWhileLauncherOpen = model.hideDockWhileLauncherOpen
         returnToFirstPage = model.returnToFirstPage
@@ -558,6 +575,8 @@ public final class SettingsViewModel: ObservableObject {
     public func resetGridLayout() {
         var grid = GridSettings.default
         grid.sortMode = model.gridSettings.sortMode
+        grid.sortReversed = model.gridSettings.sortReversed
+        grid.sortFolders = model.gridSettings.sortFolders
         grid.labelVisible = model.gridSettings.labelVisible
         grid.windowed = model.gridSettings.windowed
         model.updateGridSettings(grid)
@@ -784,7 +803,7 @@ public final class SettingsViewModel: ObservableObject {
         iconScale = grid.iconScale
         iconScalePreset = GridIconScalePreset.matching(grid)
 
-        layoutMode = model.layoutMode == .verticalScroll ? .paged : model.layoutMode
+        layoutMode = model.layoutMode
         sortMode = grid.sortMode
         hideDockWhileLauncherOpen = model.hideDockWhileLauncherOpen
         returnToFirstPage = model.returnToFirstPage

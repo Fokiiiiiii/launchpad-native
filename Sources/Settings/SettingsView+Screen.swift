@@ -58,6 +58,49 @@ extension SettingsView {
                     )
                     SettingsCardDivider()
                     SettingsCardRow(minHeight: 34) {
+                        Picker(L10n.layoutModeLabel, selection: $viewModel.layoutMode) {
+                            Text(L10n.layoutModePaged).tag(LayoutMode.paged)
+                            Text(L10n.layoutModeScroll).tag(LayoutMode.verticalScroll)
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow(minHeight: 34) {
+                        Picker(selection: $viewModel.sortMode) {
+                            Text(L10n.sortModeCustom).tag(SortMode.custom)
+                            Text(L10n.sortModeName).tag(SortMode.name)
+                            Text(L10n.sortModeDateAdded).tag(SortMode.dateAdded)
+                            Text(L10n.sortModeLastUsed).tag(SortMode.lastUsed)
+                            Text(L10n.sortModeUsage).tag(SortMode.usage)
+                        } label: {
+                            Text(L10n.sortByLabel)
+                        }
+                        .pickerStyle(.menu)
+                        .alert(L10n.usageSortFailed, isPresented: $viewModel.usageSortFailed) {
+                            Button(L10n.okButton) { }
+                        } message: {
+                            Text(L10n.usageSortHelp)
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow(minHeight: 34) {
+                        HStack {
+                            Spacer()
+                            Button(L10n.reorganizeButton) {
+                                viewModel.reorganizePages()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow(minHeight: 34) {
+                        Toggle(isOn: $viewModel.labelVisible) {
+                            Text(L10n.showIconNamesLabel)
+                        }
+                    }
+                    SettingsCardDivider()
+                    SettingsCardRow(minHeight: 34) {
                         HStack {
                             Spacer()
                             Button(role: .destructive) {
@@ -120,35 +163,6 @@ extension SettingsView {
                     SettingsCardRow(minHeight: 34) {
                         Toggle(isOn: $viewModel.windowed) {
                             Text(L10n.windowedLabel)
-                        }
-                    }
-                    SettingsCardDivider()
-                    SettingsCardRow(minHeight: 34) {
-                        Picker(selection: $viewModel.sortMode) {
-                            Text(L10n.sortModeCustom).tag(SortMode.custom)
-                            Text(L10n.sortModeName).tag(SortMode.name)
-                            Text(L10n.sortModeDateAdded).tag(SortMode.dateAdded)
-                            Text(L10n.sortModeLastUsed).tag(SortMode.lastUsed)
-                        } label: {
-                            Text(L10n.sortByLabel)
-                        }
-                        .pickerStyle(.menu)
-                    }
-                    SettingsCardDivider()
-                    SettingsCardRow(minHeight: 34) {
-                        HStack {
-                            Spacer()
-                            Button(L10n.reorganizeButton) {
-                                viewModel.reorganizePages()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-                    SettingsCardDivider()
-                    SettingsCardRow(minHeight: 34) {
-                        Toggle(isOn: $viewModel.labelVisible) {
-                            Text(L10n.showIconNamesLabel)
                         }
                     }
                     SettingsCardDivider()

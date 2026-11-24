@@ -61,6 +61,31 @@ private func waitUntil(_ condition: () -> Bool) async {
     #expect(model.gridSettings.pageMargins == 54)
 }
 
+@Test @MainActor func settingsPreserveVerticalLayoutMode() {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = GridModel(layoutStore: LayoutStore(directory: directory))
+    model.setLayoutMode(.verticalScroll)
+    let viewModel = SettingsViewModel(model: model, onTriggerSettingsChanged: { _ in .failed }, onDockVisibilityChanged: { _ in })
+    #expect(viewModel.layoutMode == .verticalScroll)
+    #expect(model.layoutMode == .verticalScroll)
+    viewModel.refresh()
+    #expect(viewModel.layoutMode == .verticalScroll)
+}
+
+@Test @MainActor func changingSortBeforeUsageRequestStartsKeepsTheNewChoice() async {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = GridModel(layoutStore: LayoutStore(directory: directory))
+    let viewModel = SettingsViewModel(model: model, onTriggerSettingsChanged: { _ in .failed }, onDockVisibilityChanged: { _ in })
+    viewModel.sortMode = .usage
+    viewModel.sortMode = .name
+    await Task.yield()
+    #expect(viewModel.sortMode == .name)
+    #expect(model.gridSettings.sortMode == .name)
+    #expect(!viewModel.usageSortFailed)
+}
+
 @Test @MainActor func resetGridLayoutRestoresGeometryWithoutChangingSortMode() {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("launchpad-settings-reset-test-\(UUID().uuidString)", isDirectory: true)

@@ -75,6 +75,8 @@ final class LauncherWindow: NSWindow {
     /// Escape reaches here via the standard responder chain when no control
     /// consumes it first (search field included), which is how AppKit
     /// surfaces "the user pressed Escape" without a raw keyDown override.
+    var onSelectAll: (() -> Bool)?
+
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
     }
@@ -94,8 +96,13 @@ final class LauncherWindow: NSWindow {
         case "f":
             onFocusSearch?()
             return true
+        case "a" where event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command:
+            if let text = firstResponder as? NSText, !text.string.isEmpty {
+                return super.performKeyEquivalent(with: event)
+            }
+            if onSelectAll?() == true { return true }
+            return super.performKeyEquivalent(with: event)
         case "z" where !event.modifierFlags.contains(.shift):
-            // Text typed into the search field keeps its own undo.
             if let text = firstResponder as? NSText, !text.string.isEmpty {
                 return super.performKeyEquivalent(with: event)
             }

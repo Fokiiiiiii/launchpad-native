@@ -3,6 +3,8 @@ import Foundation
 import Testing
 @testable import Grid
 
+import Carbon
+
 private func contextMenuRecord() -> ApplicationRecord {
     ApplicationRecord(
         id: StableAppID(bundleURL: URL(fileURLWithPath: "/tmp/Test.app"), bundleIdentifier: "test", teamIdentifier: nil),
@@ -38,6 +40,22 @@ private func contextMenuRecord() -> ApplicationRecord {
     #expect(withDockAction.items.count == withoutDockAction.items.count + 1)
 }
 
+@Test @MainActor func quitItemsAppearOnlyWhenActionsAreAvailable() {
+    let record = contextMenuRecord()
+    let without = ContextMenuBuilder.menu(for: record, actions: .init(open: {}, showInFinder: {}, rename: {}, hide: {}))
+    var quitCount = 0
+    var forceCount = 0
+    let menu = ContextMenuBuilder.menu(for: record, actions: .init(open: {}, showInFinder: {}, rename: {}, hide: {}, quit: { quitCount += 1 }, forceQuit: { forceCount += 1 }))
+    #expect(menu.items.count == without.items.count + 2)
+    guard let quit = menu.items[1] as? ClosureMenuItem, let force = menu.items[2] as? ClosureMenuItem else {
+        Issue.record("quit actions unavailable"); return
+    }
+    quit.invoke()
+    force.invoke()
+    #expect(quitCount == 1)
+    #expect(forceCount == 1)
+}
+
 /// Get Info used to open Finder with the app selected — what Show in Finder
 /// already does — so it is offered only when something really provides it.
 @Test @MainActor func getInfoAppearsOnlyWhenThereIsSomethingToRun() {
@@ -48,6 +66,27 @@ private func contextMenuRecord() -> ApplicationRecord {
     // The item and the separator in front of it.
     #expect(with.items.count == without.items.count + 2)
     #expect(without.items.last?.isSeparatorItem != true)
+}
+
+@Test func finderInfoEventPassesThePathAsData() throws {
+    let path = "/tmp/a \"quoted\" name\nsecond line.app"
+    let url = URL(fileURLWithPath: path)
+    let event = try #require(FinderInfoAction.event(for: url))
+    #expect(event.eventClass == AEEventClass(kASAppleScriptSuite))
+    #expect(event.eventID == AEEventID(kASSubroutineEvent))
+    #expect(event.paramDescriptor(forKeyword: AEKeyword(keyASSubroutineName))?.stringValue == "showInfo")
+    #expect(event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.atIndex(1)?.stringValue == url.path)
+    #expect(FinderInfoAction.event(for: URL(string: "https://example.invalid/app")!) == nil)
+}
+
+@Test @MainActor func finderInfoEventInvokesLocalHandlerWithExactPath() throws {
+    let url = URL(fileURLWithPath: "/tmp/name with spaces.app")
+    let event = try #require(FinderInfoAction.event(for: url))
+    let script = try #require(NSAppleScript(source: "on showInfo(posixPath)\nreturn posixPath\nend showInfo"))
+    var error: NSDictionary?
+    let result = script.executeAppleEvent(event, error: &error)
+    #expect(error == nil)
+    #expect(result.stringValue == url.path)
 }
 
 @Test @MainActor func hiddenMenuIconsLeaveEveryItemWithoutAnImage() {

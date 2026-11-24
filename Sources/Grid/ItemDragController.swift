@@ -174,6 +174,8 @@ final class ItemDragController {
 
     func isGroupSelected(_ item: LayoutItem) -> Bool { selectedItems.contains(item) }
 
+    var groupSelection: Set<LayoutItem> { selectedItems }
+
     func isGroupItemBeingDragged(_ item: LayoutItem) -> Bool {
         activeItemDrag != nil && draggedGroup.contains(item)
     }
@@ -184,6 +186,26 @@ final class ItemDragController {
             (cell as? GridCellItem)?.applySelection(false)
             cell.view.layer?.opacity = 1
         }
+    }
+
+    func setGroupSelection(_ items: Set<LayoutItem>) {
+        selectedItems = items
+        guard model.pages.indices.contains(currentPage) else { return }
+        for (index, item) in model.pages[currentPage].enumerated() {
+            (collectionView.item(at: IndexPath(item: index, section: 0)) as? GridCellItem)?.applySelection(items.contains(item))
+        }
+    }
+
+    func selectAllItems() -> Bool {
+        guard !isDragging, model.pages.indices.contains(currentPage) else { return false }
+        let items = model.pages.flatMap { $0 }
+        guard !items.isEmpty else { return false }
+        callbacks.clearKeyboardSelection()
+        selectedItems = Set(items)
+        for index in model.pages[currentPage].indices {
+            (collectionView.item(at: IndexPath(item: index, section: 0)) as? GridCellItem)?.applySelection(true)
+        }
+        return true
     }
 
     func handleItemMouseDown(indexPath: IndexPath, event: NSEvent) {
@@ -295,6 +317,11 @@ final class ItemDragController {
     }
 
     func cancelItemDragIfNeeded() {
+        if let pending = pendingItemPress {
+            pendingItemPress = nil
+            itemDragMouseDownEvent = nil
+            applyPressFeedback(at: pending.indexPath, pressed: false)
+        }
         guard let session = activeItemDrag else { return }
         DiagnosticsLog.grid.notice("cancelItemDragIfNeeded: reverting drag of item \(session.sourceOriginalIndex, privacy: .public)")
         revertItemDrag(session: session)

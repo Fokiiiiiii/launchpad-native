@@ -97,3 +97,39 @@ public enum LegacyLaunchpadImporter {
     }
 
 }
+
+enum ApplicationUsageReader {
+    enum ReadError: Error { case unavailable, invalidData }
+
+    static var defaultURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Knowledge/knowledgeC.db")
+    }
+
+    static func read(from url: URL) throws -> [String: Int64] {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK,
+              let database else {
+            if let database { sqlite3_close(database) }
+            throw ReadError.unavailable
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        let query = "SELECT ZVALUESTRING, COUNT(*) FROM ZOBJECT WHERE ZSTREAMNAME = '/app/usage' AND ZVALUESTRING IS NOT NULL GROUP BY ZVALUESTRING"
+        guard sqlite3_prepare_v2(database, query, -1, &statement, nil) == SQLITE_OK,
+              let statement else { throw ReadError.invalidData }
+        defer { sqlite3_finalize(statement) }
+        var result: [String: Int64] = [:]
+        while true {
+            switch sqlite3_step(statement) {
+            case SQLITE_ROW:
+                guard let value = sqlite3_column_text(statement, 0) else { throw ReadError.invalidData }
+                result[String(cString: value)] = sqlite3_column_int64(statement, 1)
+            case SQLITE_DONE:
+                return result
+            default:
+                throw ReadError.invalidData
+            }
+        }
+    }
+}

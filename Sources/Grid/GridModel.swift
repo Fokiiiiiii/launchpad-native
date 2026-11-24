@@ -88,13 +88,7 @@ public final class GridModel {
         pages = document.pages.isEmpty ? [[]] : document.pages
         folders = document.folders
 
-        // Vertical scrolling is a legacy value without a renderer. Normalize it
-        // in memory and persist the migration together with any capacity reflow.
         var requiresSave = false
-        if document.layoutMode == .verticalScroll {
-            document.layoutMode = .paged
-            requiresSave = true
-        }
 
         gridSettings = document.gridSettings
         // A document can contain pages packed for a larger capacity. Reflow
@@ -307,7 +301,14 @@ public final class GridModel {
     /// Switching back to `.custom` is a no-op beyond recording the preference:
     /// the manual order was already overwritten, and restoring it would need
     /// undo history this does not keep.
+    private var usageCountsByBundle: [String: Int64]?
+
+    public private(set) var sortRevision: UInt = 0
+    public var canAdjustUsageSort: Bool { gridSettings.sortMode != .usage || usageCountsByBundle != nil }
+
     public func applySortMode(_ mode: SortMode) {
+        sortRevision &+= 1
+        guard mode != .usage || usageCountsByBundle != nil else { return }
         forgetUndoHistory()
         gridSettings.sortMode = mode
         document.gridSettings = gridSettings
@@ -320,18 +321,68 @@ public final class GridModel {
             sortEachContainer(by: isOrderedByDateAddedNewestFirst)
         case .lastUsed:
             sortEachContainer(by: isOrderedByLastUsedMostRecentFirst)
+        case .usage:
+            sortEachContainer { lhs, rhs in usageCount(for: lhs) > usageCount(for: rhs) }
         }
         orderDidChange()
     }
 
-    private func sortEachContainer(by areInIncreasingOrder: (LayoutItem, LayoutItem) -> Bool) {
-        for pageIndex in pages.indices {
-            pages[pageIndex].sort(by: areInIncreasingOrder)
+    public func setSortReversed(_ reversed: Bool) {
+        guard canAdjustUsageSort else { return }
+        guard gridSettings.sortReversed != reversed else { return }
+        gridSettings.sortReversed = reversed
+        applySortMode(gridSettings.sortMode)
+    }
+
+    public func setSortFolders(_ enabled: Bool) {
+        guard canAdjustUsageSort else { return }
+        guard gridSettings.sortFolders != enabled else { return }
+        gridSettings.sortFolders = enabled
+        applySortMode(gridSettings.sortMode)
+    }
+
+    public func sortByUsage() async throws {
+        try await sortByUsage(from: ApplicationUsageReader.defaultURL)
+    }
+
+    func sortByUsage(from url: URL) async throws {
+        sortRevision &+= 1
+        let revision = sortRevision
+        let snapshot = layoutSnapshot
+        let settings = gridSettings
+        let counts: [String: Int64]
+        do {
+            counts = try await Task.detached(priority: .userInitiated) {
+                try ApplicationUsageReader.read(from: url)
+            }.value
+        } catch {
+            guard revision == sortRevision else { throw CancellationError() }
+            throw error
         }
+        try Task.checkCancellation()
+        guard revision == sortRevision, snapshot == layoutSnapshot, settings == gridSettings else { throw CancellationError() }
+        usageCountsByBundle = counts
+        applySortMode(.usage)
+    }
+
+    private func usageCount(for item: LayoutItem) -> Int64 {
+        guard case .app(let id) = item,
+              let record = recordsByIDValue[id.value] else { return 0 }
+        return usageCountsByBundle?[record.bundleIdentifier] ?? 0
+    }
+
+    private func sortEachContainer(by areInIncreasingOrder: (LayoutItem, LayoutItem) -> Bool) {
+        let ordered: (LayoutItem, LayoutItem) -> Bool = { lhs, rhs in
+            self.gridSettings.sortReversed ? areInIncreasingOrder(rhs, lhs) : areInIncreasingOrder(lhs, rhs)
+        }
+        for pageIndex in pages.indices {
+            pages[pageIndex].sort(by: ordered)
+        }
+        guard gridSettings.sortFolders else { return }
         for folderID in Array(folders.keys) {
             guard var folder = folders[folderID] else { continue }
             for pageIndex in folder.pages.indices {
-                folder.pages[pageIndex].sort(by: areInIncreasingOrder)
+                folder.pages[pageIndex].sort(by: ordered)
             }
             folders[folderID] = folder
         }
@@ -1039,15 +1090,41 @@ public final class GridModel {
         orderDidChange()
     }
 
+    public func ungroupAllFolders() {
+        guard pages.joined().contains(where: { if case .folder = $0 { return true }; return false }) else { return }
+        let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
+        var page = 0
+        while page < pages.count {
+            var kept: [LayoutItem] = []
+            var ungrouped: [LayoutItem] = []
+            for item in pages[page] {
+                if case .folder(let id) = item, let folder = folders.removeValue(forKey: id) {
+                    ungrouped.append(contentsOf: folder.pages.flatMap { $0 })
+                } else {
+                    kept.append(item)
+                }
+            }
+            pages[page] = kept + ungrouped
+            cascadeOverflow(from: page)
+            page += 1
+        }
+        if pages.isEmpty { pages = [[]] }
+        orderDidChange()
+    }
+
     // MARK: - Hidden apps (2.16)
 
     /// Hides without unregistering/deleting anything — the app stays
     /// installed and known to Catalog, it just drops out of pages/folders
     /// and normal search until unhidden.
     public func hideApplication(_ id: StableAppID) {
+        hideApplications([id])
+    }
+
+    public func hideApplications(_ ids: [StableAppID]) {
+        guard !ids.isEmpty else { return }
         let undoPoint = layoutSnapshot; defer { rememberForUndo(undoPoint) }
-        let identifier = id.asPersistenceIdentifier
-        document.hiddenApplicationIDs.insert(identifier)
+        document.hiddenApplicationIDs.formUnion(ids.map(\.asPersistenceIdentifier))
         let hiddenValues = Set(document.hiddenApplicationIDs.map(\.value))
         let validIDs = Set(recordsByIDValue.keys).subtracting(hiddenValues)
         pruneMissingItems(validIDs: validIDs)

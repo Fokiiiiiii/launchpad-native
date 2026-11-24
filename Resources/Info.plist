@@ -34,6 +34,8 @@
     <string>15.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Allows Finder to show information for the selected application.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>

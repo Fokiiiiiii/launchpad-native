@@ -24,3 +24,35 @@ public enum AppLauncher {
         }
     }
 }
+
+import Carbon
+
+enum FinderInfoAction {
+    private static let scriptSource = """
+    on showInfo(posixPath)
+        tell application id "com.apple.finder"
+            activate
+            open information window of (POSIX file posixPath as alias)
+        end tell
+    end showInfo
+    """
+
+    static func event(for url: URL) -> NSAppleEventDescriptor? {
+        guard url.isFileURL, !url.path.isEmpty else { return nil }
+        let event = NSAppleEventDescriptor(eventClass: AEEventClass(kASAppleScriptSuite),
+            eventID: AEEventID(kASSubroutineEvent), targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+        event.setParam(NSAppleEventDescriptor(string: "showInfo"), forKeyword: AEKeyword(keyASSubroutineName))
+        let arguments = NSAppleEventDescriptor.list()
+        arguments.insert(NSAppleEventDescriptor(string: url.path), at: 1)
+        event.setParam(arguments, forKeyword: AEKeyword(keyDirectObject))
+        return event
+    }
+
+    @MainActor static func show(_ url: URL) -> Bool {
+        guard let event = event(for: url), let script = NSAppleScript(source: scriptSource) else { return false }
+        var error: NSDictionary?
+        _ = script.executeAppleEvent(event, error: &error)
+        return error == nil
+    }
+}

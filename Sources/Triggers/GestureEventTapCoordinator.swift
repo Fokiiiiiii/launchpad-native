@@ -34,8 +34,9 @@ public final class GestureEventTapCoordinator {
         }
 
         func shouldSuppress(eventType: UInt32, eventTouchCount: Int, selected: Int, now: TimeInterval) -> Bool {
-            if eventType == 29 { return eventTouchCount == selected }
-            return eventType == 30 && deviceID != nil && now >= lastFrameTime && now - lastFrameTime <= Self.staleAfter
+            let active = deviceID != nil && now >= lastFrameTime && now - lastFrameTime <= Self.staleAfter
+            if eventType == 29 { return eventTouchCount == selected || (eventTouchCount == 0 && active) }
+            return eventType == 30 && active
         }
     }
 

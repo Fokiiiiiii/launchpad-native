@@ -19,6 +19,8 @@ public enum ContextMenuBuilder {
         public var getInfo: (() -> Void)?
         public var showWindows: (() -> Void)?
         public var uninstall: (() -> Void)?
+        public var quit: (() -> Void)? = nil
+        public var forceQuit: (() -> Void)? = nil
     }
 
     public static func menu(
@@ -32,6 +34,13 @@ public enum ContextMenuBuilder {
 
         if record.canOpenNewInstance, let openNewInstance = actions.openNewInstance {
             menu.addItem(makeItem(L10n.menuOpenNewInstance, symbolName: "macwindow.badge.plus", iconVisibility: iconVisibility, action: openNewInstance))
+        }
+
+        if let quit = actions.quit {
+            menu.addItem(makeItem(L10n.menuBarQuitItem, symbolName: "xmark.circle", iconVisibility: iconVisibility, action: quit))
+        }
+        if let forceQuit = actions.forceQuit {
+            menu.addItem(makeItem(L10n.menuForceQuit, symbolName: "exclamationmark.circle", iconVisibility: iconVisibility, action: forceQuit))
         }
 
         menu.addItem(.separator())

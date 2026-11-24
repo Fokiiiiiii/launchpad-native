@@ -37,8 +37,15 @@ final class GridCollectionView: NSCollectionView {
     /// feed the recognizer.
     private let swipeRecognizer = SwipePageRecognizer()
 
+    var scrollsVertically = false
+
     override func scrollWheel(with event: NSEvent) {
-        swipeRecognizer.handle(event)
+        if scrollsVertically {
+            if let scroll = enclosingScrollView { scroll.scrollWheel(with: event) }
+            else { super.scrollWheel(with: event) }
+        } else {
+            swipeRecognizer.handle(event)
+        }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -62,38 +69,123 @@ final class GridCollectionView: NSCollectionView {
     var onItemMouseDragged: ((NSEvent) -> Void)?
     var onItemMouseUp: ((NSEvent) -> Void)?
 
+    var onMarqueeBegin: ((Bool) -> Void)?
+    var onMarqueeChange: ((NSRect) -> Void)?
+    var onMarqueeEnd: (() -> Void)?
+    private var backgroundPress: NSPoint?
+    private var backgroundAdditive = false
+    private var marqueeActive = false
+    private var marqueeView: NSView?
+
+    private var itemPressActive = false
+
+    var isMarqueeActive: Bool { marqueeActive }
+
+    var onMarqueePointer: ((NSPoint) -> Void)?
+
+    private var marqueeGeneration: UInt = 0
+    private var marqueeMonitor: MarqueeMonitor?
+
+    deinit { marqueeMonitor?.remove() }
+
+    func cancelMarquee() {
+        let wasActive = marqueeActive
+        marqueeGeneration &+= 1
+        marqueeMonitor?.remove()
+        marqueeMonitor = nil
+        itemPressActive = false
+        backgroundPress = nil
+        marqueeActive = false
+        marqueeView?.removeFromSuperview()
+        marqueeView = nil
+        if wasActive { onMarqueeEnd?() }
+    }
+
     override func mouseDown(with event: NSEvent) {
+        cancelMarquee()
         let point = convert(event.locationInWindow, from: nil)
         if let indexPath = indexPathForItem(at: point),
            let cell = item(at: indexPath) as? GridCellItem {
             let localPoint = cell.view.convert(point, from: self)
             if cell.contentHitTestFrame.insetBy(dx: -10, dy: -10).contains(localPoint) {
                 DiagnosticsLog.grid.notice("GridCollectionView.mouseDown: content hit at \(indexPath.item, privacy: .public)")
+                itemPressActive = true
                 onItemMouseDown?(indexPath, event)
                 return
             }
         }
         DiagnosticsLog.grid.notice("GridCollectionView.mouseDown: background click at \(String(describing: point), privacy: .public)")
-        onBackgroundClick?()
+        backgroundPress = point
+        backgroundAdditive = event.modifierFlags.contains(.command)
     }
 
     /// AppKit keeps routing mouseDragged/mouseUp to whichever view received
     /// the initiating mouseDown, for the duration of that press — standard
     /// NSResponder tracking behavior, no extra setup needed here.
     override func mouseDragged(with event: NSEvent) {
-        // `.debug`, not `.notice`: this fires 60-120 times a second for the
-        // whole duration of a drag, and `.notice` is persisted to the on-disk
-        // unified log store — a fixed per-event cost on the most
-        // latency-sensitive path in the app. `log stream --level debug` still
-        // shows these when diagnosing drag behaviour.
         DiagnosticsLog.grid.debug("GridCollectionView.mouseDragged fired")
-        onItemMouseDragged?(event)
+        guard let start = backgroundPress else {
+            if itemPressActive { onItemMouseDragged?(event) }
+            return
+        }
+        let end = convert(event.locationInWindow, from: nil)
+        if !marqueeActive {
+            guard hypot(end.x - start.x, end.y - start.y) >= 4 else { return }
+            marqueeActive = true
+            onMarqueeBegin?(backgroundAdditive)
+            guard marqueeActive else { return }
+            armMarqueeSafety()
+            let overlay = NSView()
+            overlay.wantsLayer = true
+            overlay.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor
+            overlay.layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.8).cgColor
+            overlay.layer?.borderWidth = 1
+            overlay.setAccessibilityElement(false)
+            addSubview(overlay)
+            marqueeView = overlay
+        }
+        let rect = NSRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))
+        marqueeView?.frame = rect
+        onMarqueeChange?(rect)
+        onMarqueePointer?(end)
+    }
+
+    private func armMarqueeSafety() {
+        marqueeGeneration &+= 1
+        let generation = marqueeGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + ItemDrag.itemDragSafetyNetTimeout) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.marqueeActive, self.marqueeGeneration == generation else { return }
+                self.cancelMarquee()
+            }
+        }
+        guard window != nil else { return }
+        if let token = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp], handler: { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.marqueeActive, self.marqueeGeneration == generation else { return }
+                self.cancelMarquee()
+            }
+        }) { marqueeMonitor = MarqueeMonitor(token) }
     }
 
     override func mouseUp(with event: NSEvent) {
         DiagnosticsLog.grid.debug("GridCollectionView.mouseUp fired")
-        onItemMouseUp?(event)
+        guard backgroundPress != nil else {
+            guard itemPressActive else { return }
+            itemPressActive = false
+            onItemMouseUp?(event)
+            return
+        }
+        let wasActive = marqueeActive
+        cancelMarquee()
+        if !wasActive { onBackgroundClick?() }
     }
 
 
+}
+
+private final class MarqueeMonitor: @unchecked Sendable {
+    private let token: Any
+    init(_ token: Any) { self.token = token }
+    func remove() { NSEvent.removeMonitor(token) }
 }

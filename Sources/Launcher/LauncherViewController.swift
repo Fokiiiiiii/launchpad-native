@@ -356,6 +356,29 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
         return true
     }
 
+    func selectAllGridItems() -> Bool {
+        guard viewModel.query.isEmpty else { return false }
+        return gridViewController.selectAllItems()
+    }
+
+    @objc private func selectAllFromMenu() {
+        _ = selectAllGridItems()
+    }
+
+    @objc private func ungroupAllFolders() {
+        let alert = NSAlert()
+        alert.messageText = L10n.ungroupAllFolders
+        alert.informativeText = L10n.ungroupAllConfirmation
+        alert.addButton(withTitle: L10n.okButton)
+        alert.addButton(withTitle: L10n.cancelButton)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        gridViewController.cancelItemDragIfNeeded()
+        gridViewController.closeFolderIfOpen()
+        gridViewController.clearItemSelection()
+        gridModel.ungroupAllFolders()
+        Task { await gridModel.save() }
+    }
+
     /// The controls on the search pill, for checking that clicks still reach
     /// them wherever the glass behind them sits in the hierarchy.
     var searchPillControlsForTesting: [NSView] { [searchField, clearSearchButton, quickMenuButton] }
@@ -667,15 +690,20 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
         let pagedItem = NSMenuItem(title: L10n.layoutModePaged, action: #selector(selectPagedLayoutMode), keyEquivalent: "")
         pagedItem.target = self
-        pagedItem.state = .on
+        pagedItem.state = gridModel.layoutMode == .paged ? .on : .off
         menu.addItem(pagedItem)
+        let scrollItem = NSMenuItem(title: L10n.layoutModeScroll, action: #selector(selectScrollLayoutMode), keyEquivalent: "")
+        scrollItem.target = self
+        scrollItem.state = gridModel.layoutMode == .verticalScroll ? .on : .off
+        menu.addItem(scrollItem)
 
         menu.addItem(.separator())
         let sortItem = NSMenuItem(title: L10n.sortByLabel, action: nil, keyEquivalent: "")
         let sortSubmenu = NSMenu()
         let modes: [(SortMode, String)] = [
             (.custom, L10n.sortModeCustom), (.name, L10n.sortModeName),
-            (.dateAdded, L10n.sortModeDateAdded), (.lastUsed, L10n.sortModeLastUsed)
+            (.dateAdded, L10n.sortModeDateAdded), (.lastUsed, L10n.sortModeLastUsed),
+            (.usage, L10n.sortModeUsage)
         ]
         for (mode, title) in modes {
             let mi = NSMenuItem(title: title, action: #selector(selectSortMode(_:)), keyEquivalent: "")
@@ -684,10 +712,29 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
             mi.state = gridModel.gridSettings.sortMode == mode ? .on : .off
             sortSubmenu.addItem(mi)
         }
+        sortSubmenu.addItem(.separator())
+        let reverse = NSMenuItem(title: L10n.reverseSortOrder, action: #selector(toggleSortOrder), keyEquivalent: "")
+        reverse.target = self
+        reverse.state = gridModel.gridSettings.sortReversed ? .on : .off
+        reverse.isEnabled = gridModel.gridSettings.sortMode != .custom
+        sortSubmenu.addItem(reverse)
+        let sortFolders = NSMenuItem(title: L10n.sortFolderContents, action: #selector(toggleSortFolders), keyEquivalent: "")
+        sortFolders.target = self
+        sortFolders.state = gridModel.gridSettings.sortFolders ? .on : .off
+        sortFolders.isEnabled = gridModel.gridSettings.sortMode != .custom
+        sortSubmenu.addItem(sortFolders)
         sortItem.submenu = sortSubmenu
         menu.addItem(sortItem)
 
         menu.addItem(.separator())
+        let selectAll = NSMenuItem(title: L10n.selectAllItems, action: #selector(selectAllFromMenu), keyEquivalent: "")
+        selectAll.target = self
+        selectAll.isEnabled = viewModel.query.isEmpty
+        menu.addItem(selectAll)
+        let ungroup = NSMenuItem(title: L10n.ungroupAllFolders, action: #selector(ungroupAllFolders), keyEquivalent: "")
+        ungroup.target = self
+        ungroup.isEnabled = !gridModel.folders.isEmpty
+        menu.addItem(ungroup)
 
         let settingsItem = NSMenuItem(title: L10n.openSettingsMenuItem, action: #selector(settingsButtonTapped), keyEquivalent: "")
         settingsItem.target = self
@@ -705,16 +752,60 @@ final class LauncherViewController: NSViewController, NSTextFieldDelegate, NSCol
 
     @objc private func selectPagedLayoutMode() { applyLayoutMode(.paged) }
 
+    @objc private func selectScrollLayoutMode() { applyLayoutMode(.verticalScroll) }
+
     private func applyLayoutMode(_ mode: LayoutMode) {
-        let supportedMode: LayoutMode = mode == .verticalScroll ? .paged : mode
-        gridModel.setLayoutMode(supportedMode)
+        gridModel.setLayoutMode(mode)
         Task { await gridModel.save() }
     }
 
     @objc private func selectSortMode(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let mode = SortMode(rawValue: raw) else { return }
-        gridModel.applySortMode(mode)
-        Task { await gridModel.save() }
+        if mode == .usage {
+            let revision = gridModel.sortRevision
+            Task { [weak self] in
+                guard let self, self.gridModel.sortRevision == revision else { return }
+                if await self.readUsageSort() { await self.gridModel.save() }
+            }
+        } else {
+            gridModel.applySortMode(mode)
+            Task { await gridModel.save() }
+        }
+    }
+
+    private func readUsageSort() async -> Bool {
+        do {
+            try await gridModel.sortByUsage()
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = L10n.usageSortFailed
+            alert.informativeText = L10n.usageSortHelp
+            alert.runModal()
+            return false
+        }
+    }
+
+    @objc private func toggleSortOrder() {
+        let revision = gridModel.sortRevision
+        Task { [weak self] in
+            guard let self, self.gridModel.sortRevision == revision else { return }
+            if !self.gridModel.canAdjustUsageSort, !(await self.readUsageSort()) { return }
+            self.gridModel.setSortReversed(!self.gridModel.gridSettings.sortReversed)
+            await self.gridModel.save()
+        }
+    }
+
+    @objc private func toggleSortFolders() {
+        let revision = gridModel.sortRevision
+        Task { [weak self] in
+            guard let self, self.gridModel.sortRevision == revision else { return }
+            if !self.gridModel.canAdjustUsageSort, !(await self.readUsageSort()) { return }
+            self.gridModel.setSortFolders(!self.gridModel.gridSettings.sortFolders)
+            await self.gridModel.save()
+        }
     }
 
     private func setSearchMode(active: Bool) {

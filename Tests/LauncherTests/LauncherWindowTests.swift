@@ -209,6 +209,15 @@ func searchEmptyStateOnlyParticipatesInAccessibilityWhenVisible() {
     #expect(closed)
 }
 
+@Test @MainActor func selectAllShortcutInvokesGridSelection() {
+    let window = LauncherWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100))
+    var calls = 0
+    window.onSelectAll = { calls += 1; return true }
+    let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: window.windowNumber, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 0)
+    #expect(event.map(window.performKeyEquivalent) == true)
+    #expect(calls == 1)
+}
+
 @Test @MainActor func launcherWindowStaysOnTheCurrentDesktop() {
     let window = LauncherWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100))
 

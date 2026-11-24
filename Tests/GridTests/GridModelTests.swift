@@ -6,6 +6,10 @@ import Testing
 
 import Darwin
 
+import AppKit
+
+import SQLite3
+
 private func record(
     _ name: String,
     id: String,
@@ -461,6 +465,324 @@ private func makeModel(directory: URL) -> GridModel {
     #expect(!model.undo())
 }
 
+@Test @MainActor func ungroupingAllFoldersAppendsItemsAndCanBeUndone() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c"), record("D", id: "d")])
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+    let original = model.pages
+    let originalFolders = model.folders
+    guard case .folder(let id) = original[0][0], let folder = model.folders[id] else {
+        Issue.record("folder missing"); return
+    }
+    let expected = Array(original[0].dropFirst()) + folder.pages.flatMap { page in page }
+    model.ungroupAllFolders()
+    #expect(model.pages[0] == expected)
+    #expect(model.folders.isEmpty)
+    #expect(model.undo())
+    #expect(model.pages == original)
+    #expect(model.folders == originalFolders)
+}
+
+@Test @MainActor func ungroupingAllFoldersCarriesOverflowWithoutLosingApps() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = (0..<36).map { index in record("App" + String(index), id: "id" + String(index)) }
+    model.reconcile(with: apps)
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+    model.moveItem(fromPage: 1, fromIndex: 0, toPage: 0, toIndex: 34)
+    let original = model.pages
+    let originalFolders = model.folders
+    model.ungroupAllFolders()
+    #expect(model.pages.map { page in page.count } == [35, 1])
+    #expect(Set(model.pages.flatMap { page in page }) == Set(apps.map { app in .app(app.id.asPersistenceIdentifier) }))
+    #expect(model.undo())
+    #expect(model.pages == original)
+    #expect(model.folders == originalFolders)
+}
+
+@Test @MainActor func hidingMultipleAppsCanBeUndoneTogether() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let a = record("A", id: "a")
+    let b = record("B", id: "b")
+    let c = record("C", id: "c")
+    model.reconcile(with: [a, b, c])
+    let original = model.pages
+    model.hideApplications([a.id, b.id])
+    #expect(Set(model.hiddenApplicationIdentifiers) == Set([a.id.asPersistenceIdentifier, b.id.asPersistenceIdentifier]))
+    #expect(model.undo())
+    #expect(model.pages == original)
+    #expect(model.hiddenApplicationIdentifiers.isEmpty)
+    #expect(!model.undo())
+}
+
+@Test @MainActor func selectingAllItemsIncludesEveryPage() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let view = NSView()
+    let scroll = NSScrollView()
+    let collection = GridCollectionView()
+    let drag = ItemDragController(model: model, layout: PagedGridLayout(), collectionView: collection, scrollView: scroll, view: view, callbacks: .init(currentPage: { 0 }, commitPageChange: { _ in }, prefetchIcons: { _ in }, neighborPage: { _, _ in nil }, activateItem: { _ in }, clearKeyboardSelection: {}))
+    #expect(!drag.selectAllItems())
+    let apps = (0..<60).map { index in record("App" + String(index), id: "id" + String(index)) }
+    model.reconcile(with: apps)
+    #expect(model.pages.count > 1)
+    #expect(drag.selectAllItems())
+    #expect(drag.groupSelection == Set(model.pages.flatMap { page in page }))
+    drag.clearGroupSelection()
+    #expect(drag.groupSelection.isEmpty)
+}
+
+@Test @MainActor func backgroundClickAndMarqueeAreDistinguished() {
+    let collection = GridCollectionView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+    collection.collectionViewLayout = NSCollectionViewFlowLayout()
+    var clicks = 0
+    var starts: [Bool] = []
+    var rects: [NSRect] = []
+    var ends = 0
+    collection.onBackgroundClick = { clicks += 1 }
+    collection.onMarqueeBegin = { starts.append($0) }
+    collection.onMarqueeChange = { rects.append($0) }
+    collection.onMarqueeEnd = { ends += 1 }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: point, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    collection.mouseDown(with: event(.leftMouseDown, NSPoint(x: 10, y: 10)))
+    #expect(clicks == 0)
+    collection.mouseUp(with: event(.leftMouseUp, NSPoint(x: 10, y: 10)))
+    #expect(clicks == 1)
+    collection.mouseDown(with: event(.leftMouseDown, NSPoint(x: 10, y: 10), .command))
+    collection.mouseDragged(with: event(.leftMouseDragged, NSPoint(x: 40, y: 50), .command))
+    #expect(collection.isMarqueeActive)
+    collection.mouseUp(with: event(.leftMouseUp, NSPoint(x: 40, y: 50), .command))
+    #expect(!collection.isMarqueeActive)
+    #expect(starts == [true])
+    let start = collection.convert(NSPoint(x: 10, y: 10), from: nil)
+    let end = collection.convert(NSPoint(x: 40, y: 50), from: nil)
+    let expected = NSRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(start.x - end.x), height: abs(start.y - end.y))
+    #expect(rects == [expected])
+    #expect(ends == 1)
+    #expect(clicks == 1)
+    var itemUps = 0
+    collection.onItemMouseUp = { _ in itemUps += 1 }
+    collection.mouseDown(with: event(.leftMouseDown, NSPoint(x: 10, y: 10)))
+    collection.mouseDragged(with: event(.leftMouseDragged, NSPoint(x: 40, y: 50)))
+    collection.cancelMarquee()
+    collection.mouseUp(with: event(.leftMouseUp, NSPoint(x: 40, y: 50)))
+    #expect(ends == 2)
+    #expect(clicks == 1)
+    #expect(itemUps == 0)
+}
+
+@Test @MainActor func marqueeSelectionUpdatesWhenTheRectangleShrinks() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")])
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.reload()
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first,
+          let collection = scroll.documentView as? GridCollectionView,
+          let first = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+          let second = collection.layoutAttributesForItem(at: IndexPath(item: 1, section: 0))?.frame else {
+        Issue.record("grid geometry unavailable"); return
+    }
+    collection.onMarqueeBegin?(false)
+    collection.onMarqueeChange?(first.union(second))
+    #expect(collection.menuProvider?(IndexPath(item: 0, section: 0))?.items.first?.submenu != nil)
+    collection.onMarqueeChange?(first)
+    #expect(collection.menuProvider?(IndexPath(item: 0, section: 0))?.items.first?.submenu == nil)
+    collection.onMarqueeEnd?()
+    collection.onMarqueeBegin?(true)
+    collection.onMarqueeChange?(second)
+    #expect(collection.menuProvider?(IndexPath(item: 0, section: 0))?.items.first?.submenu != nil)
+    collection.onMarqueeEnd?()
+}
+
+@Test @MainActor func cancelledItemPressDoesNotLaunchOnLaterMouseUp() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a")])
+    var launches = 0
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in launches += 1 }, onBackgroundClick: {})
+    controller.loadViewIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first,
+          let collection = scroll.documentView as? GridCollectionView,
+          let click = NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else {
+        Issue.record("grid unavailable"); return
+    }
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), click)
+    controller.cancelItemDragIfNeeded()
+    collection.onItemMouseUp?(click)
+    #expect(launches == 0)
+}
+
+@Test @MainActor func selectedAppsExposeBatchMenuAndCanBeHiddenTogether() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = (0..<60).map { index in record("App" + String(index), id: "id" + String(index)) }
+    model.reconcile(with: apps)
+    let original = model.pages
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.loadViewIfNeeded()
+    #expect(controller.selectAllItems())
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first,
+          let collection = scroll.documentView as? GridCollectionView,
+          let menu = collection.menuProvider?(IndexPath(item: 0, section: 0)),
+          let hide = menu.items.last as? ClosureMenuItem else {
+        Issue.record("batch menu is unavailable")
+        return
+    }
+    #expect(menu.items.first?.submenu?.items.count == original.count)
+    hide.invoke()
+    #expect(model.hiddenApplicationIdentifiers.count == apps.count)
+    #expect(model.undo())
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func selectedAppsCanBeGroupedAndUndone() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")])
+    let original = model.pages
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.loadViewIfNeeded()
+    #expect(controller.selectAllItems())
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first,
+          let collection = scroll.documentView as? GridCollectionView,
+          let menu = collection.menuProvider?(IndexPath(item: 0, section: 0)),
+          let group = menu.items.dropFirst().first as? ClosureMenuItem else {
+        Issue.record("group menu is unavailable")
+        return
+    }
+    group.invoke()
+    guard case .folder(let id) = model.pages[0][0], let folder = model.folders[id] else {
+        Issue.record("group did not create a folder")
+        return
+    }
+    #expect(folder.pages.flatMap { page in page } == original.flatMap { page in page })
+    #expect(model.undo())
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func selectedAppsOpenInGridOrder() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")]
+    model.reconcile(with: apps)
+    var launched: [StableAppID] = []
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { app in launched.append(app.id) }, onBackgroundClick: {})
+    controller.loadViewIfNeeded()
+    #expect(controller.selectAllItems())
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first,
+          let collection = scroll.documentView as? GridCollectionView,
+          let menu = collection.menuProvider?(IndexPath(item: 0, section: 0)),
+          let open = menu.items.dropLast().last as? ClosureMenuItem else {
+        Issue.record("open menu is unavailable"); return
+    }
+    open.invoke()
+    #expect(launched == apps.map { app in app.id })
+}
+
+@Test @MainActor func staleBatchMenuDoesNotHideRemainingApps() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = [record("A", id: "a"), record("B", id: "b")]
+    model.reconcile(with: apps)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.loadViewIfNeeded()
+    #expect(controller.selectAllItems())
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first,
+          let collection = scroll.documentView as? GridCollectionView,
+          let menu = collection.menuProvider?(IndexPath(item: 0, section: 0)),
+          let hide = menu.items.last as? ClosureMenuItem else {
+        Issue.record("batch menu unavailable"); return
+    }
+    model.hideApplication(apps[0].id)
+    hide.invoke()
+    #expect(Set(model.hiddenApplicationIdentifiers) == Set([apps[0].id.asPersistenceIdentifier]))
+}
+
+@Test @MainActor func selectedAppsCanMoveIntoExistingFolder() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c"), record("D", id: "d")])
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+    let original = model.pages
+    guard case .folder(let id) = model.pages[0][0] else { Issue.record("folder missing"); return }
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.loadViewIfNeeded()
+    #expect(controller.selectAllItems())
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first,
+          let collection = scroll.documentView as? GridCollectionView,
+          let click = NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else {
+        Issue.record("grid unavailable"); return
+    }
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), click)
+    guard let menu = collection.menuProvider?(IndexPath(item: 1, section: 0)),
+          let destination = menu.items.dropFirst().first?.submenu?.items.first as? ClosureMenuItem else {
+        Issue.record("folder menu unavailable"); return
+    }
+    destination.invoke()
+    #expect(model.folders[id]?.pages.flatMap { page in page }.count == 4)
+    #expect(model.undo())
+    #expect(model.pages == original)
+    #expect(model.folders[id]?.pages.flatMap { page in page }.count == 2)
+}
+
+@Test @MainActor func selectedAppsCanMoveToAnotherPageAndUndo() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = (0..<60).map { index in record("App" + String(index), id: "id" + String(index)) }
+    model.reconcile(with: apps)
+    let original = model.pages
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.loadViewIfNeeded()
+    guard original.count > 1,
+          let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first,
+          let collection = scroll.documentView as? GridCollectionView,
+          let click = NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else {
+        Issue.record("grid unavailable"); return
+    }
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), click)
+    collection.onItemMouseDown?(IndexPath(item: 1, section: 0), click)
+    guard let menu = collection.menuProvider?(IndexPath(item: 0, section: 0)),
+          let destination = menu.items.first?.submenu?.items.dropFirst().first as? ClosureMenuItem else {
+        Issue.record("page menu unavailable"); return
+    }
+    destination.invoke()
+    #expect(!model.pages[0].contains(original[0][0]))
+    #expect(!model.pages[0].contains(original[0][1]))
+    #expect(model.undo())
+    #expect(model.pages == original)
+}
+
 @Test @MainActor func refusedChangesAndCatalogChangesLeaveNothingToUndo() async throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: dir) }
@@ -634,6 +956,604 @@ private func makeModel(directory: URL) -> GridModel {
     await model2.loadDocument()
     #expect(model2.folders.values.first?.name == "MyFolder")
     #expect(model2.pages[0].count == 1)
+}
+
+@Test @MainActor func verticalLayoutModeSurvivesReloadWithoutChangingPages() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b")])
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    await model.save()
+    let restored = makeModel(directory: dir)
+    await restored.loadDocument()
+    #expect(restored.layoutMode == .verticalScroll)
+    #expect(restored.pages == original)
+}
+
+@Test @MainActor func verticalGridDisplaysAllPagesAndActivatesItems() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = (0..<60).map { index in record("App" + String(index), id: "id" + String(index)) }
+    model.reconcile(with: apps)
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    var launched: [StableAppID] = []
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { app in launched.append(app.id) }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView else { Issue.record("vertical grid unavailable"); return }
+    #expect(collection.numberOfItems(inSection: 0) == 60)
+    #expect(controller.currentCellSize == (collection.collectionViewLayout as? NSCollectionViewFlowLayout)?.itemSize)
+    collection.layoutSubtreeIfNeeded()
+    #expect((collection.collectionViewLayout?.collectionViewContentSize.height ?? 0) > scroll.contentView.bounds.height)
+    #expect(model.pages == original)
+    #expect(controller.selectAllItems())
+    #expect(collection.menuProvider?(IndexPath(item: 0, section: 0))?.items.first?.submenu != nil)
+    controller.clearItemSelection()
+    controller.moveSelection(deltaColumns: 0, deltaRows: 0)
+    controller.launchSelection()
+    #expect(launched == [apps.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }[0].id])
+    model.setLayoutMode(.paged)
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func verticalKeyboardSelectionFollowsTheSameItemAfterReordering() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")]
+    model.reconcile(with: apps)
+    model.setLayoutMode(.verticalScroll)
+    var launched: [StableAppID] = []
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { app in launched.append(app.id) }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    controller.moveSelection(deltaColumns: 0, deltaRows: 0)
+    model.moveItem(fromPage: 0, fromIndex: 0, toPage: 0, toIndex: 2)
+    controller.launchSelection()
+    #expect(launched == [apps[0].id])
+}
+
+@Test @MainActor func verticalKeyboardNavigationScrollsToTheSelectedItem() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<105).map { index in record("App" + String(index), id: "id" + String(index)) })
+    model.setLayoutMode(.verticalScroll)
+    var launched: [StableAppID] = []
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { app in launched.append(app.id) }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }) else {
+        Issue.record("vertical grid unavailable"); return
+    }
+    controller.moveSelection(deltaColumns: 0, deltaRows: 0)
+    controller.moveSelection(deltaColumns: 0, deltaRows: 7)
+    #expect(scroll.contentView.bounds.origin.y > 0)
+    controller.launchSelection()
+    guard case .app(let id) = model.pages.flatMap({ page in page })[49] else { Issue.record("expected app"); return }
+    #expect(launched == [model.record(for: id)!.id])
+}
+
+@Test @MainActor func verticalSelectionDropsItemsRemovedFromTheCatalog() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")]
+    model.reconcile(with: apps)
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    #expect(controller.selectAllItems())
+    model.reconcile(with: Array(apps.prefix(2)))
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let menu = collection.menuProvider?(IndexPath(item: 0, section: 0)) else { Issue.record("vertical grid unavailable"); return }
+    #expect(menu.items.count > 1)
+}
+
+@Test @MainActor func verticalGridViewportCanScrollThroughAllItems() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<105).map { index in record("App" + String(index), id: "id" + String(index)) })
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = controller.view
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView else { Issue.record("vertical grid unavailable"); return }
+    #expect(collection.frame.height > scroll.contentView.bounds.height)
+    let before = scroll.contentView.bounds.origin.y
+    let visible = scroll.contentView.bounds
+    collection.onMarqueePointer?(NSPoint(x: visible.midX, y: visible.maxY - 1))
+    #expect(scroll.contentView.bounds.origin.y > before)
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: 250))
+    scroll.reflectScrolledClipView(scroll.contentView)
+    #expect(scroll.contentView.bounds.origin.y > before)
+    controller.resetToFirstPage()
+    #expect(scroll.contentView.bounds.origin.y == 0)
+}
+
+@Test @MainActor func verticalGridResizesAfterCatalogAndIconSettingsChange() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = (0..<105).map { index in record("App" + String(index), id: "id" + String(index)) }
+    model.reconcile(with: apps)
+    var settings = model.gridSettings
+    settings.iconScale = 0.7
+    model.updateGridSettings(settings)
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView else { Issue.record("vertical grid unavailable"); return }
+    let tall = collection.frame.height
+    let smallScale = controller.currentIconLayoutMetrics.visualScale
+    settings.iconScale = 1.0
+    model.updateGridSettings(settings)
+    #expect(controller.currentIconLayoutMetrics.visualScale > smallScale)
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: 500))
+    scroll.reflectScrolledClipView(scroll.contentView)
+    #expect(scroll.contentView.bounds.origin.y > 0)
+    model.reconcile(with: Array(apps.prefix(3)))
+    controller.view.layoutSubtreeIfNeeded()
+    #expect(scroll.contentView.bounds.origin.y == 0)
+    #expect(collection.frame.height < tall)
+    #expect(collection.frame.height >= scroll.contentView.bounds.height)
+    #expect(collection.numberOfItems(inSection: 0) == 3)
+}
+
+@Test @MainActor func verticalGridAdaptsToViewportResizeWithoutChangingLayout() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<80).map { index in record("App" + String(index), id: "id" + String(index)) })
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let flow = collection.collectionViewLayout as? NSCollectionViewFlowLayout else {
+        Issue.record("vertical grid unavailable"); return
+    }
+    let before = flow.itemSize
+    controller.view.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+    controller.view.layoutSubtreeIfNeeded()
+    #expect(flow.itemSize.width < before.width)
+    #expect(flow.itemSize.height < before.height)
+    #expect(collection.numberOfItems(inSection: 0) == 80)
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func verticalGridKeepsScrollPositionAfterSorting() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<105).map { index in record("App" + String(index), id: "id" + String(index)) })
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }) else {
+        Issue.record("vertical grid unavailable"); return
+    }
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: 500))
+    scroll.reflectScrolledClipView(scroll.contentView)
+    let before = scroll.contentView.bounds.origin.y
+    #expect(before > 0)
+    model.applySortMode(.name)
+    controller.view.layoutSubtreeIfNeeded()
+    #expect(scroll.contentView.bounds.origin.y == before)
+}
+
+@Test @MainActor func switchingAwayFromVerticalCancelsAnActiveDrag() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<8).map { index in record("App" + String(index), id: "id" + String(index)) })
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let first = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+          let target = collection.layoutAttributesForItem(at: IndexPath(item: 3, section: 0))?.frame else {
+        Issue.record("vertical grid geometry unavailable"); return
+    }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: collection.convert(point, to: nil), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    let start = NSPoint(x: first.midX, y: first.midY)
+    let end = NSPoint(x: target.maxX - 2, y: target.midY)
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), event(.leftMouseDown, start))
+    collection.onItemMouseDragged?(event(.leftMouseDragged, end))
+    model.setLayoutMode(.paged)
+    collection.onItemMouseUp?(event(.leftMouseUp, end))
+    #expect(model.pages == original)
+    #expect(!model.canUndo)
+}
+
+@MainActor
+private final class WheelRecordingScrollView: NSScrollView {
+    var wheelEvents = 0
+    override func scrollWheel(with event: NSEvent) { wheelEvents += 1 }
+}
+
+@Test @MainActor func verticalWheelIsForwardedToTheScrollView() {
+    let scroll = WheelRecordingScrollView()
+    let collection = GridCollectionView()
+    scroll.documentView = collection
+    collection.scrollsVertically = true
+    guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -250, wheel2: 0, wheel3: 0),
+          let event = NSEvent(cgEvent: cg) else { Issue.record("scroll event unavailable"); return }
+    collection.scrollWheel(with: event)
+    #expect(scroll.wheelEvents == 1)
+}
+
+@Test @MainActor func switchingFromVerticalKeepsTheVisiblePage() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<105).map { index in record("App" + String(index), id: "id" + String(index)) })
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let target = collection.layoutAttributesForItem(at: IndexPath(item: 104, section: 0))?.frame,
+          let control = controller.view.subviews.compactMap({ view in view as? PageControlView }).first else {
+        Issue.record("vertical grid geometry unavailable"); return
+    }
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: target.minY))
+    scroll.reflectScrolledClipView(scroll.contentView)
+    guard let index = collection.collectionViewLayout?.layoutAttributesForElements(in: scroll.contentView.bounds).compactMap({ $0.indexPath?.item }).min() else {
+        Issue.record("no visible item"); return
+    }
+    var offset = 0
+    var expected = 0
+    for (page, entries) in original.enumerated() {
+        if index < offset + entries.count { expected = page; break }
+        offset += entries.count
+    }
+    #expect(expected > 0)
+    model.setLayoutMode(.paged)
+    #expect(control.currentPage == expected)
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func switchingToVerticalCancelsPendingPageTransition() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<40).map { index in record("App" + String(index), id: "id" + String(index)) })
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let control = controller.view.subviews.compactMap({ view in view as? PageControlView }).first else {
+        Issue.record("page control unavailable"); return
+    }
+    controller.moveSelection(deltaColumns: 0, deltaRows: 0)
+    controller.moveSelection(deltaColumns: 0, deltaRows: 100)
+    model.setLayoutMode(.verticalScroll)
+    try await Task.sleep(for: .milliseconds(700))
+    #expect(control.currentPage == 0)
+    #expect(model.layoutMode == .verticalScroll)
+}
+
+@Test @MainActor func verticalGridDragReordersAndCanBeUndone() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<40).map { index in record("App" + String(index), id: "id" + String(index)) })
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let source = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+          let target = collection.layoutAttributesForItem(at: IndexPath(item: 3, section: 0))?.frame else {
+        Issue.record("vertical grid geometry unavailable"); return
+    }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: collection.convert(point, to: nil), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    let start = NSPoint(x: source.midX, y: source.midY)
+    let end = NSPoint(x: target.maxX - 2, y: target.midY)
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), event(.leftMouseDown, start))
+    collection.onItemMouseDragged?(event(.leftMouseDragged, end))
+    collection.onItemMouseUp?(event(.leftMouseUp, end))
+    #expect(Array(model.pages[0].prefix(4)) == [original[0][1], original[0][2], original[0][3], original[0][0]])
+    #expect(model.undo())
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func verticalGroupDragPreservesOrderAndCanBeUndone() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<8).map { index in record("App" + String(index), id: "id" + String(index)) })
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let first = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+          let second = collection.layoutAttributesForItem(at: IndexPath(item: 1, section: 0))?.frame,
+          let target = collection.layoutAttributesForItem(at: IndexPath(item: 3, section: 0))?.frame else {
+        Issue.record("vertical grid geometry unavailable"); return
+    }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: collection.convert(point, to: nil), modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    for (index, frame) in [(0, first), (1, second)] {
+        let point = NSPoint(x: frame.midX, y: frame.midY)
+        collection.onItemMouseDown?(IndexPath(item: index, section: 0), event(.leftMouseDown, point, .command))
+    }
+    let start = NSPoint(x: first.midX, y: first.midY)
+    let end = NSPoint(x: target.maxX - 2, y: target.midY)
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), event(.leftMouseDown, start))
+    collection.onItemMouseDragged?(event(.leftMouseDragged, end))
+    collection.onItemMouseUp?(event(.leftMouseUp, end))
+    #expect(Array(model.pages[0].prefix(4)) == [original[0][2], original[0][3], original[0][0], original[0][1]])
+    #expect(model.undo())
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func verticalGroupDropCreatesFolderWithAllSelectedApps() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<8).map { index in record("App" + String(index), id: "id" + String(index)) })
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let first = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+          let second = collection.layoutAttributesForItem(at: IndexPath(item: 1, section: 0))?.frame,
+          let target = collection.layoutAttributesForItem(at: IndexPath(item: 3, section: 0))?.frame else {
+        Issue.record("vertical grid geometry unavailable"); return
+    }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: collection.convert(point, to: nil), modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    for (index, frame) in [(0, first), (1, second)] {
+        collection.onItemMouseDown?(IndexPath(item: index, section: 0), event(.leftMouseDown, NSPoint(x: frame.midX, y: frame.midY), .command))
+    }
+    let start = NSPoint(x: first.midX, y: first.midY)
+    let end = NSPoint(x: target.midX, y: target.midY)
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), event(.leftMouseDown, start))
+    collection.onItemMouseDragged?(event(.leftMouseDragged, end))
+    collection.onItemMouseUp?(event(.leftMouseUp, end))
+    guard let folder = model.folders.values.first else { Issue.record("folder missing"); return }
+    #expect(folder.pages.flatMap { page in page } == [original[0][3], original[0][0], original[0][1]])
+    #expect(model.undo())
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func verticalDragIntoGapUsesTheNearestInsertion() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<8).map { index in record("App" + String(index), id: "id" + String(index)) })
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let source = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+          let target = collection.layoutAttributesForItem(at: IndexPath(item: 2, section: 0))?.frame,
+          let next = collection.layoutAttributesForItem(at: IndexPath(item: 3, section: 0))?.frame else {
+        Issue.record("vertical grid geometry unavailable"); return
+    }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: collection.convert(point, to: nil), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    let start = NSPoint(x: source.midX, y: source.midY)
+    let end = NSPoint(x: target.maxX + min(3, (next.minX - target.maxX) / 4), y: target.midY)
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), event(.leftMouseDown, start))
+    collection.onItemMouseDragged?(event(.leftMouseDragged, end))
+    collection.onItemMouseUp?(event(.leftMouseUp, end))
+    #expect(Array(model.pages[0].prefix(3)) == [original[0][1], original[0][2], original[0][0]])
+    #expect(model.undo())
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func verticalDragOntoAppCreatesFolderAndCanBeUndone() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")])
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let source = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+          let target = collection.layoutAttributesForItem(at: IndexPath(item: 1, section: 0))?.frame else {
+        Issue.record("vertical grid geometry unavailable"); return
+    }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: collection.convert(point, to: nil), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    let start = NSPoint(x: source.midX, y: source.midY)
+    let end = NSPoint(x: target.midX, y: target.midY)
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), event(.leftMouseDown, start))
+    collection.onItemMouseDragged?(event(.leftMouseDragged, end))
+    collection.onItemMouseUp?(event(.leftMouseUp, end))
+    #expect(model.folders.count == 1)
+    #expect(model.undo())
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func verticalDragCanMoveAcrossSavedPages() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<40).map { index in record("App" + String(index), id: "id" + String(index)) })
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let source = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+          let target = collection.layoutAttributesForItem(at: IndexPath(item: 37, section: 0))?.frame else {
+        Issue.record("vertical grid geometry unavailable"); return
+    }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: collection.convert(point, to: nil), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    let start = NSPoint(x: source.midX, y: source.midY)
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), event(.leftMouseDown, start))
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, target.midY - 200)))
+    scroll.reflectScrolledClipView(scroll.contentView)
+    let end = NSPoint(x: target.maxX - 2, y: target.midY)
+    collection.onItemMouseDragged?(event(.leftMouseDragged, end))
+    collection.onItemMouseUp?(event(.leftMouseUp, end))
+    #expect(model.pages[1].contains(original[0][0]))
+    #expect(model.undo())
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func verticalGroupDragCombinesItemsFromDifferentPages() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<75).map { index in record("App" + String(index), id: "id" + String(index)) })
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let source = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame,
+          let target = collection.layoutAttributesForItem(at: IndexPath(item: 72, section: 0))?.frame else {
+        Issue.record("vertical grid geometry unavailable"); return
+    }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint, _ flags: NSEvent.ModifierFlags = []) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: collection.convert(point, to: nil), modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    let start = NSPoint(x: source.midX, y: source.midY)
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), event(.leftMouseDown, start, .command))
+    collection.onItemMouseDown?(IndexPath(item: 37, section: 0), event(.leftMouseDown, start, .command))
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), event(.leftMouseDown, start))
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, target.midY - 200)))
+    scroll.reflectScrolledClipView(scroll.contentView)
+    let end = NSPoint(x: target.maxX - 2, y: target.midY)
+    collection.onItemMouseDragged?(event(.leftMouseDragged, end))
+    collection.onItemMouseUp?(event(.leftMouseUp, end))
+    guard let first = model.pages[2].firstIndex(of: original[0][0]),
+          let second = model.pages[2].firstIndex(of: original[1][2]) else { Issue.record("group did not reach destination"); return }
+    #expect(second == first + 1)
+    #expect(model.undo())
+    #expect(model.pages == original)
+}
+
+@Test @MainActor func verticalMarqueeSelectsWithoutClosing() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")])
+    model.setLayoutMode(.verticalScroll)
+    var dismissed = 0
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: { dismissed += 1 })
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let second = collection.layoutAttributesForItem(at: IndexPath(item: 1, section: 0))?.frame else {
+        Issue.record("vertical grid geometry unavailable"); return
+    }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: collection.convert(point, to: nil), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    let start = NSPoint(x: 1, y: 1)
+    let end = NSPoint(x: second.maxX, y: second.maxY)
+    collection.mouseDown(with: event(.leftMouseDown, start))
+    collection.mouseDragged(with: event(.leftMouseDragged, end))
+    #expect(collection.isMarqueeActive)
+    collection.mouseUp(with: event(.leftMouseUp, end))
+    #expect(!collection.isMarqueeActive)
+    #expect(dismissed == 0)
+    #expect(collection.menuProvider?(IndexPath(item: 0, section: 0))?.items.first?.submenu != nil)
+}
+
+@Test @MainActor func verticalDragReleasedOutsideDoesNotChangeLayout() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: (0..<40).map { index in record("App" + String(index), id: "id" + String(index)) })
+    let original = model.pages
+    model.setLayoutMode(.verticalScroll)
+    let controller = GridViewController(model: model, iconCache: IconCache(), onLaunch: { _ in }, onBackgroundClick: {})
+    controller.view.frame = NSRect(x: 0, y: 0, width: 1200, height: 800)
+    controller.view.layoutSubtreeIfNeeded()
+    guard let scroll = controller.view.subviews.compactMap({ view in view as? NSScrollView }).first(where: { !$0.isHidden }),
+          let collection = scroll.documentView as? GridCollectionView,
+          let source = collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))?.frame else {
+        Issue.record("vertical grid geometry unavailable"); return
+    }
+    func event(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
+        NSEvent.mouseEvent(with: type, location: collection.convert(point, to: nil), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    let start = NSPoint(x: source.midX, y: source.midY)
+    let end = NSPoint(x: scroll.contentView.bounds.maxX + 200, y: scroll.contentView.bounds.maxY + 200)
+    collection.onItemMouseDown?(IndexPath(item: 0, section: 0), event(.leftMouseDown, start))
+    collection.onItemMouseDragged?(event(.leftMouseDragged, end))
+    collection.onItemMouseUp?(event(.leftMouseUp, end))
+    #expect(model.pages == original)
+    #expect(!model.canUndo)
 }
 
 @Test @MainActor func layoutBackupRestoresTheGridWithoutChangingPreferences() async throws {
@@ -831,6 +1751,96 @@ private func makeModel(directory: URL) -> GridModel {
     }
     #expect(sorted == ["Apple", "Mango", "Zebra"])
     #expect(model.gridSettings.sortMode == .name)
+}
+
+@Test @MainActor func sortDirectionReversesOrderAndPersists() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    let apps = [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")]
+    model.reconcile(with: apps)
+    model.applySortMode(.name)
+    let ascending = model.pages
+    model.setSortReversed(true)
+    #expect(model.pages[0] == Array(ascending[0].reversed()))
+    await model.save()
+    let restored = makeModel(directory: dir)
+    await restored.loadDocument()
+    #expect(restored.gridSettings.sortReversed)
+    #expect(restored.pages == model.pages)
+    model.setSortReversed(false)
+    #expect(model.pages == ascending)
+}
+
+@Test func usageReaderCountsOnlyApplicationEventsAndReportsErrors() throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: url) }
+    #expect(throws: ApplicationUsageReader.ReadError.self) { try ApplicationUsageReader.read(from: url) }
+    var db: OpaquePointer?
+    guard sqlite3_open(url.path, &db) == SQLITE_OK, let db else { Issue.record("fixture open failed"); return }
+    let sql = "CREATE TABLE ZOBJECT (ZVALUESTRING TEXT, ZSTREAMNAME TEXT); INSERT INTO ZOBJECT VALUES ('a', '/app/usage'), ('a', '/app/usage'), ('b', '/app/usage'), ('a', '/other'), (NULL, '/app/usage');"
+    let status = sqlite3_exec(db, sql, nil, nil, nil)
+    sqlite3_close(db)
+    #expect(status == SQLITE_OK)
+    #expect(try ApplicationUsageReader.read(from: url) == ["a": 2, "b": 1])
+}
+
+@Test @MainActor func usageSortUsesCountsAndPreservesLayoutOnReadError() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("usage.db")
+    let model = makeModel(directory: dir.appendingPathComponent("layout"))
+    await model.loadDocument()
+    let apps = [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")]
+    model.reconcile(with: apps)
+    let before = model.pages
+    let revision = model.sortRevision
+    do {
+        try await model.sortByUsage(from: url)
+        Issue.record("expected a read error")
+    } catch { }
+    #expect(model.pages == before)
+    #expect(model.sortRevision != revision)
+    #expect(model.gridSettings.sortMode == .custom)
+    var db: OpaquePointer?
+    guard sqlite3_open(url.path, &db) == SQLITE_OK, let db else { Issue.record("fixture open failed"); return }
+    let sql = "CREATE TABLE ZOBJECT (ZVALUESTRING TEXT, ZSTREAMNAME TEXT); INSERT INTO ZOBJECT VALUES ('b', '/app/usage'), ('b', '/app/usage'), ('c', '/app/usage');"
+    let status = sqlite3_exec(db, sql, nil, nil, nil)
+    sqlite3_close(db)
+    #expect(status == SQLITE_OK)
+    try await model.sortByUsage(from: url)
+    #expect(model.pages[0] == [apps[1], apps[2], apps[0]].map { app in .app(app.id.asPersistenceIdentifier) })
+    await model.save()
+    let restored = makeModel(directory: dir.appendingPathComponent("layout"))
+    await restored.loadDocument()
+    #expect(restored.gridSettings.sortMode == .usage)
+    #expect(!restored.canAdjustUsageSort)
+    restored.setSortReversed(true)
+    #expect(!restored.gridSettings.sortReversed)
+    model.setSortReversed(true)
+    #expect(model.pages[0] == [apps[0], apps[2], apps[1]].map { app in .app(app.id.asPersistenceIdentifier) })
+}
+
+@Test @MainActor func folderSortingCanBeDisabledAndRestored() async throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let model = makeModel(directory: dir)
+    await model.loadDocument()
+    model.reconcile(with: [record("A", id: "a"), record("B", id: "b"), record("C", id: "c")])
+    model.createOrJoinFolder(sourcePage: 0, sourceIndex: 0, destinationPage: 0, destinationIndex: 1)
+    guard let id = model.folders.keys.first else { Issue.record("folder missing"); return }
+    let original = model.folders[id]?.pages
+    model.setSortFolders(false)
+    model.applySortMode(.name)
+    #expect(model.folders[id]?.pages == original)
+    await model.save()
+    let restored = makeModel(directory: dir)
+    await restored.loadDocument()
+    #expect(!restored.gridSettings.sortFolders)
+    model.setSortFolders(true)
+    #expect(model.folders[id]?.pages.first == original?.first.map { page in Array(page.reversed()) })
 }
 
 @Test @MainActor func applySortModeDateAddedOrdersNewestAddedFirst() async throws {

@@ -239,6 +239,35 @@ public enum L10n {
         String(format: string("grid.pagecontrol.pagenumber", "Page %d"), n)
     }
 
+    public static var finderInfoFailed: String { string("menu.info.failed", "Could not show information. Check the Finder Automation permission in System Settings.") }
+
+    public static var menuForceQuit: String { string("menu.forcequit", "Force Quit") }
+    public static func quitConfirmation(_ name: String) -> String { String(format: string("menu.quit.confirm", "Quit %@?"), name) }
+    public static var forceQuitWarning: String { string("menu.forcequit.warning", "Force quitting may cause unsaved changes to be lost.") }
+    public static var quitRequestFailed: String { string("menu.quit.failed", "Could not send a quit request to every running instance.") }
+
+    public static var layoutModeScroll: String { string("grid.layout.scroll", "Scroll") }
+    public static var layoutModeLabel: String { string("grid.layout.mode", "Browsing Style") }
+
+    public static var ungroupAllFolders: String { string("grid.ungroupall", "Ungroup All Folders") }
+    public static var ungroupAllConfirmation: String { string("grid.ungroupall.confirm", "All folders will be removed and their apps moved onto the grid. You can undo this change.") }
+
+    public static var sortModeUsage: String { string("grid.sortusage", "Most Used") }
+    public static var usageSortFailed: String { string("grid.usagefailed", "Usage history unavailable") }
+    public static var usageSortHelp: String { string("grid.usagehelp", "The usage history could not be read. Full Disk Access may be required in System Settings. Your layout was not changed.") }
+
+    public static var sortFolderContents: String { string("grid.sortfolders", "Also Sort Apps in Folders") }
+
+    public static var selectAllItems: String { string("grid.selectall", "Select All") }
+
+    public static var reverseSortOrder: String { string("grid.reversesort", "Reverse Order") }
+
+    public static var moveToFolder: String { string("grid.movetofolder", "Move to Folder") }
+
+    public static var groupInNewFolder: String { string("grid.groupnewfolder", "Group in New Folder") }
+
+    public static var moveToPage: String { string("grid.movetopage", "Move to Page") }
+
     // MARK: Grid — window browser
 
     public static var windowBrowserEmpty: String { string("windowbrowser.empty", "No open windows") }

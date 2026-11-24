@@ -40,6 +40,8 @@ final class FolderOverlayPresenter {
     /// every async icon load resolving against a dead controller.
     var presentedPanelForTesting: FolderContentsViewController? { contentsViewController }
 
+    var isOpen: Bool { contentsViewController != nil }
+
     init(model: GridModel, iconCache: IconCache) {
         self.model = model
         self.iconCache = iconCache

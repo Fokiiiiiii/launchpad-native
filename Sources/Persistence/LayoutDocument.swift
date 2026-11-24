@@ -49,6 +49,7 @@ public enum SortMode: String, Codable, Sendable {
     case name
     case dateAdded
     case lastUsed
+    case usage
 }
 
 /// Selectable app-icon designs — all original artwork, never a reproduction
@@ -113,6 +114,8 @@ public struct GridSettings: Codable, Sendable, Hashable {
     public var pageMargins: Double
     public var folderGridSize: Int
     public var sortMode: SortMode
+    public var sortReversed: Bool
+    public var sortFolders: Bool
     /// Multiplier applied to the icon's computed cell ceiling. Kept in the
     /// persisted grid settings so icon-size choices survive relaunches without
     /// changing the page-capacity reflow model.
@@ -127,6 +130,8 @@ public struct GridSettings: Codable, Sendable, Hashable {
         pageMargins: Double,
         folderGridSize: Int,
         sortMode: SortMode = .custom,
+        sortReversed: Bool = false,
+        sortFolders: Bool = true,
         iconScale: Double = 1.0,
         windowed: Bool = false
     ) {
@@ -139,11 +144,13 @@ public struct GridSettings: Codable, Sendable, Hashable {
         self.pageMargins = pageMargins
         self.folderGridSize = folderGridSize
         self.sortMode = sortMode
+        self.sortReversed = sortReversed
+        self.sortFolders = sortFolders
         self.iconScale = iconScale
     }
 
     private enum CodingKeys: String, CodingKey {
-        case columns, rows, horizontalSpacing, verticalSpacing, labelVisible, pageMargins, folderGridSize, sortMode, iconScale, windowed
+        case columns, rows, horizontalSpacing, verticalSpacing, labelVisible, pageMargins, folderGridSize, sortMode, sortReversed, sortFolders, iconScale, windowed
     }
 
     /// What a decoded value is held to. These are wider than the Settings
@@ -176,6 +183,8 @@ public struct GridSettings: Codable, Sendable, Hashable {
         // back to the default for that one setting; failing here took the whole
         // document down with it, and the layout with it.
         sortMode = (try? container.decodeIfPresent(SortMode.self, forKey: .sortMode)) ?? .custom
+        sortReversed = (try? container.decodeIfPresent(Bool.self, forKey: .sortReversed)) ?? false
+        sortFolders = (try? container.decodeIfPresent(Bool.self, forKey: .sortFolders)) ?? true
         iconScale = Self.clamped(try container.decodeIfPresent(Double.self, forKey: .iconScale) ?? 1.05, to: Self.iconScaleRange)
     }
 

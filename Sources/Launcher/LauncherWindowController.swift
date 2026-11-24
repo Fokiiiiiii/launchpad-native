@@ -624,6 +624,7 @@ public final class LauncherWindowController: NSObject, NSWindowDelegate {
         window.onOpenSettings = { [weak self] in self?.onOpenSettings?() }
         window.onFocusSearch = { [weak self] in self?.viewController?.focusSearch() }
         window.onUndo = { [weak self] in self?.viewController?.undoLayoutChange() ?? false }
+        window.onSelectAll = { [weak self] in self?.viewController?.selectAllGridItems() ?? false }
 
         // Hidden-app mutations can originate from the grid's context menu,
         // not only Settings. Attach a dedicated observer so an active search

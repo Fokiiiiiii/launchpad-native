@@ -55,6 +55,8 @@ import Testing
 
     let decoded = try JSONDecoder().decode(GridSettings.self, from: payload)
     #expect(decoded.iconScale == 1.05)
+    #expect(!decoded.sortReversed)
+    #expect(decoded.sortFolders)
     #expect(decoded.columns == 7)
     #expect(decoded.rows == 5)
 }
