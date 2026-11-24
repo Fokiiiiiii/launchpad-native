@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import CoreGraphics
 import DesignSystem
 import Diagnostics
@@ -45,6 +46,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// Built once, alongside the window, and kept alive for the controller's
     /// lifetime.
     private var viewModel: SettingsViewModel?
+    private var titleSubscription: AnyCancellable?
     /// Closes Settings on a click outside its bounds (Round 12 §7) — the
     /// launcher itself must never react to that same click, see
     /// `OutsideClickDismissMonitor`'s doc comment.
@@ -132,7 +134,6 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let window = DismissableWindow(contentViewController: containerController)
         window.onCancel = { [weak self] in self?.close() }
-        window.title = ""
         window.styleMask = [.borderless]
         window.isMovableByWindowBackground = true
         window.isOpaque = false
@@ -152,6 +153,9 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         self.window = window
+        titleSubscription = viewModel.$selectedTab.sink { [weak window] tab in
+            window?.title = tab.title
+        }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 

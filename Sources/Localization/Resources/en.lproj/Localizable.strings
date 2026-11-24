@@ -39,7 +39,7 @@
 "settings.grid.iconscale.hint" = "Smart recommends an icon size for the current grid. Manual changes use Custom. The effective limit adapts to the cell spacing.";
 "settings.grid.reorganize" = "Reorganize";
 "settings.grid.hidedock" = "Hide Dock";
-"settings.display.menuicons" = "Menu icons";
+"settings.display.menuicons" = "Icons in menus";
 "settings.display.menuicons.automatic" = "Automatic";
 "settings.display.menuicons.visible" = "Show";
 "settings.display.menuicons.hidden" = "Hide";
@@ -72,6 +72,8 @@
 "settings.sources.remove" = "Remove";
 "settings.sources.addfolder" = "Add Folder…";
 "settings.sources.chooseFolderPanelMessage" = "Choose a folder to scan for applications";
+"settings.sources.header" = "App Folders";
+"settings.sources.empty" = "No folders added yet.";
 "settings.hidden.empty" = "No hidden apps.";
 "settings.hidden.empty.hint" = "Hide an app from its context menu to list it here.";
 "settings.hidden.unhide" = "Unhide";

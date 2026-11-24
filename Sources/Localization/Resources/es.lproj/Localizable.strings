@@ -39,7 +39,7 @@
 "settings.grid.iconscale.hint" = "«Inteligente» recomienda un tamaño de icono para la cuadrícula actual. Los cambios manuales pasan a «Personalizado». El límite efectivo se adapta al espaciado entre celdas.";
 "settings.grid.reorganize" = "Reorganizar";
 "settings.grid.hidedock" = "Ocultar el Dock";
-"settings.display.menuicons" = "Iconos de los menús";
+"settings.display.menuicons" = "Iconos dentro de los menús";
 "settings.display.menuicons.automatic" = "Automático";
 "settings.display.menuicons.visible" = "Mostrar";
 "settings.display.menuicons.hidden" = "Ocultar";
@@ -72,6 +72,8 @@
 "settings.sources.remove" = "Eliminar";
 "settings.sources.addfolder" = "Añadir carpeta…";
 "settings.sources.chooseFolderPanelMessage" = "Selecciona una carpeta donde buscar apps";
+"settings.sources.header" = "Carpetas de apps";
+"settings.sources.empty" = "Aún no has añadido carpetas.";
 "settings.hidden.empty" = "No hay apps ocultas.";
 "settings.hidden.empty.hint" = "Oculta una app desde su menú contextual para que aparezca aquí.";
 "settings.hidden.unhide" = "Mostrar";

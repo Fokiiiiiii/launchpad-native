@@ -39,7 +39,7 @@
 "settings.grid.iconscale.hint" = "スマート推奨は現在のグリッドに合わせてアイコンサイズを決めます。手動変更はカスタムになります。実効上限はセル間隔に合わせて自動調整されます。";
 "settings.grid.reorganize" = "整理する";
 "settings.grid.hidedock" = "Dockを隠す";
-"settings.display.menuicons" = "メニューのアイコン";
+"settings.display.menuicons" = "メニュー内のアイコン";
 "settings.display.menuicons.automatic" = "自動";
 "settings.display.menuicons.visible" = "表示";
 "settings.display.menuicons.hidden" = "非表示";
@@ -72,6 +72,8 @@
 "settings.sources.remove" = "削除";
 "settings.sources.addfolder" = "フォルダを追加…";
 "settings.sources.chooseFolderPanelMessage" = "アプリをスキャンするフォルダを選択してください";
+"settings.sources.header" = "アプリのフォルダ";
+"settings.sources.empty" = "追加したフォルダはまだありません。";
 "settings.hidden.empty" = "非表示のアプリはありません。";
 "settings.hidden.empty.hint" = "アプリを右クリックして非表示にすると、ここに表示されます。";
 "settings.hidden.unhide" = "表示に戻す";

@@ -60,13 +60,14 @@ public struct SettingsView: View {
     }
 
     private var settingsTabDefinitions: [(SettingsTab, String, String)] {
-        [
-            (.general, L10n.tabGeneral, "gearshape"),
-            (.screen, L10n.tabScreen, "circle.hexagongrid"),
-            (.apps, L10n.tabApps, "square.dashed.inset.filled"),
-            (.advanced, L10n.tabAdvanced, "slider.horizontal.3"),
-            (.about, L10n.tabAbout, "info.circle")
+        let symbols: [(SettingsTab, String)] = [
+            (.general, "gearshape"),
+            (.screen, "circle.hexagongrid"),
+            (.apps, "square.dashed.inset.filled"),
+            (.advanced, "slider.horizontal.3"),
+            (.about, "info.circle")
         ]
+        return symbols.map { ($0.0, $0.0.title, $0.1) }
     }
 
     private var settingsTabBar: some View {
@@ -157,6 +158,20 @@ public struct SettingsView: View {
         panel.message = L10n.chooseFolderPanelMessage
         if panel.runModal() == .OK, let url = panel.url {
             viewModel.addCustomSource(path: url.path)
+        }
+    }
+}
+
+
+extension SettingsTab {
+    /// The pane's name — shown on its tab and used as the window title.
+    var title: String {
+        switch self {
+        case .general: L10n.tabGeneral
+        case .screen: L10n.tabScreen
+        case .apps: L10n.tabApps
+        case .advanced: L10n.tabAdvanced
+        case .about: L10n.tabAbout
         }
     }
 }

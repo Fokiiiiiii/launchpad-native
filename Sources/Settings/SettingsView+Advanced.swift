@@ -13,11 +13,11 @@ extension SettingsView {
         ScrollView {
             VStack(alignment: .leading, spacing: Metrics.sectionSpacing) {
                 VStack(alignment: .leading, spacing: Metrics.sectionHeaderSpacing) {
-                    SettingsSectionHeader(L10n.tabAdvanced, systemImage: "slider.horizontal.3", tint: .gray)
+                    SettingsSectionHeader(L10n.customSourcesHeader, systemImage: "folder", tint: .gray)
                 SettingsCard {
                     if viewModel.customSources.isEmpty {
                         SettingsCardRow(minHeight: 40) {
-                            Text(L10n.chooseFolderPanelMessage)
+                            Text(L10n.customSourcesEmpty)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }

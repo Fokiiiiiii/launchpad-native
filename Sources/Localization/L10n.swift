@@ -89,7 +89,7 @@ public enum L10n {
     public static var sortModeLastUsed: String { string("settings.grid.sortby.lastused", "Last Used") }
     public static var reorganizeButton: String { string("settings.grid.reorganize", "Reorganize") }
     public static var hideDockToggleLabel: String { string("settings.grid.hidedock", "Hide Dock") }
-    public static var menuIconVisibilityLabel: String { string("settings.display.menuicons", "Menu icons") }
+    public static var menuIconVisibilityLabel: String { string("settings.display.menuicons", "Icons in menus") }
     public static var menuIconVisibilityAutomatic: String { string("settings.display.menuicons.automatic", "Automatic") }
     public static var menuIconVisibilityVisible: String { string("settings.display.menuicons.visible", "Show") }
     public static var menuIconVisibilityHidden: String { string("settings.display.menuicons.hidden", "Hide") }
@@ -143,6 +143,8 @@ public enum L10n {
     public static var removeButton: String { string("settings.sources.remove", "Remove") }
     public static var addFolderButton: String { string("settings.sources.addfolder", "Add Folder…") }
     public static var chooseFolderPanelMessage: String { string("settings.sources.chooseFolderPanelMessage", "Choose a folder to scan for applications") }
+    public static var customSourcesHeader: String { string("settings.sources.header", "App Folders") }
+    public static var customSourcesEmpty: String { string("settings.sources.empty", "No folders added yet.") }
 
     // MARK: Settings — Hidden tab
 

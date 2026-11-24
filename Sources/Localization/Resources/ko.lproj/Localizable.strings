@@ -39,7 +39,7 @@
 "settings.grid.iconscale.hint" = "스마트는 현재 그리드에 맞는 아이콘 크기를 추천합니다. 직접 조절하면 사용자화로 바뀝니다. 실제 상한은 셀 간격에 따라 조정됩니다.";
 "settings.grid.reorganize" = "정리";
 "settings.grid.hidedock" = "Dock 가리기";
-"settings.display.menuicons" = "메뉴 아이콘";
+"settings.display.menuicons" = "메뉴 안의 아이콘";
 "settings.display.menuicons.automatic" = "자동";
 "settings.display.menuicons.visible" = "표시";
 "settings.display.menuicons.hidden" = "숨기기";
@@ -72,6 +72,8 @@
 "settings.sources.remove" = "제거";
 "settings.sources.addfolder" = "폴더 추가…";
 "settings.sources.chooseFolderPanelMessage" = "앱을 검색할 폴더를 선택하세요";
+"settings.sources.header" = "앱 폴더";
+"settings.sources.empty" = "아직 추가한 폴더가 없습니다.";
 "settings.hidden.empty" = "가려진 앱이 없습니다.";
 "settings.hidden.empty.hint" = "앱의 보조 클릭 메뉴에서 가리면 여기에 표시됩니다.";
 "settings.hidden.unhide" = "가리기 해제";

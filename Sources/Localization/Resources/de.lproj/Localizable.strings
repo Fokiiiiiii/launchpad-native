@@ -39,7 +39,7 @@
 "settings.grid.iconscale.hint" = "„Automatisch“ schlägt eine passende Symbolgröße für das aktuelle Raster vor. Manuelle Änderungen gelten als „Eigene“. Die tatsächliche Obergrenze richtet sich nach dem Zellenabstand.";
 "settings.grid.reorganize" = "Neu anordnen";
 "settings.grid.hidedock" = "Dock ausblenden";
-"settings.display.menuicons" = "Menüsymbole";
+"settings.display.menuicons" = "Symbole in Menüs";
 "settings.display.menuicons.automatic" = "Automatisch";
 "settings.display.menuicons.visible" = "Anzeigen";
 "settings.display.menuicons.hidden" = "Ausblenden";
@@ -72,6 +72,8 @@
 "settings.sources.remove" = "Entfernen";
 "settings.sources.addfolder" = "Ordner hinzufügen…";
 "settings.sources.chooseFolderPanelMessage" = "Wähle einen Ordner, der nach Apps durchsucht werden soll";
+"settings.sources.header" = "App-Ordner";
+"settings.sources.empty" = "Noch keine Ordner hinzugefügt.";
 "settings.hidden.empty" = "Keine ausgeblendeten Apps.";
 "settings.hidden.empty.hint" = "Blende eine App über ihr Kontextmenü aus, damit sie hier erscheint.";
 "settings.hidden.unhide" = "Einblenden";

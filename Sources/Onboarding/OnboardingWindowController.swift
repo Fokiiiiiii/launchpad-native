@@ -11,7 +11,7 @@ import SwiftUI
 /// New — same `root`/background/`hosting.view` sibling pattern as
 /// `LauncherWindow.swift`. Hiding the native titlebar close button means
 /// `DismissableWindow`'s Escape handling is now the only way to dismiss
-/// this early besides clicking through all 4 pages.
+/// this early besides clicking through all 3 pages.
 @MainActor
 public final class OnboardingWindowController: NSObject, NSWindowDelegate {
     private var window: DismissableWindow?

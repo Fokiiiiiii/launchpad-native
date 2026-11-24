@@ -13,65 +13,48 @@ import SwiftUI
 struct OnboardingView: View {
     let onFinished: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
     @State private var pageIndex = 0
     @State private var movingForward = true
 
     private let pageCount = 3
 
     var body: some View {
-        ZStack {
-            background
-            VStack(spacing: 0) {
-                Group {
-                    switch pageIndex {
-                    case 0: WelcomePage()
-                    case 1: TriggersPage()
-                    default: PermissionsPage()
-                    }
+        VStack(spacing: 0) {
+            Group {
+                switch pageIndex {
+                case 0: WelcomePage()
+                case 1: TriggersPage()
+                default: PermissionsPage()
                 }
-                .id(pageIndex)
-                .transition(reduceMotion ? .opacity : .asymmetric(
-                    insertion: .offset(x: movingForward ? 440 : -440).combined(with: .opacity),
-                    removal: .offset(x: movingForward ? -440 : 440).combined(with: .opacity)
-                ))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-
-                HStack(spacing: 12) {
-                    pageDots
-                    Spacer()
-                    if pageIndex > 0 {
-                        Button(L10n.onboardingBackButton) { advance(by: -1) }
-                    }
-                    Button(pageIndex == pageCount - 1 ? L10n.onboardingGetStartedButton : L10n.onboardingNextButton) {
-                        if pageIndex == pageCount - 1 {
-                            onFinished()
-                        } else {
-                            advance(by: 1)
-                        }
-                    }
-                    .keyboardShortcut(.defaultAction)
-                }
-                .padding(.horizontal, 36)
-                .padding(.bottom, 34)
             }
+            .id(pageIndex)
+            .transition(reduceMotion ? .opacity : .asymmetric(
+                insertion: .offset(x: movingForward ? 440 : -440).combined(with: .opacity),
+                removal: .offset(x: movingForward ? -440 : 440).combined(with: .opacity)
+            ))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
+
+            HStack(spacing: 12) {
+                pageDots
+                Spacer()
+                if pageIndex > 0 {
+                    Button(L10n.onboardingBackButton) { advance(by: -1) }
+                }
+                Button(pageIndex == pageCount - 1 ? L10n.onboardingGetStartedButton : L10n.onboardingNextButton) {
+                    if pageIndex == pageCount - 1 {
+                        onFinished()
+                    } else {
+                        advance(by: 1)
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 36)
+            .padding(.bottom, 34)
         }
         .frame(width: 540, height: 680)
         .clipShape(RoundedRectangle(cornerRadius: 16))
-    }
-
-    private var background: some View {
-        ZStack {
-            colorScheme == .dark ? Color(red: 0.04, green: 0.05, blue: 0.08) : Color.white
-            LinearGradient(
-                colors: colorScheme == .dark
-                    ? [Color(red: 0.08, green: 0.27, blue: 0.42), Color(red: 0.03, green: 0.09, blue: 0.2), .clear]
-                    : [Color(red: 0.77, green: 0.91, blue: 1), Color(red: 0.88, green: 0.93, blue: 1), .clear],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
-        }
-        .accessibilityHidden(true)
     }
 
     private var pageDots: some View {
